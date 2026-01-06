@@ -20,4 +20,4 @@ DB_PASSWORD=mir0188_2024
 
 
 
-git remote add origin https://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@github.com/MIR-FAHIM/ecom_vendor.git
+
