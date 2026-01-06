@@ -2,6 +2,11 @@
 
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\BrandController;
+use App\Http\Controllers\ProductController;
+use App\Http\Controllers\ShopController;
+
+
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('users')->group(function () {
@@ -30,4 +35,45 @@ Route::prefix('categories')->group(function () {
     Route::put('/update/{id}', [CategoryController::class, 'updateCategory']);
 
     Route::delete('/delete/{id}', [CategoryController::class, 'deleteCategory']);
+});
+
+Route::prefix('brands')->group(function () {
+    Route::post('/create', [BrandController::class, 'createBrand']);
+
+    Route::get('/list', [BrandController::class, 'listBrands']);
+    Route::get('/details/{id}', [BrandController::class, 'getBrandDetails']);
+
+    Route::put('/update/{id}', [BrandController::class, 'updateBrand']);
+
+    Route::delete('/delete/{id}', [BrandController::class, 'deleteBrand']);
+});
+
+Route::prefix('products')->group(function () {
+    Route::post('/create', [ProductController::class, 'createProduct']);
+
+    Route::get('/list', [ProductController::class, 'listProducts']);
+    Route::get('/details/{id}', [ProductController::class, 'getProductDetails']);
+
+    Route::put('/update/{id}', [ProductController::class, 'updateProduct']);
+
+    Route::delete('/delete/{id}', [ProductController::class, 'deleteProduct']);
+
+    // Images
+    Route::post('/images/add/{id}', [ProductController::class, 'addProductImage']);
+    Route::delete('/images/delete/{imageId}', [ProductController::class, 'deleteProductImage']);
+});
+
+
+
+Route::prefix('shops')->group(function () {
+    Route::post('/create', [ShopController::class, 'createShop']);
+
+    Route::get('/list', [ShopController::class, 'listShops']);
+    Route::get('/details/{id}', [ShopController::class, 'getShopDetails']);
+
+    Route::put('/update/{id}', [ShopController::class, 'updateShop']);
+
+    Route::patch('/status/{id}', [ShopController::class, 'updateShopStatus']);
+
+    Route::delete('/delete/{id}', [ShopController::class, 'deleteShop']);
 });
