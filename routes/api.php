@@ -5,6 +5,9 @@ use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\BrandController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ShopController;
+use App\Http\Controllers\CartController;
+use App\Http\Controllers\OrderController;
+
 
 
 use Illuminate\Support\Facades\Route;
@@ -77,4 +80,34 @@ Route::prefix('shops')->group(function () {
     Route::patch('/status/{id}', [ShopController::class, 'updateShopStatus']);
 
     Route::delete('/delete/{id}', [ShopController::class, 'deleteShop']);
+});
+
+
+
+
+
+Route::prefix('carts')->group(function () {
+    Route::get('/active/{userId}', [CartController::class, 'getActiveCart']);
+
+    Route::post('/items/add', [CartController::class, 'addItemToCart']);
+    Route::put('/items/update/{itemId}', [CartController::class, 'updateCartItemQty']);
+    Route::delete('/items/delete/{itemId}', [CartController::class, 'removeCartItem']);
+
+    Route::delete('/clear/{userId}', [CartController::class, 'clearCart']);
+});
+
+
+
+
+
+Route::prefix('orders')->group(function () {
+    Route::post('/checkout', [OrderController::class, 'checkout']);
+
+    Route::get('/list/{userId}', [OrderController::class, 'listOrdersByUser']);
+    Route::get('/details/{id}', [OrderController::class, 'getOrderDetails']);
+
+    Route::patch('/status/{id}', [OrderController::class, 'updateOrderStatus']);
+
+    // Item status update (for vendor/admin workflows)
+    Route::patch('/item/status/{id}', [OrderController::class, 'updateOrderItemStatus']);
 });
