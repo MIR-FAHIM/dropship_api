@@ -7,6 +7,7 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ShopController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\OrderController;
+use App\Http\Controllers\DeliveryAddressController;
 
 
 
@@ -112,4 +113,12 @@ Route::prefix('orders')->group(function () {
 
     // Item status update (for vendor/admin workflows)
     Route::patch('/item/status/{id}', [OrderController::class, 'updateOrderItemStatus']);
+});
+
+Route::prefix('addresses')->group(function () {
+    Route::post('/add', [DeliveryAddressController::class, 'addDeliveryAddress']);
+    Route::get('/user/{userId}', [DeliveryAddressController::class, 'getAddressByUser']);
+    Route::delete('/delete/{id}', [DeliveryAddressController::class, 'deleteAddress']);
+    Route::patch('/inactive/{id}', [DeliveryAddressController::class, 'inactiveAddress']);
+    Route::put('/update/{id}', [DeliveryAddressController::class, 'updateAddress']);
 });
