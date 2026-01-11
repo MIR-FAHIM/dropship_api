@@ -54,8 +54,7 @@ class Product extends Model
 
     public function primaryImage()
     {
-        // Your model class is ProductImage, table is product_images
-        return $this->belongsTo(ProductImage::class, 'product_id');
+        return $this->hasOne(ProductImage::class, 'product_id')->where('is_primary', true);
     }
     public function shop()
     {
