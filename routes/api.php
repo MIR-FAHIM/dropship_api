@@ -107,6 +107,7 @@ Route::prefix('orders')->group(function () {
     Route::post('/checkout', [OrderController::class, 'checkout']);
 
     Route::get('/list/{userId}', [OrderController::class, 'listOrdersByUser']);
+    Route::get('/list', [OrderController::class, 'allOrders']);
     Route::get('/details/{id}', [OrderController::class, 'getOrderDetails']);
 
     Route::patch('/status/{id}', [OrderController::class, 'updateOrderStatus']);

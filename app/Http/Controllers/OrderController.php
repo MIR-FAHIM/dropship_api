@@ -173,6 +173,21 @@ class OrderController extends Controller
         }
     }
 
+public function allOrders(Request $request)
+    {
+        try {
+            $perPage = (int) $request->get('per_page', 20);
+
+            $orders = Order::latest()
+                ->paginate($perPage);
+
+            return $this->success('Orders fetched successfully', $orders);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }         
+
+
     /**
      * GET /orders/details/{id}
      */
