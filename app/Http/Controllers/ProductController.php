@@ -7,6 +7,7 @@ use App\Models\ProductImage;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 class ProductController extends Controller
 {
     private function success($message, $data = null, int $code = 200)
@@ -89,7 +90,7 @@ public function createProduct(Request $request)
         ]);
 
         return $this->success('Product created successfully', $product, 201);
-    } catch (\Illuminate\Validation\ValidationException $e) {
+    } catch (ValidationException $e) {
         return $this->failed('Validation failed', $e->errors(), 422);
     } catch (\Throwable $e) {
         return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
@@ -102,37 +103,55 @@ public function createProduct(Request $request)
  */
 public function productImageUpload(Request $request, $productId)
 {
+    DB::beginTransaction();
+
     try {
         $product = Product::find($productId);
         if (!$product) {
+            DB::rollBack();
             return $this->failed('Product not found', null, 404);
         }
 
+        // 1) Validate multipart form-data files
         $validated = $request->validate([
             'images' => ['required', 'array', 'min:1'],
-            'images.*.image' => ['required', 'string', 'max:255'],
+
+            // IMPORTANT: This must be a file, not a string
+            'images.*.image' => ['required', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+
             'images.*.alt_text' => ['nullable', 'string', 'max:255'],
             'images.*.sort_order' => ['nullable', 'integer'],
-            'images.*.is_primary' => ['nullable', 'boolean'],
+            'images.*.is_primary' => ['nullable'], // handle manually because form-data can be "true","false","1","0"
             'images.*.status' => ['nullable', 'string', 'max:50'],
         ]);
 
         $created = [];
 
-        DB::beginTransaction();
-
         foreach ($validated['images'] as $img) {
-            if (array_key_exists('is_primary', $img) && (bool) $img['is_primary'] === true) {
+
+            // 2) Normalize is_primary from form-data reliably
+            $isPrimary = false;
+            if (array_key_exists('is_primary', $img)) {
+                $isPrimary = filter_var($img['is_primary'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                $isPrimary = ($isPrimary === null) ? false : $isPrimary;
+            }
+
+            // 3) If this one is primary, reset other primary flags
+            if ($isPrimary) {
                 ProductImage::where('product_id', $product->id)->update(['is_primary' => false]);
             }
 
+            // 4) Store file and save path
+            // storage/app/public/products/{productId}/xxxx.webp
+            $path = $img['image']->store("products/{$product->id}", 'public');
+
             $created[] = ProductImage::create([
                 'product_id' => $product->id,
-                'image' => $img['image'],
+                'image' => $path, // store path in DB
                 'alt_text' => $img['alt_text'] ?? null,
                 'sort_order' => $img['sort_order'] ?? null,
-                'is_primary' => array_key_exists('is_primary', $img) ? (bool) $img['is_primary'] : null,
-                'status' => $img['status'] ?? null,
+                'is_primary' => $isPrimary,
+                'status' => $img['status'] ?? 'active',
             ]);
         }
 
@@ -144,9 +163,11 @@ public function productImageUpload(Request $request, $productId)
             'product' => $product,
             'created_images' => $created,
         ], 201);
-    } catch (\Illuminate\Validation\ValidationException $e) {
+
+    } catch (ValidationException $e) {
         DB::rollBack();
         return $this->failed('Validation failed', $e->errors(), 422);
+
     } catch (\Throwable $e) {
         DB::rollBack();
         return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
