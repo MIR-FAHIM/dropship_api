@@ -287,4 +287,29 @@ class UserController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * GET /users/number-exists?number=...
+     * Returns whether the given phone number exists for any user.
+     */
+    public function numberExists(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'number' => ['required', 'string', 'max:100'],
+            ]);
+
+            $number = $validated['number'];
+
+            $exists = User::where('mobile', $number)
+                ->orWhere('optional_phone', $number)
+                ->exists();
+
+            return $this->success('Number lookup completed', ['exists' => (bool) $exists]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 }

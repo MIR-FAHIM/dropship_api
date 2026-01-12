@@ -8,10 +8,14 @@ use App\Http\Controllers\ShopController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\DeliveryAddressController;
+<<<<<<< HEAD
 use App\Http\Controllers\WishListController;
 use App\Http\Controllers\BannerController;
 
 
+=======
+use App\Http\Controllers\AttributeController;
+>>>>>>> 855b554f0e6f9e5a4ff13eadb13c8823a449d1f3
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('users')->group(function () {
@@ -21,6 +25,8 @@ Route::prefix('users')->group(function () {
     Route::get('/customers', [UserController::class, 'getCustomers']);
     Route::get('/vendors', [UserController::class, 'getVendors']);
     Route::get('/details/{id}', [UserController::class, 'getUserDetails']);
+
+    Route::get('/number-exists', [UserController::class, 'numberExists']);
 
     Route::put('/update/{id}', [UserController::class, 'updateUser']);
 
@@ -106,6 +112,7 @@ Route::prefix('orders')->group(function () {
     Route::post('/checkout', [OrderController::class, 'checkout']);
 
     Route::get('/list/{userId}', [OrderController::class, 'listOrdersByUser']);
+    Route::get('/list', [OrderController::class, 'allOrders']);
     Route::get('/details/{id}', [OrderController::class, 'getOrderDetails']);
 
     Route::patch('/status/{id}', [OrderController::class, 'updateOrderStatus']);
@@ -122,6 +129,7 @@ Route::prefix('addresses')->group(function () {
     Route::put('/update/{id}', [DeliveryAddressController::class, 'updateAddress']);
 });
 
+<<<<<<< HEAD
 
 // Wishlist endpoints
 Route::prefix('wishlists')->group(function () {
@@ -138,3 +146,17 @@ Route::prefix('banners')->group(function () {
     Route::delete('/remove/{id}', [BannerController::class, 'removeBanner']);
 });
 
+=======
+Route::prefix('attributes')->group(function () {
+    Route::post('/create', [AttributeController::class, 'addAttribute']);
+    Route::get('/list', [AttributeController::class, 'getAttributes']);
+    Route::get('/details/{id}', [AttributeController::class, 'getAttributeWithValues']);
+    Route::put('/update/{id}', [AttributeController::class, 'updateAttribute']);
+    Route::delete('/delete/{id}', [AttributeController::class, 'deleteAttribute']);
+
+    // Attribute Values
+    Route::post('/values/create', [AttributeController::class, 'addAttributeValue']);
+    Route::put('/values/update/{id}', [AttributeController::class, 'updateAttributeValue']);
+    Route::delete('/values/delete/{id}', [AttributeController::class, 'deleteAttributeValue']);
+});
+>>>>>>> 855b554f0e6f9e5a4ff13eadb13c8823a449d1f3
