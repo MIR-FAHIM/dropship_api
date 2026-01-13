@@ -48,7 +48,7 @@ class BannerController extends Controller
             $imagePath = null;
             if ($request->hasFile('image')) {
                 $path = $request->file('image')->store('banners', 'public');
-                $imagePath = \Illuminate\Support\Facades\Storage::url($path); // e.g. /storage/banners/...
+                $imagePath = $path; // e.g. /storage/banners/...
             } else {
                 $imagePath = $validated['image_path'] ?? null;
             }
