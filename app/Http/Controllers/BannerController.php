@@ -37,17 +37,28 @@ class BannerController extends Controller
                 'title' => ['nullable', 'string', 'max:255'],
                 'related_product_id' => ['nullable', 'integer', 'exists:products,id'],
                 'related_category_id' => ['nullable', 'integer', 'exists:categories,id'],
-                'image_path' => ['required', 'string', 'max:255'],
+                // Accept either an uploaded file (`image`) or a direct `image_path` string
+                'image' => ['nullable', 'image', 'max:2048'], // max 2MB
+                'image_path' => ['required_without:image', 'nullable', 'string', 'max:255'],
                 'note' => ['nullable', 'string'],
                 'is_active' => ['nullable', 'boolean'],
             ]);
+
+            // Handle file upload if provided, otherwise use provided image_path
+            $imagePath = null;
+            if ($request->hasFile('image')) {
+                $path = $request->file('image')->store('banners', 'public');
+                $imagePath = \Illuminate\Support\Facades\Storage::url($path); // e.g. /storage/banners/...
+            } else {
+                $imagePath = $validated['image_path'] ?? null;
+            }
 
             $banner = Banner::create([
                 'banner_name' => $validated['banner_name'],
                 'title' => $validated['title'] ?? null,
                 'related_product_id' => $validated['related_product_id'] ?? null,
                 'related_category_id' => $validated['related_category_id'] ?? null,
-                'image_path' => $validated['image_path'],
+                'image_path' => $imagePath,
                 'note' => $validated['note'] ?? null,
                 'is_active' => array_key_exists('is_active', $validated) ? (bool) $validated['is_active'] : true,
             ]);
