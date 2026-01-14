@@ -14,11 +14,17 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
 
-        // $middleware->alias([
-        //     'auth.token' => ApiTokenAuth::class,
-        // ]);
+$middleware->alias([
+    'token' => ApiTokenAuth::class,
+]);
+$middleware->web(append: [
+    ApiTokenAuth::class,
+]);
+$middleware->api(append: [
+    ApiTokenAuth::class,
+]);
         
-        $middleware->append(ApiTokenAuth::class);
+       // $middleware->append(ApiTokenAuth::class);
    
     })
     ->withExceptions(function (Exceptions $exceptions): void {

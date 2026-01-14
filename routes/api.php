@@ -16,7 +16,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Middleware\ApiTokenAuth;
 
 // Authentication endpoints
-Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware(ApiTokenAuth::class);;
+Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('sso');
 Route::post('/auth/logout', [AuthController::class, 'logout']);
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
