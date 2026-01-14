@@ -11,57 +11,42 @@ use Illuminate\Support\Facades\Log;
 
 class ApiTokenAuth
 {
-    public function handle(Request $request, Closure $next, $scope = null)
-    {
-        Log::info('Middleware HIT', [
-            'uri' => $request->getUri(),
-            'bearer' => $request->bearerToken()
-        ]);
-        // 1. Read Bearer token
-        $plainToken = $request->bearerToken();
+public function handle(Request $request, Closure $next, $scope = null)
+{
+    $plainToken = $request->bearerToken();
 
-        if (!$plainToken) {
-            return response()->json([
-                'message' => 'API token missing'
-            ], 401);
-        }
-
-        // 2. Hash token
-        $tokenHash = hash('sha256', $plainToken);
-
-        // 3. Find token
-        $apiToken = ApiToken::with('user')
-            ->where('token_hash', $tokenHash)
-            ->where('is_revoked', false)
-            ->where(function ($q) {
-                $q->whereNull('expires_at')
-                    ->orWhere('expires_at', '>', now());
-            })
-            ->first();
-
-        if (!$apiToken) {
-            return response()->json([
-                'message' => 'Invalid or expired API token'
-            ], 401);
-        }
-
-        // 4. Scope check (optional)
-        if ($scope && !in_array($scope, $apiToken->scopes ?? [])) {
-            return response()->json([
-                'message' => 'Insufficient permission'
-            ], 403);
-        }
-
-        // 5. Attach user & token manually to request
-        $request->attributes->set('api_user', $apiToken->user);
-        $request->attributes->set('api_token', $apiToken);
-
-        // 6. Update last used time
-        $apiToken->update([
-            'last_used_at' => now(),
-            'ip' => $request->ip(),
-        ]);
-
-        return $next($request);
+    if (!$plainToken) {
+        return response()->json(['message'=>'API token missing'], 401);
     }
+
+    $tokenHash = hash('sha256', $plainToken);
+
+    $apiToken = ApiToken::with('user')
+        ->where('token_hash', $tokenHash)
+        ->first();
+
+    if (!$apiToken || !$apiToken->isValid()) {
+        return response()->json(['message'=>'Invalid or expired API token'], 401);
+    }
+
+    if (!$apiToken->user) {
+        return response()->json(['message'=>'Token user not found'], 401);
+    }
+
+    if ($scope && !$apiToken->hasScope($scope)) {
+        return response()->json(['message'=>'Insufficient permission'], 403);
+    }
+
+    // Attach user and token manually
+    $request->attributes->set('api_user', $apiToken->user);
+    $request->attributes->set('api_token', $apiToken);
+
+    // Update last used info
+    $apiToken->update([
+        'last_used_at' => now(),
+        'ip' => $request->ip(),
+    ]);
+
+    return $next($request);
+}
 }
