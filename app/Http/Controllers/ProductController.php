@@ -180,7 +180,7 @@ class ProductController extends Controller
     public function listProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage']);
+            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'brand']);
 
             if ($request->filled('shop_id')) {
                 $query->where('shop_id', $request->shop_id);
@@ -208,13 +208,30 @@ class ProductController extends Controller
 
             if ($request->filled('search')) {
                 $search = trim($request->search);
-                $query->where(function ($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                        ->orWhere('sku', 'like', "%{$search}%")
-                        ->orWhere('slug', 'like', "%{$search}%");
+                // split into tokens so multi-word searches behave well
+                $tokens = preg_split('/\s+/', $search);
+
+                $query->where(function ($q) use ($tokens) {
+                    foreach ($tokens as $token) {
+                        $t = "%" . $token . "%";
+                        $q->where(function ($qq) use ($t) {
+                            $qq->where('name', 'like', $t)
+                                ->orWhere('sku', 'like', $t)
+                                ->orWhere('slug', 'like', $t)
+                                ->orWhereHas('category', function ($qc) use ($t) {
+                                    $qc->where('name', 'like', $t);
+                                })
+                                ->orWhereHas('subCategory', function ($qc) use ($t) {
+                                    $qc->where('name', 'like', $t);
+                                })
+                                ->orWhereHas('brand', function ($qc) use ($t) {
+                                    $qc->where('name', 'like', $t);
+                                });
+                        });
+                    }
                 });
             }
-            $query = Product::query()->with(['primaryImage', 'images']);
+
             $perPage = (int) $request->get('per_page', 20);
             $products = $query->latest()->paginate($perPage);
 
