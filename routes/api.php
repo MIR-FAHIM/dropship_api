@@ -14,6 +14,8 @@ use App\Http\Controllers\AttributeController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ProductAttributeController;
+use App\Http\Controllers\ReportController;
+use App\Http\Controllers\ProductDiscountController;
 use App\Http\Middleware\ApiTokenAuth;
 
 // Authentication endpoints
@@ -175,14 +177,14 @@ Route::prefix('product-attributes')->group(function () {
 });
 
 Route::prefix('reports')->group(function () {
-    Route::get('/dashboard', [App\Http\Controllers\ReportController::class, 'dashboard']);
+    Route::get('/dashboard', [ReportController::class, 'dashboard']);
 });
 
 Route::prefix('product-discounts')->group(function () {
-    Route::post('/create', [App\Http\Controllers\ProductDiscountController::class, 'create']);
-    Route::get('/list', [App\Http\Controllers\ProductDiscountController::class, 'list']);
-    Route::get('/details/{id}', [App\Http\Controllers\ProductDiscountController::class, 'details']);
-    Route::put('/update/{id}', [App\Http\Controllers\ProductDiscountController::class, 'update']);
-    Route::delete('/delete/{id}', [App\Http\Controllers\ProductDiscountController::class, 'delete']);
+    Route::post('/create', [ProductDiscountController::class, 'create']);
+    Route::get('/list', [ProductDiscountController::class, 'list']);
+    Route::get('/details/{id}', [ProductDiscountController::class, 'details']);
+    Route::put('/update/{id}', [ProductDiscountController::class, 'update']);
+    Route::delete('/delete/{id}', [ProductDiscountController::class, 'delete']);
 });
 

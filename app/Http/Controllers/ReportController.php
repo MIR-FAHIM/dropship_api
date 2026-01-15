@@ -60,7 +60,7 @@ class ReportController extends Controller
 
             $last7Start = Carbon::today()->subDays(6); // include today = 7 days
             $last7Sell = (float) Order::where('payment_status', 'paid')
-                ->whereDate('created_at', '>=', $last7Start)
+                ->whereDate('created_at', '>=', $last7Start)->desc()
                 ->sum('total');
 
             // Daily breakdown for last 7 days
