@@ -233,6 +233,11 @@ class ProductController extends Controller
             $product = Product::with([
                 'images',
                 'primaryImage',
+                'brand',
+                'category',
+                'subCategory',
+                'shop',
+                'related',
                 'productAttributes.attribute',
                 'productAttributes.value',
             ])->find($id);
