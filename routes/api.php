@@ -174,3 +174,11 @@ Route::prefix('product-attributes')->group(function () {
     Route::delete('/delete/{id}', [ProductAttributeController::class, 'delete']);
 });
 
+Route::prefix('product-discounts')->group(function () {
+    Route::post('/create', [App\Http\Controllers\ProductDiscountController::class, 'create']);
+    Route::get('/list', [App\Http\Controllers\ProductDiscountController::class, 'list']);
+    Route::get('/details/{id}', [App\Http\Controllers\ProductDiscountController::class, 'details']);
+    Route::put('/update/{id}', [App\Http\Controllers\ProductDiscountController::class, 'update']);
+    Route::delete('/delete/{id}', [App\Http\Controllers\ProductDiscountController::class, 'delete']);
+});
+
