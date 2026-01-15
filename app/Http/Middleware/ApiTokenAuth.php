@@ -16,7 +16,9 @@ public function handle(Request $request, Closure $next, $scope = null)
     $plainToken = $request->bearerToken();
 
     if (!$plainToken) {
-        return response()->json(['message'=>'API token missing'], 401);
+        return response()->json([
+            'status'=>'error',
+            'message'=>'API token missing'], 401);
     }
 
     $tokenHash = hash('sha256', $plainToken);

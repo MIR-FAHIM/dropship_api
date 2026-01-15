@@ -5,7 +5,7 @@ SHOW TABLES;
 DROP TABLE content_images;
 USE database_name;
 DESCRIBE content_images;
-php artisan make:model ApiToken -m  
+php artisan make:model ProductAttribute -m  
 php artisan make:migration UserReview
 php artisan route:list
 php artisan route:clear

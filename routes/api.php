@@ -13,6 +13,7 @@ use App\Http\Controllers\BannerController;
 use App\Http\Controllers\AttributeController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ProductAttributeController;
 use App\Http\Middleware\ApiTokenAuth;
 
 // Authentication endpoints
@@ -163,5 +164,13 @@ Route::prefix('attributes')->group(function () {
     Route::post('/values/create', [AttributeController::class, 'addAttributeValue']);
     Route::put('/values/update/{id}', [AttributeController::class, 'updateAttributeValue']);
     Route::delete('/values/delete/{id}', [AttributeController::class, 'deleteAttributeValue']);
+});
+
+Route::prefix('product-attributes')->group(function () {
+    Route::post('/create', [ProductAttributeController::class, 'create']);
+    Route::get('/list', [ProductAttributeController::class, 'list']);
+    Route::get('/details/{id}', [ProductAttributeController::class, 'details']);
+    Route::put('/update/{id}', [ProductAttributeController::class, 'update']);
+    Route::delete('/delete/{id}', [ProductAttributeController::class, 'delete']);
 });
 
