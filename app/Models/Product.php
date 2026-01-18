@@ -9,57 +9,75 @@ class Product extends Model
 {
     use HasFactory;
 
+    // ✅ Mass assignable fields
     protected $fillable = [
-        'shop_id',
-        'category_id',
-        'sub_category_id',
-        'brand_id',
-        'related_id',
-
         'name',
-        'slug',
-        'sku',
-
-        'short_description',
+        'added_by',
+        'user_id',
+        'category_id',
+        'brand_id',
+        'photos',
+        'thumbnail_img',
+        'video_provider',
+        'video_link',
+        'tags',
         'description',
-        'thumbnail',
-
-        'price',
-        'sale_price',
-        'cost_price',
-
-        'stock',
-        'track_stock',
-        'is_active',
-
-        'status',
+        'unit_price',
+        'purchase_price',
+        'variant_product',
+        'attributes',
+        'choice_options',
+        'colors',
+        'variations',
+        'todays_deal',
+        'published',
+        'approved',
+        'stock_visibility_state',
+        'cash_on_delivery',
+        'featured',
+        'seller_featured',
+        'current_stock',
+        'unit',
+        'weight',
+        'min_qty',
+        'low_stock_quantity',
+        'discount',
+        'discount_type',
+        'discount_start_date',
+        'discount_end_date',
+        'starting_bid',
+        'auction_start_date',
+        'auction_end_date',
+        'tax',
+        'tax_type',
+        'shipping_type',
+        'shipping_cost',
+        'is_quantity_multiplied',
+        'est_shipping_days',
+        'num_of_sale',
+        'meta_title',
+        'meta_description',
+        'meta_img',
+        'pdf',
+        'slug',
+        'refundable',
+        'earn_point',
+        'rating',
+        'barcode',
+        'digital',
+        'auction_product',
+        'file_name',
+        'file_path',
+        'external_link',
+        'external_link_btn',
+        'wholesale_product',
+        'frequently_brought_selection_type',
     ];
 
-    protected $casts = [
-        'price' => 'float',
-        'sale_price' => 'float',
-        'cost_price' => 'float',
-        'stock' => 'integer',
-        'track_stock' => 'boolean',
-        'is_active' => 'boolean',
-    ];
-
-
-        public function images()
+    // ✅ Relationships
+    public function user()
     {
-        return $this->hasMany(ProductImage::class, 'product_id');
-    }
-
-    // 2) Primary image (one row where is_primary = true)
-
-    public function primaryImage()
-    {
-        return $this->hasOne(ProductImage::class, 'product_id')->where('is_primary', true);
-    }
-    public function shop()
-    {
-        // Your model class is Shops (plural), table is shops
-        return $this->belongsTo(Shops::class, 'shop_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
 
     public function category()
@@ -67,29 +85,19 @@ class Product extends Model
         return $this->belongsTo(Category::class, 'category_id');
     }
 
-    public function subCategory()
-    {
-        // Still points to categories table
-        return $this->belongsTo(Category::class, 'sub_category_id');
-    }
-
     public function brand()
     {
         return $this->belongsTo(Brand::class, 'brand_id');
     }
 
-    public function related()
+    // ✅ Accessor example for full photo URL
+    public function getThumbnailUrlAttribute()
     {
-        return $this->belongsTo(Product::class, 'related_id');
+        return $this->thumbnail_img ? asset('storage/' . $this->thumbnail_img) : null;
     }
 
-    public function productAttributes()
+    public function getPhotosArrayAttribute()
     {
-        return $this->hasMany(ProductAttribute::class, 'product_id');
-    }
-
-    public function productDiscount()
-    {
-        return $this->hasOne(ProductDiscount::class, 'product_id');
+        return $this->photos ? explode(',', $this->photos) : [];
     }
 }
