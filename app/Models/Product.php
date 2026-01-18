@@ -86,7 +86,7 @@ class Product extends Model
     }
     public function primaryImage()
     {
-        return $this->hasOne(ProductImage::class, 'product_id');
+        return $this->belongsTo(Upload::class, 'thumbnail_img');
     }
 
     public function images()
