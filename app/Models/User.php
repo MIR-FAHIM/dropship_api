@@ -2,43 +2,38 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Foundation\Auth\User as Authenticatable;
-use Illuminate\Notifications\Notifiable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
-class User extends Authenticatable
+class User extends Model
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable;
+    use HasFactory, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.
-     *
-     * @var list<string>
      */
     protected $fillable = [
         'name',
         'email',
+        'email_verified_at',
         'password',
-        'mobile',          // Newly added
-        'address',         // Newly added
-        'optional_phone',  // Newly added
-        'fcm_token',       // Newly added
-        'is_banned',       // Newly added
-        'role',            // Newly added
-        'status',          // Newly added
-        'zone',            // Newly added
-        'district',        // Newly added
-        'area',            // Newly added
-        'lat',             // Newly added
-        'lon',             // Newly added
+        'mobile',
+        'optional_phone',
+        'address',
+        'fcm_token',
+        'is_banned',
+        'role',
+        'status',
+        'zone',
+        'district',
+        'area',
+        'lat',
+        'lon',
     ];
 
     /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
+     * The attributes that should be hidden for arrays / JSON.
      */
     protected $hidden = [
         'password',
@@ -47,42 +42,13 @@ class User extends Authenticatable
 
     /**
      * The attributes that should be cast.
-     *
-     * @return array<string, string>
      */
-    protected function casts(): array
-    {
-        return [
-            'email_verified_at' => 'datetime',
-            'password' => 'hashed',
-            'is_banned' => 'boolean',  // Cast 'is_banned' as boolean
-            'lat' => 'float',          // Cast 'lat' as float
-            'lon' => 'float',          // Cast 'lon' as float
-        ];
-    }
-
-    /**
-     * Mutators for setting attributes
-     *
-     * @param string $value
-     * @return void
-     */
-    public function setRoleAttribute($value)
-    {
-        $this->attributes['role'] = strtolower($value); // Make sure role is always lowercase
-    }
-
-    /**
-     * Accessor for the 'status' attribute.
-     * You can customize how the 'status' value is represented.
-     *
-     * @return string
-     */
-    public function getStatusAttribute($value)
-    {
-        return ucfirst($value); // Capitalize status (active/inactive)
-    }
-
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+        'is_banned' => 'boolean',
+        'lat' => 'decimal:7',
+        'lon' => 'decimal:7',
+    ];
 
     public function apiTokens()
     {

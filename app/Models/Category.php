@@ -9,18 +9,41 @@ class Category extends Model
 {
     use HasFactory;
 
+    /**
+     * The attributes that are mass assignable.
+     */
     protected $fillable = [
         'parent_id',
+        'level',
         'name',
-        'slug',
+        'order_level',
+        'commision_rate',
+        'banner',
         'icon',
-        'image',
-        'sort_order',
-        'status',
+        'cover_image',
+        'featured',
+        'top',
+        'digital',
+        'slug',
+        'meta_title',
+        'meta_description',
     ];
 
     /**
-     * Parent category (for sub-categories)
+     * Attribute casting.
+     */
+    protected $casts = [
+        'parent_id' => 'integer',
+        'level' => 'integer',
+        'order_level' => 'integer',
+        'commision_rate' => 'float',
+        'featured' => 'integer',
+        'top' => 'integer',
+        'digital' => 'integer',
+    ];
+
+    /**
+     * Parent category (self-referencing).
      */
     public function parent()
     {
@@ -28,26 +51,10 @@ class Category extends Model
     }
 
     /**
-     * Child categories
+     * Child categories (self-referencing).
      */
     public function children()
     {
         return $this->hasMany(Category::class, 'parent_id');
-    }
-
-    /**
-     * Products linked as main category
-     */
-    public function products()
-    {
-        return $this->hasMany(Product::class, 'category_id');
-    }
-
-    /**
-     * Products linked as sub-category
-     */
-    public function subCategoryProducts()
-    {
-        return $this->hasMany(Product::class, 'sub_category_id');
     }
 }
