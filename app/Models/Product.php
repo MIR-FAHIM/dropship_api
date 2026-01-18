@@ -84,6 +84,10 @@ class Product extends Model
     {
         return $this->belongsTo(Category::class, 'category_id');
     }
+    public function related()
+    {
+        return $this->belongsTo(Category::class, 'category_id');
+    }
     public function primaryImage()
     {
         return $this->belongsTo(Upload::class, 'thumbnail_img');
