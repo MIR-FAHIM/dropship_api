@@ -26,7 +26,7 @@ Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
 
 Route::prefix('users')->group(function () {
-    Route::post('/create', [UserController::class, 'createUser']);
+    Route::post('/create', [UserController::class, 'createUser'])->withoutMiddleware('token');;
 
     Route::get('/list', [UserController::class, 'listUsers']);
     Route::get('/customers', [UserController::class, 'getCustomers']);
