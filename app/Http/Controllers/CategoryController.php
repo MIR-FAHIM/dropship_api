@@ -60,6 +60,7 @@ class CategoryController extends Controller
         try {
             // Only show top-level featured categories (no children)
             $query = Category::query()
+            ->with('banner')
                 ->where('parent_id', 0)
                 ->where('featured', 1);
 
