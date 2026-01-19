@@ -372,12 +372,7 @@ class ProductController extends Controller
                 return $this->failed('Product not found', null, 404);
             }
 
-            // Normalize photos input: accept comma string or single id and convert to array
-            if ($request->filled('photos') && !is_array($request->photos)) {
-                $photosArray = array_filter(array_map('trim', explode(',', (string) $request->photos)));
-                $request->merge(['photos' => $photosArray]);
-            }
-
+            
             $validated = $request->validate([
                 'name' => ['nullable', 'string', 'max:255'],
                 'added_by' => ['nullable', 'string', 'max:255'],
@@ -385,9 +380,7 @@ class ProductController extends Controller
                 'category_id' => ['nullable', 'integer', 'exists:categories,id'],
                 'brand_id' => ['nullable', 'integer', 'exists:brands,id'],
 
-                // photos are upload ids (array or comma string normalized above)
-                'photos' => ['nullable', 'array'],
-                'photos.*' => ['integer', 'exists:uploads,id'],
+            
                 'thumbnail_img' => ['nullable', 'integer', 'exists:uploads,id'],
 
                 'video_provider' => ['nullable', 'string', 'max:100'],
@@ -451,14 +444,7 @@ class ProductController extends Controller
                 'frequently_brought_selection_type' => ['nullable', 'string', 'max:50'],
             ]);
 
-            // Normalize photos: accept array of ids or comma string
-            if (array_key_exists('photos', $validated)) {
-                if (is_array($validated['photos'])) {
-                    $validated['photos'] = implode(',', $validated['photos']);
-                } else {
-                    $validated['photos'] = (string) $validated['photos'];
-                }
-            }
+            
 
             // Normalize boolean flags explicitly when present
             foreach ([
@@ -483,7 +469,7 @@ class ProductController extends Controller
             $product->fill($validated);
             $product->save();
 
-            $product->load(['images', 'primaryImage']);
+           
 
             return $this->success('Product updated successfully', $product);
         } catch (ValidationException $e) {
