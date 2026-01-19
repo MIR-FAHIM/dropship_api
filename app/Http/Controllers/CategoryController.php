@@ -58,33 +58,34 @@ class CategoryController extends Controller
     public function listCategories(Request $request)
     {
         try {
-            $query = Category::query();
+            $query = Category::query()
+                ->with(['children' => function ($q) {
+                    $q->orderByRaw('COALESCE(order_level, 999999) asc')
+                      ->latest();
+                }]);
 
+            // If a specific parent_id is provided, filter by it (0 is top-level)
             if ($request->filled('parent_id')) {
-                $query->where('parent_id', $request->parent_id);
+                $query->where('parent_id', (int) $request->parent_id);
             }
 
-            if ($request->filled('status')) {
-                $query->where('status', $request->status);
-            }
-
-            // Default: top-level categories only if nothing provided
+            // Default: top-level categories (parent_id === 0) only if nothing provided
             if (!$request->filled('parent_id') && !$request->filled('all')) {
-                $query->whereNull('parent_id');
+                $query->where('parent_id', 0);
             }
 
             $perPage = (int) $request->get('per_page', 20);
 
             // If you want all (no pagination): /categories/list?all=1
             if ($request->filled('all') && (int) $request->get('all') === 1) {
-                $categories = $query->orderByRaw('COALESCE(sort_order, 999999) asc')
+                $categories = $query->orderByRaw('COALESCE(order_level, 999999) asc')
                     ->latest()
                     ->get();
 
                 return $this->success('Categories fetched successfully', $categories);
             }
 
-            $categories = $query->orderByRaw('COALESCE(sort_order, 999999) asc')
+            $categories = $query->orderByRaw('COALESCE(order_level, 999999) asc')
                 ->latest()
                 ->paginate($perPage);
 
@@ -184,7 +185,7 @@ class CategoryController extends Controller
             }
 
             $children = Category::where('parent_id', $id)
-                ->orderByRaw('COALESCE(sort_order, 999999) asc')
+                ->orderByRaw('COALESCE(order_level, 999999) asc')
                 ->latest()
                 ->get();
 
