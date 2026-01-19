@@ -59,7 +59,7 @@ class CategoryController extends Controller
     {
         try {
             $query = Category::query()
-                ->with(['children' => function ($q) {
+                ->with(['banner','children' => function ($q) {
                     $q->orderByRaw('COALESCE(order_level, 999999) asc')
                       ->latest();
                 }]);
@@ -78,7 +78,7 @@ class CategoryController extends Controller
 
             // If you want all (no pagination): /categories/list?all=1
             if ($request->filled('all') && (int) $request->get('all') === 1) {
-                $categories = $query->with('banner')->orderByRaw('COALESCE(order_level, 999999) asc')
+                $categories = $query->orderByRaw('COALESCE(order_level, 999999) asc')
                     ->latest()
                     ->get();
 
