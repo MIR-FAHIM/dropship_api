@@ -216,7 +216,7 @@ class ProductController extends Controller
                         $t = "%" . $token . "%";
                         $q->where(function ($qq) use ($t) {
                             $qq->where('name', 'like', $t)
-                                ->orWhere('sku', 'like', $t)
+                               
                                 ->orWhere('slug', 'like', $t)
                                 ->orWhereHas('category', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
