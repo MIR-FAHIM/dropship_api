@@ -20,6 +20,7 @@ class Banner extends Model
         'related_product_id',
         'related_category_id',
         'image_path',
+        'image_id',
         'note',
         'is_active',
     ];

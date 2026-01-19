@@ -27,7 +27,8 @@ return new class extends Migration
                   ->constrained('categories')
                   ->nullOnDelete();
 
-            $table->string('image_path');     // Banner image path or URL
+            $table->string('image_path')->nullable();     // Banner image path or URL
+            $table->string('image_id')->nullable();     // Banner image ID or reference
             $table->text('note')->nullable(); // Optional description
 
             $table->boolean('is_active')->default(true);
