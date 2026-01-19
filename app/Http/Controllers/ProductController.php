@@ -221,9 +221,7 @@ class ProductController extends Controller
                                 ->orWhereHas('category', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 })
-                                ->orWhereHas('subCategory', function ($qc) use ($t) {
-                                    $qc->where('name', 'like', $t);
-                                })
+                               
                                 ->orWhereHas('brand', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 });
