@@ -132,7 +132,7 @@ public function productDiscount()
     }
     public function averageReview()
     {
-        return $this->hasMany(Review::class, 'product_id')
+        return $this->hasOne(Review::class, 'product_id')
             ->selectRaw('product_id, AVG(star_count) as average_rating, COUNT(*) as review_count')
             ->groupBy('product_id');
     }
