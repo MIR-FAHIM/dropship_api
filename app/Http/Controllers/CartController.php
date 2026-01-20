@@ -78,10 +78,10 @@ class CartController extends Controller
 
             // Decide the unit price snapshot
             $unitPrice = null;
-            if (!is_null($product->sale_price) && $product->sale_price > 0) {
-                $unitPrice = (float) $product->sale_price;
+            if (!is_null($product->unit_price) && $product->unit_price > 0) {
+                $unitPrice = (float) $product->unit_price;
             } else {
-                $unitPrice = !is_null($product->price) ? (float) $product->price : null;
+                $unitPrice = !is_null($product->unit_price) ? (float) $product->unit_price : null;
             }
 
             // Apply product-level discount if available and valid
