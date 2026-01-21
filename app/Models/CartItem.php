@@ -15,6 +15,7 @@ class CartItem extends Model
         'shop_id',
         'qty',
         'unit_price',
+        'attribute_id',
         'line_total',
         'status',
     ];
@@ -33,6 +34,10 @@ class CartItem extends Model
     public function product()
     {
         return $this->belongsTo(Product::class, 'product_id');
+    }
+    public function productAttribute()
+    {
+        return $this->belongsTo(ProductAttribute::class, 'attribute_id');
     }
 
     public function shop()

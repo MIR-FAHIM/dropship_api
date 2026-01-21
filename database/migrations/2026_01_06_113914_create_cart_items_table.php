@@ -34,6 +34,7 @@ return new class extends Migration
             $table->integer('qty')->nullable();
             $table->decimal('unit_price', 12, 2)->nullable();
             $table->decimal('line_total', 12, 2)->nullable(); // qty * unit_price (cached)
+            $table->integer('attribute_id')->nullable(); // e.g., size/color variant
 
             // Optional control
             $table->string('status')->nullable(); 

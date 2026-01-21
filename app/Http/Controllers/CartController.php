@@ -49,7 +49,7 @@ class CartController extends Controller
                 ]);
             }
 
-            $cart->load(['items.product.primaryImage',  'items.shop']);
+            $cart->load(['items.product.primaryImage',  'items.shop', 'items.product.productDiscount', 'items.productAttribute']);
 
             return $this->success('Active cart fetched successfully', $cart);
         } catch (\Throwable $e) {
