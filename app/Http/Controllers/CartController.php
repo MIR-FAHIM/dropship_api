@@ -109,6 +109,7 @@ class CartController extends Controller
             // Merge: same cart + same product = increment qty
             $item = CartItem::where('cart_id', $cart->id)
                 ->where('product_id', $product->id)
+                ->where('attribute_id', $request->input('attribute_id'))
                 ->first();
 
             if ($item) {
