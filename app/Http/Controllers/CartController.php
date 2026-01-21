@@ -121,6 +121,7 @@ class CartController extends Controller
                 $item = CartItem::create([
                     'cart_id' => $cart->id,
                     'product_id' => $product->id,
+                    'attribute_id' => $request->input('attribute_id'),
                     'shop_id' => $product->shop_id ?? null,
                     'qty' => (int) $validated['qty'],
                     'unit_price' => $unitPrice,
