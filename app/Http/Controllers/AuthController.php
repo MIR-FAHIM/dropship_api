@@ -47,7 +47,13 @@ class AuthController extends Controller
             if (!empty($validated['email'])) {
                 $user = User::where('email', $validated['email'])->first();
             } elseif (!empty($validated['phone'])) {
-                $user = User::where('phone', $validated['phone'])->first();
+                $rawPhone = trim($validated['phone']);
+                $normalizedPhone = preg_replace('/^\+?88/', '', $rawPhone);
+
+                $user = User::where(function ($query) use ($rawPhone, $normalizedPhone) {
+                    $query->where('phone', $rawPhone)
+                        ->orWhere('phone', $normalizedPhone);
+                })->first();
             }
 
             if (!$user || !Hash::check($validated['password'], $user->password)) {
