@@ -142,6 +142,7 @@ class DeliveryController extends Controller
 
             $assignments = AssignDeliveryMan::with(['order', 'deliveryMan'])
                 ->where('delivery_man_id', $deliveryManId)
+                ->where('status', 'assigned')
                 ->latest()
                 ->paginate($perPage);
 
