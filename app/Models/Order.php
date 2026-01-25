@@ -50,6 +50,12 @@ class Order extends Model
     {
         return $this->belongsTo(User::class);
     }
+    
+    public function deliveryMan()
+    {
+        return $this->hasOne(AssignDeliveryMan::class, 'order_id')
+            ->where('status', 'assigned');
+    }
 
     /**
      * Order has many order items (the truth)
