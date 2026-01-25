@@ -8,6 +8,7 @@ use App\Models\Shops;
 use App\Models\User;
 use App\Models\Order;
 use App\Models\Cart;
+use App\Models\Transaction;
 use Carbon\Carbon;
 
 class ReportController extends Controller
@@ -45,32 +46,38 @@ class ReportController extends Controller
             $ordersCount = Order::count();
             $activeCarts = Cart::where('status', 'active')->count();
 
-            // Sales sums (only consider paid orders)
-            $totalSell = (float) Order::where('payment_status', 'paid')->sum('total');
+            // Sales sums (only consider completed credit transactions)
+            $totalSell = (float) Transaction::where('trx_type', 'credit')
+                ->where('status', 'completed')
+                ->sum('amount');
 
             $today = Carbon::today()->toDateString();
             $yesterday = Carbon::yesterday()->toDateString();
 
-            $todaySell = (float) Order::where('payment_status', 'paid')
+            $todaySell = (float) Transaction::where('trx_type', 'credit')
+                ->where('status', 'completed')
                 ->whereDate('created_at', $today)
-                ->sum('total');
+                ->sum('amount');
 
-            $yesterdaySell = (float) Order::where('payment_status', 'paid')
+            $yesterdaySell = (float) Transaction::where('trx_type', 'credit')
+                ->where('status', 'completed')
                 ->whereDate('created_at', $yesterday)
-                ->sum('total');
+                ->sum('amount');
 
             $last7Start = Carbon::today()->subDays(6)->toDateString(); // include today = 7 days
-            $last7Sell = (float) Order::where('payment_status', 'paid')
+            $last7Sell = (float) Transaction::where('trx_type', 'credit')
+                ->where('status', 'completed')
                 ->whereDate('created_at', '>=', $last7Start)
-                ->sum('total');
+                ->sum('amount');
 
             // Daily breakdown for last 7 days (most recent first)
             $days = [];
             for ($i = 0; $i < 7; $i++) {
                 $d = Carbon::today()->subDays($i)->toDateString();
-                $sum = (float) Order::where('payment_status', 'paid')
+                $sum = (float) Transaction::where('trx_type', 'credit')
+                    ->where('status', 'completed')
                     ->whereDate('created_at', $d)
-                    ->sum('total');
+                    ->sum('amount');
                 $days[] = [
                     'date' => $d,
                     'total' => $sum,
