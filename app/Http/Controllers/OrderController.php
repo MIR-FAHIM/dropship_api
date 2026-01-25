@@ -265,6 +265,14 @@ public function allOrders(Request $request)
             $order->status = $validated['status'];
             $order->save();
 
+            if($validated['status'] === 'completed') {
+                // Also update all order items to completed
+                Order::where('order_id', $order->id)
+                    ->update(['payment_status' => 'paid']);
+                OrderItem::where('order_id', $order->id)
+                    ->update(['status' => 'completed']);
+            }
+
             return $this->success('Order status updated successfully', $order);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
