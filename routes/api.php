@@ -21,6 +21,7 @@ use App\Http\Controllers\UploadController;
 use App\Http\Controllers\RelatedProductController;
 use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\DeliveryController;
+use App\Http\Controllers\TransactionController;
 
 // Authentication endpoints
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
@@ -223,4 +224,10 @@ Route::prefix('deliveries')->group(function () {
     Route::get('/all/{deliveryManId}', [DeliveryController::class, 'getAllOrderByDeliveryMan']);
     Route::get('/assigned/{deliveryManId}', [DeliveryController::class, 'getAssignedDelivery']);
     Route::get('/completed/{deliveryManId}', [DeliveryController::class, 'getCompletedDelivery']);
+});
+
+Route::prefix('transactions')->group(function () {
+    Route::get('/credit', [TransactionController::class, 'creditTransaction']);
+    Route::get('/debit', [TransactionController::class, 'debitTransaction']);
+    Route::get('/report', [TransactionController::class, 'transactionReport']);
 });
