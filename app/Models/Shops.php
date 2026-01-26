@@ -38,4 +38,8 @@ class Shops extends Model
     {
         return $this->belongsTo(User::class);
     }
+    public function logo()
+    {
+        return $this->belongsTo(Upload::class , 'logo' ,);
+    }
 }

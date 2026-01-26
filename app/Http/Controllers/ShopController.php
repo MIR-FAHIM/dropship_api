@@ -130,8 +130,8 @@ class ShopController extends Controller
                 return $this->success('Shops fetched successfully', $shops);
             }
 
-            $perPage = (int) $request->get('per_page', 20);
-            $shops = $query->with('user')->paginate($perPage);
+            $perPage = (int) $request->get('per_page', 100);
+            $shops = $query->with('logo','user')->paginate($perPage);
 
             return $this->success('Shops fetched successfully', $shops);
         } catch (\Throwable $e) {
@@ -204,7 +204,7 @@ class ShopController extends Controller
                 return $this->success('Products fetched successfully', $products);
             }
 
-            $perPage = (int) $request->get('per_page', 20);
+            $perPage = (int) $request->get('per_page', 100);
             $products = $query->latest()->paginate($perPage);
 
             return $this->success('Products fetched successfully', $products);
