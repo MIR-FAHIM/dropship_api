@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Product;
 use App\Models\Shops;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -151,6 +152,62 @@ class ShopController extends Controller
             }
 
             return $this->success('Shop fetched successfully', $shop);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /shops/products/{id}
+     * List products by shop owner (shop.user_id === product.user_id)
+     */
+    public function getShopProducts(Request $request, $id)
+    {
+        try {
+            $shop = Shops::find($id);
+
+            if (!$shop) {
+                return $this->failed('Shop not found', null, 404);
+            }
+
+            if (empty($shop->user_id)) {
+                return $this->success('Shop has no owner user', []);
+            }
+
+            $query = Product::query()
+                ->with(['primaryImage', 'images', 'category', 'subCategory', 'brand', 'productDiscount'])
+                ->where('user_id', $shop->user_id);
+
+            if ($request->filled('search')) {
+                $search = trim($request->search);
+                $tokens = preg_split('/\s+/', $search);
+
+                $query->where(function ($q) use ($tokens) {
+                    foreach ($tokens as $token) {
+                        $t = "%" . $token . "%";
+                        $q->where(function ($qq) use ($t) {
+                            $qq->where('name', 'like', $t)
+                                ->orWhere('slug', 'like', $t)
+                                ->orWhereHas('category', function ($qc) use ($t) {
+                                    $qc->where('name', 'like', $t);
+                                })
+                                ->orWhereHas('brand', function ($qc) use ($t) {
+                                    $qc->where('name', 'like', $t);
+                                });
+                        });
+                    }
+                });
+            }
+
+            if ($request->filled('all') && (int) $request->get('all') === 1) {
+                $products = $query->latest()->get();
+                return $this->success('Products fetched successfully', $products);
+            }
+
+            $perPage = (int) $request->get('per_page', 20);
+            $products = $query->latest()->paginate($perPage);
+
+            return $this->success('Products fetched successfully', $products);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

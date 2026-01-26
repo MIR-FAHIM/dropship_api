@@ -91,6 +91,7 @@ Route::prefix('shops')->group(function () {
 
     Route::get('/list', [ShopController::class, 'listShops']);
     Route::get('/details/{id}', [ShopController::class, 'getShopDetails']);
+    Route::get('/products/{id}', [ShopController::class, 'getShopProducts']);
 
     Route::put('/update/{id}', [ShopController::class, 'updateShop']);
 
