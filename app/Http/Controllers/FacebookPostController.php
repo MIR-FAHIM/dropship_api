@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\FacebookAccount;
 use App\Models\FacebookPage;
 use App\Models\FacebookPost;
+use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
 
 class FacebookPostController extends Controller
@@ -184,6 +186,8 @@ class FacebookPostController extends Controller
                 'product_id' => ['required', 'integer', 'exists:products,id'],
                 'fb_post_id' => ['nullable', 'string', 'max:255'],
                 'status' => ['nullable', 'string', 'max:100'],
+                'caption' => ['nullable', 'string', 'max:2000'],
+                'image_url' => ['nullable', 'url'],
             ]);
 
             $page = FacebookPage::find($validated['facebook_page_id']);
@@ -196,13 +200,60 @@ class FacebookPostController extends Controller
                 return $this->failed('Facebook page does not belong to user', null, 403);
             }
 
+            $product = Product::find($validated['product_id']);
+            if (!$product) {
+                return $this->failed('Product not found', null, 404);
+            }
+
+            $token = Crypt::decryptString($page->page_access_token);
+
+            $caption = $validated['caption'] ?? $product->name ?? 'New product';
+            $imageUrl = $validated['image_url'] ?? $product->thumbnail_url ?? null;
+
+            if (!$imageUrl) {
+                $photos = $product->photos_array ?? [];
+                if (!empty($photos)) {
+                    $first = $photos[0];
+                    $imageUrl = str_starts_with($first, 'http') ? $first : asset('storage/' . $first);
+                }
+            }
+
+            $graphUrl = $imageUrl
+                ? "https://graph.facebook.com/v19.0/{$page->page_id}/photos"
+                : "https://graph.facebook.com/v19.0/{$page->page_id}/feed";
+
+            $payload = $imageUrl
+                ? ['url' => $imageUrl, 'caption' => $caption]
+                : ['message' => $caption];
+
+            $response = Http::asForm()->post($graphUrl, array_merge($payload, [
+                'access_token' => $token,
+            ]));
+            $responseBody = $response->json();
+if (!$response->successful()) {
+    return response()->json([
+        'error' => 'Facebook API error',
+        'status' => $response->status(),
+        'response' => $responseBody,
+    ], 400);
+}
+            $fbPostId = $response->json('post_id')
+                ?? $response->json('id')
+                ?? '';
+
             $post = FacebookPost::create([
                 'facebook_page_id' => $validated['facebook_page_id'],
                 'product_id' => $validated['product_id'],
-                'fb_post_id' => $validated['fb_post_id'] ?? '',
-                'status' => $validated['status'] ?? 'published',
+                'fb_post_id' => $fbPostId,
+                'status' => $response->successful() ? 'published' : 'failed',
             ]);
 
+            if (!$response->successful()) {
+                return $this->failed('Failed to publish content', [
+                    'facebook_response' => $response->json(),
+                    'post' => $post,
+                ], 502);
+            }
             return $this->success('Content published', $post, 201);
         } catch (ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
