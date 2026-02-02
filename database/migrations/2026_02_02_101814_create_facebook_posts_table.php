@@ -13,8 +13,8 @@ return new class extends Migration
     {
         Schema::create('facebook_posts', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('facebook_page_id')->constrained('facebook_pages')->cascadeOnDelete();
-            $table->foreignId('product_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('facebook_page_id');
+            $table->foreignId('product_id');
             $table->string('fb_post_id');
             $table->string('status');
             $table->timestamp('created_at')->useCurrent();

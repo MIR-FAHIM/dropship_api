@@ -13,8 +13,8 @@ return new class extends Migration
     {
         Schema::create('facebook_pages', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('facebook_account_id')->constrained('facebook_accounts')->cascadeOnDelete();
+            $table->foreignId('user_id');
+            $table->foreignId('facebook_account_id');
             $table->string('page_id');
             $table->string('page_name');
             $table->text('page_access_token');
