@@ -167,7 +167,7 @@ class FacebookPostController extends Controller
             $perPage = (int) $request->get('per_page', 20);
             $pages = $query->latest()->paginate($perPage);
 
-  
+
 
             return $this->success('Facebook pages fetched', $pages);
         } catch (\Throwable $e) {
@@ -205,7 +205,11 @@ class FacebookPostController extends Controller
                 return $this->failed('Product not found', null, 404);
             }
 
-            $token = Crypt::decryptString($page->page_access_token);
+            try {
+                $token = Crypt::decryptString($page->page_access_token);
+            } catch (\Throwable $e) {
+                return $this->failed('Invalid page access token', null, 422);
+            }
 
             $caption = $validated['caption'] ?? $product->name ?? 'New product';
             $imageUrl = $validated['image_url'] ?? $product->thumbnail_url ?? null;
@@ -216,6 +220,10 @@ class FacebookPostController extends Controller
                     $first = $photos[0];
                     $imageUrl = str_starts_with($first, 'http') ? $first : asset('storage/' . $first);
                 }
+            }
+
+            if ($imageUrl && !filter_var($imageUrl, FILTER_VALIDATE_URL)) {
+                $imageUrl = null;
             }
 
             $graphUrl = $imageUrl
@@ -230,13 +238,6 @@ class FacebookPostController extends Controller
                 'access_token' => $token,
             ]));
             $responseBody = $response->json();
-if (!$response->successful()) {
-    return response()->json([
-        'error' => 'Facebook API error',
-        'status' => $response->status(),
-        'response' => $responseBody,
-    ], 400);
-}
             $fbPostId = $response->json('post_id')
                 ?? $response->json('id')
                 ?? '';
@@ -252,6 +253,11 @@ if (!$response->successful()) {
                 return $this->failed('Failed to publish content', [
                     'facebook_response' => $response->json(),
                     'post' => $post,
+                    'payload' => [
+                        'graph_url' => $graphUrl,
+                        'caption' => $caption,
+                        'image_url' => $imageUrl,
+                    ],
                 ], 502);
             }
             return $this->success('Content published', $post, 201);
