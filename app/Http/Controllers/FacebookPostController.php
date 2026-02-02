@@ -205,11 +205,11 @@ class FacebookPostController extends Controller
                 return $this->failed('Product not found', null, 404);
             }
 
-            try {
-                $token = Crypt::decryptString($page->page_access_token);
-            } catch (\Throwable $e) {
-                return $this->failed('Invalid page access token', null, 422);
-            }
+           
+                $token = $page->page_access_token
+                    ? Crypt::decryptString($page->page_access_token)
+                    : '';
+         
 
             $caption = $validated['caption'] ?? $product->name ?? 'New product';
             $imageUrl = $validated['image_url'] ?? $product->thumbnail_url ?? null;
