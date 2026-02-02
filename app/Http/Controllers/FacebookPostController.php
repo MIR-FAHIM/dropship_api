@@ -211,19 +211,11 @@ class FacebookPostController extends Controller
          
 
             $caption = $validated['caption'] ?? $product->name ?? 'New product';
-            $imageUrl = $validated['image_url'] ?? $product->thumbnail_url ?? null;
+            $imageUrl = $product->primaryImage?->file_name
+                ? 'https://apidropship.braintodo.com/storage/app/public/' . ltrim($product->primaryImage->file_name, '/')
+                : null;
 
-            if (!$imageUrl) {
-                $photos = $product->photos_array ?? [];
-                if (!empty($photos)) {
-                    $first = $photos[0];
-                    $imageUrl = str_starts_with($first, 'http') ? $first : asset('storage/' . $first);
-                }
-            }
-
-            if ($imageUrl && !filter_var($imageUrl, FILTER_VALIDATE_URL)) {
-                $imageUrl = null;
-            }
+ 
 
             $graphUrl = $imageUrl
                 ? "https://graph.facebook.com/v19.0/{$page->page_id}/photos"
