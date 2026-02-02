@@ -206,9 +206,8 @@ class FacebookPostController extends Controller
             }
 
            
-                $token = $page->page_access_token
-                    ? Crypt::decryptString($page->page_access_token)
-                    : '';
+                $token = $page->page_access_token;
+        ;
          
 
             $caption = $validated['caption'] ?? $product->name ?? 'New product';
