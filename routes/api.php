@@ -22,6 +22,7 @@ use App\Http\Controllers\RelatedProductController;
 use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\DeliveryController;
 use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\FacebookPostController;
 
 // Authentication endpoints
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
@@ -231,4 +232,18 @@ Route::prefix('transactions')->group(function () {
     Route::get('/credit', [TransactionController::class, 'creditTransaction']);
     Route::get('/debit', [TransactionController::class, 'debitTransaction']);
     Route::get('/report', [TransactionController::class, 'transactionReport']);
+});
+
+// Facebook endpoints
+Route::prefix('facebook')->group(function () {
+    Route::post('/accounts/add', [FacebookPostController::class, 'addAccount']);
+    Route::get('/accounts', [FacebookPostController::class, 'getAccounts']);
+
+    Route::post('/pages/add', [FacebookPostController::class, 'addPage']);
+    Route::get('/pages', [FacebookPostController::class, 'getPages']);
+
+    Route::post('/posts/publish', [FacebookPostController::class, 'publishContent']);
+    Route::get('/posts', [FacebookPostController::class, 'getContents']);
+    Route::post('/posts/republish/{id}', [FacebookPostController::class, 'rePublish']);
+    Route::delete('/posts/delete/{id}', [FacebookPostController::class, 'deleteContent']);
 });
