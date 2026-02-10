@@ -74,7 +74,7 @@ Route::prefix('brands')->group(function () {
 Route::prefix('products')->group(function () {
     Route::post('/create', [ProductController::class, 'createProduct']);
     Route::post('/images/upload/{productId}', [ProductController::class, 'productImageUpload']);
-
+Route::get('/category/wise', [ProductController::class, 'listCategoryProducts']);
     Route::get('/list', [ProductController::class, 'listProducts']);
     Route::get('/list/featured', [ProductController::class, 'listFeaturedProducts']);
     Route::get('/list/today-deal', [ProductController::class, 'listTodayDealProducts']);
