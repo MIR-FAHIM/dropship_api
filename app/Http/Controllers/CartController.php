@@ -70,6 +70,7 @@ class CartController extends Controller
                 'user_id' => ['required', 'integer', 'exists:users,id'],
                 'product_id' => ['required', 'integer', 'exists:products,id'],
                 'qty' => ['required', 'integer', 'min:1'],
+                'reseller_price' => ['nullable', 'numeric', 'min:0'],
             ]);
 
             $product = Product::with('productDiscount')->find($validated['product_id']);
@@ -88,6 +89,13 @@ class CartController extends Controller
             // Apply product-level discount if available and valid
             if (!is_null($unitPrice) && $product->productDiscount && $product->productDiscount->isValid()) {
                 $unitPrice = (float) $product->productDiscount->applyDiscount($unitPrice);
+            }
+
+            $resellerPrice = $request->input('reseller_price');
+            $resellerPrice = !is_null($resellerPrice) ? (float) $resellerPrice : $unitPrice;
+
+            if (!is_null($resellerPrice) && $product->productDiscount && $product->productDiscount->isValid()) {
+                $resellerPrice = (float) $product->productDiscount->applyDiscount($resellerPrice);
             }
 
             DB::beginTransaction();
@@ -116,7 +124,8 @@ class CartController extends Controller
                 $newQty = ((int) $item->qty) + (int) $validated['qty'];
                 $item->qty = $newQty;
                 $item->unit_price = $unitPrice;
-                $item->line_total = ($unitPrice !== null) ? round($newQty * $unitPrice, 2) : null;
+                $item->reseller_price = $resellerPrice;
+                $item->line_total = ($resellerPrice !== null) ? round($newQty * $resellerPrice, 2) : null;
                 $item->status = $item->status ?? 'active';
                 $item->save();
             } else {
@@ -127,7 +136,8 @@ class CartController extends Controller
                     'shop_id' => $product->shop_id ?? null,
                     'qty' => (int) $validated['qty'],
                     'unit_price' => $unitPrice,
-                    'line_total' => ($unitPrice !== null) ? round(((int) $validated['qty']) * $unitPrice, 2) : null,
+                    'reseller_price' => $resellerPrice,
+                    'line_total' => ($resellerPrice !== null) ? round(((int) $validated['qty']) * $resellerPrice, 2) : null,
                     'status' => 'active',
                 ]);
             }

@@ -15,6 +15,7 @@ class CartItem extends Model
         'shop_id',
         'qty',
         'unit_price',
+        'reseller_price',
         'attribute_id',
         'line_total',
         'status',
@@ -23,6 +24,7 @@ class CartItem extends Model
     protected $casts = [
         'qty' => 'integer',
         'unit_price' => 'float',
+        'reseller_price' => 'float',
         'line_total' => 'float',
     ];
 
