@@ -9,6 +9,7 @@ use App\Models\OrderStatus;
 use App\Models\OrderStatusHistory;
 use App\Models\Transaction;
 use App\Models\OrderItem;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -322,8 +323,10 @@ class OrderController extends Controller
                     return $this->failed('Debit transaction already exists for this order', null, 409);
                 }
 
+                $profitAmount = (float) ($order->reseller_profit ?? 0);
+
                 Transaction::create([
-                    'amount' => $order->reseller_profit ?? 0,
+                    'amount' => $profitAmount,
                     'trx_type' => 'debit',
                     'status' => 'completed',
                     'source' => 'cod',
@@ -331,6 +334,11 @@ class OrderController extends Controller
                     'type' => 'order_status',
                     'note' => 'Debit transaction (reseller profit) for order #' . $order->order_number,
                 ]);
+
+                if ($profitAmount > 0 && $order->user_id) {
+                    User::where('id', $order->user_id)
+                        ->increment('balance', $profitAmount);
+                }
             }
 
             return $this->success('Order status updated successfully', $order);
