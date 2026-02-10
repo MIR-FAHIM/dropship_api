@@ -183,7 +183,7 @@ class OrderController extends Controller
         }
     }
 
-public function allOrders(Request $request)
+    public function allOrders(Request $request)
     {
         try {
             $perPage = (int) $request->get('per_page', 20);
@@ -244,7 +244,13 @@ public function allOrders(Request $request)
     public function getOrderDetails($id)
     {
         try {
-            $order = Order::with(['items', 'deliveryMan.deliveryMan', 'statusHistory.status'])->find($id);
+            $order = Order::with([
+                'items',
+                'deliveryMan.deliveryMan',
+                'statusHistory.status' => function ($q) {
+                    $q->orderBy('created_at', 'desc');
+                }
+            ])->find($id);
 
             if (!$order) {
                 return $this->failed('Order not found', null, 404);
