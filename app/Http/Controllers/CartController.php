@@ -126,7 +126,9 @@ class CartController extends Controller
                 $item->unit_price = $unitPrice;
                 $item->reseller_price = $resellerPrice;
                 $item->line_total = ($resellerPrice !== null) ? round($newQty * $resellerPrice, 2) : null;
-                $item->line_total_reseller_profit = ($resellerPrice !== null) ? round($newQty * $resellerPrice, 2) : null;
+                $item->line_total_reseller_profit = ($resellerPrice !== null && $unitPrice !== null)
+                    ? round($newQty * ($resellerPrice - $unitPrice), 2)
+                    : null;
                 $item->status = $item->status ?? 'active';
                 $item->save();
             } else {
@@ -139,7 +141,9 @@ class CartController extends Controller
                     'unit_price' => $unitPrice,
                     'reseller_price' => $resellerPrice,
                     'line_total' => ($resellerPrice !== null) ? round(((int) $validated['qty']) * $resellerPrice, 2) : null,
-                    'line_total_reseller_profit' => ($resellerPrice !== null) ? round(((int) $validated['qty']) * $resellerPrice, 2) : null,
+                    'line_total_reseller_profit' => ($resellerPrice !== null && $unitPrice !== null)
+                        ? round(((int) $validated['qty']) * ($resellerPrice - $unitPrice), 2)
+                        : null,
                     'status' => 'active',
                 ]);
             }
