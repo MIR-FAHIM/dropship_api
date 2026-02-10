@@ -15,6 +15,7 @@ return new class extends Migration
             $table->id();
          
             $table->string('name', 100);
+            $table->string('type', 100);
             $table->boolean('is_active')->default(true);
           
             $table->timestamps();
