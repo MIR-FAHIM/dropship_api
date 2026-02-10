@@ -295,17 +295,27 @@ class OrderController extends Controller
             ]);
 
             $statusId = (int) $validated['status_id'];
-            if ($statusId === 12 || $statusId === 13) {
+            if ($order->id === 12) {
                 Transaction::create([
                     'amount' => $order->total,
-                    'trx_type' => $statusId === 12 ? 'credit' : 'debit',
+                    'trx_type' => 'credit',
                     'status' => 'completed',
                     'source' => 'cod',
                     'order_id' => $order->id,
                     'type' => 'order_status',
-                    'note' => $statusId === 12
-                        ? 'Credit transaction for order #' . $order->order_number
-                        : 'Debit transaction for order #' . $order->order_number,
+                    'note' => 'Credit transaction for order #' . $order->order_number,
+                ]);
+            }
+
+            if ($statusId === 13) {
+                Transaction::create([
+                    'amount' => $order->reseller_profit ?? 0,
+                    'trx_type' => 'debit',
+                    'status' => 'completed',
+                    'source' => 'cod',
+                    'order_id' => $order->id,
+                    'type' => 'order_status',
+                    'note' => 'Debit transaction (reseller profit) for order #' . $order->order_number,
                 ]);
             }
 
