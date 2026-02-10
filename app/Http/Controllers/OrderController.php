@@ -244,7 +244,7 @@ public function allOrders(Request $request)
     public function getOrderDetails($id)
     {
         try {
-            $order = Order::with(['items', 'deliveryMan.deliveryMan'])->find($id);
+            $order = Order::with(['items', 'deliveryMan.deliveryMan', 'statusHistory.status'])->find($id);
 
             if (!$order) {
                 return $this->failed('Order not found', null, 404);
