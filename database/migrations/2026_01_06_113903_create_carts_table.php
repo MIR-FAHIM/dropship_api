@@ -26,6 +26,7 @@ return new class extends Migration
             // Cached values (recomputable)
             $table->integer('total_items')->nullable();
             $table->decimal('subtotal', 12, 2)->nullable();
+            $table->decimal('reseller_profit_total', 12, 2)->nullable();
 
             $table->timestamps();
         });

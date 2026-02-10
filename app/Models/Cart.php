@@ -14,11 +14,13 @@ class Cart extends Model
         'status',
         'total_items',
         'subtotal',
+        'reseller_profit_total',
     ];
 
     protected $casts = [
         'total_items' => 'integer',
         'subtotal' => 'float',
+        'reseller_profit_total' => 'float',
     ];
 
     /**

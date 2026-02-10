@@ -295,19 +295,23 @@ class CartController extends Controller
 
         $totalItems = 0;
         $subtotal = 0;
+        $resellerProfitTotal = 0;
 
         foreach ($items as $item) {
             $qty = (int) ($item->qty ?? 0);
             $line = (float) ($item->line_total ?? 0);
+            $resellerProfit = (float) ($item->line_total_reseller_profit ?? 0);
 
             $totalItems += $qty;
             $subtotal += $line;
+            $resellerProfitTotal += $resellerProfit;
         }
 
         $cart = Cart::find($cartId);
         if ($cart) {
             $cart->total_items = $totalItems;
             $cart->subtotal = round($subtotal, 2);
+            $cart->reseller_profit_total = round($resellerProfitTotal, 2);
             $cart->save();
         }
     }
