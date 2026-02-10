@@ -169,6 +169,20 @@ class UserController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+    public function getUserBalance($id)
+    {
+        try {
+            $user = User::find($id);
+
+            if (!$user) {
+                return $this->failed('User not found', null, 404);
+            }
+
+            return $this->success('User balance fetched successfully', ['balance' => $user->balance]);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 
     /**
      * PUT /users/update/{id}

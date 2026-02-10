@@ -38,6 +38,7 @@ Route::prefix('users')->group(function () {
     Route::get('/vendors', [UserController::class, 'getVendors']);
     Route::get('/delivery-men', [UserController::class, 'getDeliveryMan']);
     Route::get('/details/{id}', [UserController::class, 'getUserDetails']);
+    Route::get('/getBalance/{id}', [UserController::class, 'getUserBalance']);
 
     Route::put('/update/{id}', [UserController::class, 'updateUser']);
 
