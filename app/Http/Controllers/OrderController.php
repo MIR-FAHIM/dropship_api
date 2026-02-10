@@ -247,9 +247,7 @@ class OrderController extends Controller
             $order = Order::with([
                 'items',
                 'deliveryMan.deliveryMan',
-                'statusHistory.status' => function ($q) {
-                    $q->orderBy('created_at', 'desc');
-                }
+                'statusHistory.status'
             ])->find($id);
 
             if (!$order) {
