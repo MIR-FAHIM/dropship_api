@@ -201,6 +201,11 @@ class CartController extends Controller
             $item->line_total = ($item->unit_price !== null)
                 ? round(((int) $validated['qty']) * (float) $item->unit_price, 2)
                 : null;
+            $item->line_total_reseller_profit = ($item->reseller_price !== null && $item->unit_price !== null)
+                ? round(((int) $validated['qty']) * ((float) $item->reseller_price - (float) $item->unit_price), 2)
+                : null;
+       
+          
             $item->save();
 
             $this->recalculateCart($item->cart_id);
