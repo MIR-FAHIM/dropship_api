@@ -53,6 +53,7 @@ Route::prefix('categories')->group(function () {
     Route::get('/list', [CategoryController::class, 'listCategories']);
     Route::get('/details/{id}', [CategoryController::class, 'getCategoryDetails']);
     Route::get('/children/{id}', [CategoryController::class, 'getCategoryChildren']);
+    Route::get('/with-children', [CategoryController::class, 'getCategoryWithAllChildren']);
 
     Route::put('/update/{id}', [CategoryController::class, 'updateCategory']);
 

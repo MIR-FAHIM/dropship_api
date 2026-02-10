@@ -184,4 +184,34 @@ class CategoryController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+
+        public function getCategoryWithAllChildren()
+    {
+        try {
+            $categories = Category::with('banner')
+                ->orderByRaw('COALESCE(order_level, 999999) asc')
+                ->get();
+
+            $byParent = $categories->groupBy(function ($category) {
+                return $category->parent_id ?? 0;
+            });
+
+            $buildTree = function ($parentId) use (&$buildTree, $byParent) {
+                $children = $byParent->get($parentId, collect());
+
+                return $children->map(function ($category) use (&$buildTree) {
+                    $nested = $buildTree($category->id);
+                    $category->setRelation('children', $nested);
+                    return $category;
+                });
+            };
+
+            $tree = $buildTree(0);
+
+            return $this->success('Categories with children fetched successfully', $tree);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 }
