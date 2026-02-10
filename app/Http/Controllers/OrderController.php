@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Order;
+use App\Models\OrderStatus;
+use App\Models\OrderStatusHistory;
 use App\Models\Transaction;
 use App\Models\OrderItem;
 use Illuminate\Http\Request;
@@ -112,6 +114,13 @@ class OrderController extends Controller
                 'total' => $total,
 
                 'note' => $validated['note'] ?? null,
+            ]);
+
+            OrderStatusHistory::create([
+                'order_id' => $order->id,
+                'status_id' => 1,
+                'note' => 'Order created via checkout',
+                'changed_by' => $validated['user_id'],
             ]);
 
             foreach ($cartItems as $ci) {
@@ -259,34 +268,21 @@ public function allOrders(Request $request)
                 return $this->failed('Order not found', null, 404);
             }
 
-            if ($order->status === 'completed') {
-                return $this->failed('Order is already completed and cannot be updated', null);
-            }
-
             $validated = $request->validate([
-                'status' => ['required', 'string', 'max:50'],
+                'status_id' => ['required', 'integer', 'exists:order_statuses,id'],
+                'note' => ['nullable', 'string'],
             ]);
 
-            $order->status = $validated['status'];
+            $status = OrderStatus::find($validated['status_id']);
+            $order->status = $status ? $status->name : $order->status;
             $order->save();
 
-            if($validated['status'] === 'completed') {
-                // Also update all order items to completed
-                $order->payment_status = 'paid';
-                $order->save();
-                OrderItem::where('order_id', $order->id)
-                    ->update(['status' => 'completed']);
-
-                    Transaction::create([
-                        'amount' => $order->total,
-                        'trx_type' => 'credit',
-                        'status' => 'completed',
-                        'source' => 'cod',
-                        'order_id' => $order->id,
-                        'type' => 'order_payment',
-                        'note' => 'Payment received for order #' . $order->order_number,
-                    ]);
-            }
+            OrderStatusHistory::create([
+                'order_id' => $order->id,
+                'status_id' => $validated['status_id'],
+                'note' => $validated['note'] ?? null,
+                'changed_by' => null,
+            ]);
 
             return $this->success('Order status updated successfully', $order);
         } catch (\Illuminate\Validation\ValidationException $e) {
