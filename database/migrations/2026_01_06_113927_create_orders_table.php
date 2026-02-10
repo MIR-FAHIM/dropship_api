@@ -43,6 +43,7 @@ return new class extends Migration
 
             // Financial snapshot
             $table->decimal('subtotal', 12, 2)->nullable();
+            $table->decimal('reseller_price', 12, 2)->nullable();
             $table->decimal('shipping_fee', 12, 2)->nullable();
             $table->decimal('discount', 12, 2)->nullable();
             $table->decimal('total', 12, 2)->nullable();

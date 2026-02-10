@@ -18,6 +18,7 @@ class CartItem extends Model
         'reseller_price',
         'attribute_id',
         'line_total',
+        'line_total_reseller_profit',
         'status',
     ];
 
@@ -26,6 +27,7 @@ class CartItem extends Model
         'unit_price' => 'float',
         'reseller_price' => 'float',
         'line_total' => 'float',
+        'line_total_reseller_profit' => 'float',
     ];
 
     public function cart()

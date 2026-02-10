@@ -82,6 +82,7 @@ class OrderController extends Controller
             foreach ($cartItems as $ci) {
                 $subtotal += (float) ($ci->line_total ?? 0);
             }
+      
 
             // For now: shipping_fee & discount are kept null (or 0) until you add those modules
             $shippingFee = 0;
@@ -109,6 +110,7 @@ class OrderController extends Controller
                 'lon' => $validated['lon'] ?? null,
 
                 'subtotal' => round($subtotal, 2),
+                'reseller_price' => round($subtotal, 2),
                 'shipping_fee' => $shippingFee,
                 'discount' => $discount,
                 'total' => $total,
@@ -137,6 +139,7 @@ class OrderController extends Controller
 
                     // Snapshot cart-time pricing
                     'unit_price' => $ci->unit_price,
+                    'reseller_price' => $ci->unit_price,
                     'qty' => $ci->qty,
                     'line_total' => $ci->line_total,
 
@@ -287,6 +290,21 @@ class OrderController extends Controller
                 'note' => $validated['note'] ?? null,
                 'changed_by' => null,
             ]);
+
+            $statusId = (int) $validated['status_id'];
+            if ($statusId === 12 || $statusId === 13) {
+                Transaction::create([
+                    'amount' => $order->total,
+                    'trx_type' => $statusId === 12 ? 'credit' : 'debit',
+                    'status' => 'completed',
+                    'source' => 'cod',
+                    'order_id' => $order->id,
+                    'type' => 'order_status',
+                    'note' => $statusId === 12
+                        ? 'Credit transaction for order #' . $order->order_number
+                        : 'Debit transaction for order #' . $order->order_number,
+                ]);
+            }
 
             return $this->success('Order status updated successfully', $order);
         } catch (\Illuminate\Validation\ValidationException $e) {

@@ -33,8 +33,10 @@ return new class extends Migration
             // Quantity and pricing snapshot (cart-time)
             $table->integer('qty')->nullable();
             $table->decimal('unit_price', 12, 2)->nullable();
+            $table->decimal('unit_price', 12, 2)->nullable();
             $table->decimal('reseller_price', 12, 2)->nullable();
             $table->decimal('line_total', 12, 2)->nullable(); // qty * unit_price (cached)
+            $table->decimal('line_total_reseller_profit', 12, 2)->nullable(); // qty * reseller_price (cached)
             $table->integer('attribute_id')->nullable(); // e.g., size/color variant
 
             // Optional control

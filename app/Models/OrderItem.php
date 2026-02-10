@@ -18,6 +18,7 @@ class OrderItem extends Model
         'sku',
 
         'unit_price',
+        'reseller_price',
         'qty',
         'line_total',
 

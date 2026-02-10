@@ -36,6 +36,7 @@ return new class extends Migration
 
             // Pricing snapshot (order-time)
             $table->decimal('unit_price', 12, 2)->nullable();
+            $table->decimal('reseller_price', 12, 2)->nullable();
             $table->integer('qty')->nullable();
             $table->decimal('line_total', 12, 2)->nullable(); // qty * unit_price
 

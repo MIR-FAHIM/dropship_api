@@ -27,6 +27,7 @@ class Order extends Model
         'lon',
 
         'subtotal',
+        'reseller_price',
         'shipping_fee',
         'discount',
         'total',
