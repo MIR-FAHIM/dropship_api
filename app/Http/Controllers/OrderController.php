@@ -295,7 +295,7 @@ class OrderController extends Controller
             ]);
 
             $statusId = (int) $validated['status_id'];
-            if ($order->id === 12) {
+            if ($statusId === 12) {
                 Transaction::create([
                     'amount' => $order->total,
                     'trx_type' => 'credit',
