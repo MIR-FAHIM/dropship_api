@@ -296,6 +296,13 @@ class OrderController extends Controller
 
             $statusId = (int) $validated['status_id'];
             if ($statusId === 12) {
+                $hasCredit = Transaction::where('order_id', $order->id)
+                    ->where('trx_type', 'credit')
+                    ->exists();
+                if ($hasCredit) {
+                    return $this->failed('Credit transaction already exists for this order', null, 409);
+                }
+
                 Transaction::create([
                     'amount' => $order->total,
                     'trx_type' => 'credit',
@@ -308,6 +315,13 @@ class OrderController extends Controller
             }
 
             if ($statusId === 13) {
+                $hasDebit = Transaction::where('order_id', $order->id)
+                    ->where('trx_type', 'debit')
+                    ->exists();
+                if ($hasDebit) {
+                    return $this->failed('Debit transaction already exists for this order', null, 409);
+                }
+
                 Transaction::create([
                     'amount' => $order->reseller_profit ?? 0,
                     'trx_type' => 'debit',
