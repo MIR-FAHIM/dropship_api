@@ -79,8 +79,10 @@ class OrderController extends Controller
 
             // Recalculate subtotal from cart_items (server truth)
             $subtotal = 0;
+            $resellerProfit = 0;
             foreach ($cartItems as $ci) {
                 $subtotal += (float) ($ci->line_total ?? 0);
+                $resellerProfit += (float) ($ci->line_total_reseller_profit ?? 0);
             }
       
 
@@ -110,7 +112,7 @@ class OrderController extends Controller
                 'lon' => $validated['lon'] ?? null,
 
                 'subtotal' => round($subtotal, 2),
-                'reseller_price' => round($subtotal, 2),
+                'reseller_profit' => round($resellerProfit, 2),
                 'shipping_fee' => $shippingFee,
                 'discount' => $discount,
                 'total' => $total,
@@ -139,9 +141,10 @@ class OrderController extends Controller
 
                     // Snapshot cart-time pricing
                     'unit_price' => $ci->unit_price,
-                    'reseller_price' => $ci->unit_price,
+                    'reseller_price' => $ci->reseller_price,
                     'qty' => $ci->qty,
                     'line_total' => $ci->line_total,
+                    'line_total_reseller_profit' => $ci->line_total_reseller_profit,
 
                     'status' => 'pending',
                 ]);

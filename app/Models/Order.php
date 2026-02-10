@@ -31,6 +31,7 @@ class Order extends Model
         'shipping_fee',
         'discount',
         'total',
+        'reseller_profit',
 
         'note',
     ];
@@ -40,6 +41,7 @@ class Order extends Model
         'shipping_fee' => 'float',
         'discount' => 'float',
         'total' => 'float',
+        'reseller_profit' => 'float',
         'lat' => 'float',
         'lon' => 'float',
     ];

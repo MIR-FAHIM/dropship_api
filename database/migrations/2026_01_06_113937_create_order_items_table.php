@@ -39,6 +39,7 @@ return new class extends Migration
             $table->decimal('reseller_price', 12, 2)->nullable();
             $table->integer('qty')->nullable();
             $table->decimal('line_total', 12, 2)->nullable(); // qty * unit_price
+            $table->decimal('line_total_reseller_profit', 12, 2)->nullable(); // qty * reseller_price
 
             // Item-level status (supports partial shipping/refund)
             $table->string('status')->nullable();

@@ -21,6 +21,7 @@ class OrderItem extends Model
         'reseller_price',
         'qty',
         'line_total',
+        'line_total_reseller_profit',
 
         'status',
     ];

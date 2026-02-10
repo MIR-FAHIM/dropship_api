@@ -47,6 +47,7 @@ return new class extends Migration
             $table->decimal('shipping_fee', 12, 2)->nullable();
             $table->decimal('discount', 12, 2)->nullable();
             $table->decimal('total', 12, 2)->nullable();
+            $table->decimal('reseller_profit', 12, 2)->nullable();
 
             // Meta
             $table->text('note')->nullable();
