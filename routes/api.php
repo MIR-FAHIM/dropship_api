@@ -31,7 +31,7 @@ Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
 
 Route::prefix('users')->group(function () {
-    Route::post('/create', [UserController::class, 'createUser'])->withoutMiddleware('token');;
+    Route::post('/create', [UserController::class, 'createUser'])->withoutMiddleware('token');
 
     Route::get('/list', [UserController::class, 'listUsers']);
     Route::get('/customers', [UserController::class, 'getCustomers']);
@@ -51,7 +51,7 @@ Route::prefix('users')->group(function () {
 Route::prefix('categories')->group(function () {
     Route::post('/create', [CategoryController::class, 'createCategory']);
 
-    Route::get('/list', [CategoryController::class, 'listCategories']);
+    Route::get('/list', [CategoryController::class, 'listCategories'])->withoutMiddleware('token');
     Route::get('/details/{id}', [CategoryController::class, 'getCategoryDetails']);
     Route::get('/children/{id}', [CategoryController::class, 'getCategoryChildren']);
     Route::get('/with-children', [CategoryController::class, 'getCategoryWithAllChildren']);
