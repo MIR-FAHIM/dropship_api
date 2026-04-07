@@ -19,9 +19,7 @@ return new class extends Migration
                 ->constrained('order_statuses');
             $table->text('note')->nullable();
             $table->foreignId('changed_by')
-                ->nullable()
-                ->constrained('users')
-                ->nullOnDelete();
+                ->nullable();
             $table->timestamps();
         });
     }
