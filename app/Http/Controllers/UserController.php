@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Service\ApiTokenService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -25,6 +26,44 @@ class UserController extends Controller
             'message' => $message,
             'errors' => $errors
         ], $code);
+    }
+
+    /**
+     * POST /users/dropshipper-register
+     */
+    public function dropshipperRegister(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'name' => ['required', 'string', 'max:191'],
+                'email' => ['required', 'email', 'unique:users,email'],
+                'password' => ['required', 'string', 'min:6'],
+                'phone' => ['nullable', 'string', 'max:20'],
+                'address' => ['nullable', 'string', 'max:300'],
+            ]);
+
+            $user = User::create([
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'password' => Hash::make($validated['password']),
+                'phone' => $validated['phone'] ?? null,
+                'address' => $validated['address'] ?? null,
+                'user_type' => 'dropshipper',
+            ]);
+
+            $created = ApiTokenService::create($user, ['basic'], 30, 'dropshipper-register-token');
+
+            return $this->success('Dropshipper registered successfully', [
+                'token' => $created['plain'],
+                'token_type' => 'Bearer',
+                'expires_at' => $created['token']->expires_at,
+                'user' => $user,
+            ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
     }
 
     /**
