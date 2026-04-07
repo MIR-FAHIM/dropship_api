@@ -192,6 +192,21 @@ class UserController extends Controller
     }
 
     /**
+     * GET /users/dropshippers?per_page=20
+     */
+    public function getDropshipperList(Request $request)
+    {
+        try {
+            $perPage = (int) ($request->get('per_page', 20));
+            $dropshippers = User::where('user_type', 'dropshipper')->latest()->paginate($perPage);
+
+            return $this->success('Dropshippers fetched successfully', $dropshippers);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * GET /users/details/{id}
      */
     public function getUserDetails($id)
