@@ -9,23 +9,21 @@ class Vendor extends Model
 {
     use HasFactory;
 
-    protected $hidden = [
-        'password',
-    ];
-
     protected $fillable = [
+        'user_id',
         'shop_name',
         'contact_person',
         'emergency_contact',
-        'address',
         'zone',
-        'email',
-        'password',
-        'mobile',
         'whatsapp',
         'owner_name',
         'shop_type',
         'description',
         'is_active',
     ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
 }

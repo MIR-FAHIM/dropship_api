@@ -89,4 +89,9 @@ class User extends Model
     {
         return $this->hasMany(ApiToken::class);
     }
+
+    public function vendor()
+    {
+        return $this->hasOne(Vendor::class);
+    }
 }

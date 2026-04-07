@@ -13,14 +13,12 @@ return new class extends Migration
     {
         Schema::create('vendors', function (Blueprint $table) {
             $table->id();
+            $table->unsignedInteger('user_id')->unique();
+            $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
             $table->string('shop_name');
             $table->string('contact_person')->nullable();
             $table->string('emergency_contact')->nullable();
-            $table->text('address')->nullable();
             $table->string('zone')->nullable();
-            $table->string('email')->unique()->nullable();
-            $table->string('password');
-            $table->string('mobile')->nullable();
             $table->string('whatsapp')->nullable();
             $table->string('owner_name')->nullable();
             $table->string('shop_type')->nullable();
