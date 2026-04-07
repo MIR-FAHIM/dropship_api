@@ -95,6 +95,20 @@ class VendorController extends Controller
     }
 
     /**
+     * GET /vendors/list
+     */
+    public function getVendorList()
+    {
+        try {
+            $vendors = Vendor::with('user')->get();
+
+            return $this->success('Vendor list fetched', $vendors);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * GET /vendors/profile/{id}
      */
     public function getVendorProfile($id)
