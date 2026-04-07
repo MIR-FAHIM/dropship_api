@@ -23,6 +23,7 @@ use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\DeliveryController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\FacebookPostController;
+use App\Http\Controllers\VendorController;
 
 // Authentication endpoints
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
@@ -248,4 +249,13 @@ Route::prefix('facebook')->group(function () {
     Route::get('/posts', [FacebookPostController::class, 'getContents']);
     Route::post('/posts/republish/{id}', [FacebookPostController::class, 'rePublish']);
     Route::delete('/posts/delete/{id}', [FacebookPostController::class, 'deleteContent']);
+});
+
+Route::prefix('vendors')->group(function () {
+    Route::post('/register', [VendorController::class, 'vendorRegister'])->withoutMiddleware('token');
+    Route::post('/login', [VendorController::class, 'vendorLogin'])->withoutMiddleware('token');
+    Route::get('/profile/{id}', [VendorController::class, 'getVendorProfile']);
+    Route::put('/update/{id}', [VendorController::class, 'updateVendor']);
+    Route::patch('/is-active/{id}', [VendorController::class, 'isActiveVendor']);
+    Route::delete('/remove/{id}', [VendorController::class, 'removeVendor']);
 });
