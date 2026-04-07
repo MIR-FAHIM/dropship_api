@@ -253,7 +253,6 @@ Route::prefix('facebook')->group(function () {
 
 Route::prefix('vendors')->group(function () {
     Route::post('/register', [VendorController::class, 'vendorRegister'])->withoutMiddleware('token');
-    Route::post('/login', [VendorController::class, 'vendorLogin'])->withoutMiddleware('token');
     Route::get('/profile/{id}', [VendorController::class, 'getVendorProfile']);
     Route::put('/update/{id}', [VendorController::class, 'updateVendor']);
     Route::patch('/is-active/{id}', [VendorController::class, 'isActiveVendor']);

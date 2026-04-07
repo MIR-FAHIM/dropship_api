@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Vendor;
+use App\Models\User;
+use App\Service\ApiTokenService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
 class VendorController extends Controller
@@ -33,54 +36,57 @@ class VendorController extends Controller
     {
         try {
             $validated = $request->validate([
-                'shop_name' => ['required', 'string', 'max:255'],
-                'email' => ['required', 'email', 'unique:vendors,email'],
+                // User fields
+                'name' => ['required', 'string', 'max:191'],
+                'email' => ['required', 'email', 'unique:users,email'],
                 'password' => ['required', 'string', 'min:6'],
+                'phone' => ['nullable', 'string', 'max:20'],
+                'address' => ['nullable', 'string', 'max:300'],
+                // Vendor-specific fields
+                'shop_name' => ['required', 'string', 'max:255'],
                 'contact_person' => ['nullable', 'string', 'max:255'],
                 'emergency_contact' => ['nullable', 'string', 'max:255'],
-                'address' => ['nullable', 'string'],
                 'zone' => ['nullable', 'string', 'max:255'],
-                'mobile' => ['nullable', 'string', 'max:50'],
                 'whatsapp' => ['nullable', 'string', 'max:50'],
                 'owner_name' => ['nullable', 'string', 'max:255'],
                 'shop_type' => ['nullable', 'string', 'max:255'],
                 'description' => ['nullable', 'string'],
             ]);
 
-            $validated['password'] = Hash::make($validated['password']);
+            $result = DB::transaction(function () use ($validated) {
+                $user = User::create([
+                    'name' => $validated['name'],
+                    'email' => $validated['email'],
+                    'password' => Hash::make($validated['password']),
+                    'phone' => $validated['phone'] ?? null,
+                    'address' => $validated['address'] ?? null,
+                    'user_type' => 'vendor',
+                ]);
 
-            $vendor = Vendor::create($validated);
+                $vendor = Vendor::create([
+                    'user_id' => $user->id,
+                    'shop_name' => $validated['shop_name'],
+                    'contact_person' => $validated['contact_person'] ?? null,
+                    'emergency_contact' => $validated['emergency_contact'] ?? null,
+                    'zone' => $validated['zone'] ?? null,
+                    'whatsapp' => $validated['whatsapp'] ?? null,
+                    'owner_name' => $validated['owner_name'] ?? null,
+                    'shop_type' => $validated['shop_type'] ?? null,
+                    'description' => $validated['description'] ?? null,
+                ]);
 
-            return $this->success('Vendor registered successfully', $vendor, 201);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return $this->failed('Validation failed', $e->errors(), 422);
-        } catch (\Throwable $e) {
-            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
-        }
-    }
+                $created = ApiTokenService::create($user, ['basic'], 30, 'vendor-register-token');
 
-    /**
-     * POST /vendors/login
-     */
-    public function vendorLogin(Request $request)
-    {
-        try {
-            $validated = $request->validate([
-                'email' => ['required', 'email'],
-                'password' => ['required', 'string'],
-            ]);
+                return [
+                    'token' => $created['plain'],
+                    'token_type' => 'Bearer',
+                    'expires_at' => $created['token']->expires_at,
+                    'user' => $user,
+                    'vendor' => $vendor,
+                ];
+            });
 
-            $vendor = Vendor::where('email', $validated['email'])->first();
-
-            if (!$vendor || !Hash::check($validated['password'], $vendor->password)) {
-                return $this->failed('Invalid credentials', null, 401);
-            }
-
-            if (!$vendor->is_active) {
-                return $this->failed('Vendor account is inactive', null, 403);
-            }
-
-            return $this->success('Login successful', $vendor);
+            return $this->success('Vendor registered successfully', $result, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
@@ -94,7 +100,7 @@ class VendorController extends Controller
     public function getVendorProfile($id)
     {
         try {
-            $vendor = Vendor::find($id);
+            $vendor = Vendor::with('user')->find($id);
 
             if (!$vendor) {
                 return $this->failed('Vendor not found', null, 404);
@@ -167,29 +173,51 @@ class VendorController extends Controller
             }
 
             $validated = $request->validate([
-                'shop_name' => ['nullable', 'string', 'max:255'],
-                'email' => ['nullable', 'email', 'unique:vendors,email,' . $id],
+                // User fields
+                'name' => ['nullable', 'string', 'max:191'],
+                'email' => ['nullable', 'email', 'unique:users,email,' . $vendor->user_id],
                 'password' => ['nullable', 'string', 'min:6'],
+                'phone' => ['nullable', 'string', 'max:20'],
+                'address' => ['nullable', 'string', 'max:300'],
+                // Vendor fields
+                'shop_name' => ['nullable', 'string', 'max:255'],
                 'contact_person' => ['nullable', 'string', 'max:255'],
                 'emergency_contact' => ['nullable', 'string', 'max:255'],
-                'address' => ['nullable', 'string'],
                 'zone' => ['nullable', 'string', 'max:255'],
-                'mobile' => ['nullable', 'string', 'max:50'],
                 'whatsapp' => ['nullable', 'string', 'max:50'],
                 'owner_name' => ['nullable', 'string', 'max:255'],
                 'shop_type' => ['nullable', 'string', 'max:255'],
                 'description' => ['nullable', 'string'],
             ]);
 
-            if (!empty($validated['password'])) {
-                $validated['password'] = Hash::make($validated['password']);
-            } else {
-                unset($validated['password']);
-            }
+            DB::transaction(function () use ($vendor, $validated) {
+                // Update user fields
+                $userFields = [];
+                foreach (['name', 'email', 'phone', 'address'] as $field) {
+                    if (array_key_exists($field, $validated)) {
+                        $userFields[$field] = $validated[$field];
+                    }
+                }
+                if (!empty($validated['password'])) {
+                    $userFields['password'] = Hash::make($validated['password']);
+                }
+                if (!empty($userFields)) {
+                    $vendor->user->update($userFields);
+                }
 
-            $vendor->update($validated);
+                // Update vendor fields
+                $vendorFields = [];
+                foreach (['shop_name', 'contact_person', 'emergency_contact', 'zone', 'whatsapp', 'owner_name', 'shop_type', 'description'] as $field) {
+                    if (array_key_exists($field, $validated)) {
+                        $vendorFields[$field] = $validated[$field];
+                    }
+                }
+                if (!empty($vendorFields)) {
+                    $vendor->update($vendorFields);
+                }
+            });
 
-            return $this->success('Vendor updated successfully', $vendor);
+            return $this->success('Vendor updated successfully', $vendor->load('user'));
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
