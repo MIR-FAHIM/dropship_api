@@ -232,7 +232,7 @@ Route::prefix('deliveries')->group(function () {
     Route::get('/assigned/{deliveryManId}', [DeliveryController::class, 'getAssignedDelivery']);
     Route::get('/completed/{deliveryManId}', [DeliveryController::class, 'getCompletedDelivery']);
 });
-
+   
 Route::prefix('transactions')->group(function () {
     Route::get('/credit', [TransactionController::class, 'creditTransaction']);
     Route::get('/debit', [TransactionController::class, 'debitTransaction']);

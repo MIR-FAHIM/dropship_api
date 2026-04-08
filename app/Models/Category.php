@@ -47,12 +47,16 @@ class Category extends Model
      */
     public function parent()
     {
-        return $this->belongsTo(Upload::class, 'parent_id');
+        return $this->belongsTo(Category::class, 'parent_id');
     }
 
     public function banner()
     {
         return $this->belongsTo(Upload::class, 'banner');
+    }
+    public function icon()
+    {
+        return $this->belongsTo(Upload::class, 'icon');
     }
 
     /**

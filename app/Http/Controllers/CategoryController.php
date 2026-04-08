@@ -67,6 +67,8 @@ class CategoryController extends Controller
 
             $perPage = (int) $request->get('per_page', 20);
 
+            $query->with('icon');
+
             // If you want all (no pagination): /categories/list?all=1
             if ($request->filled('all') && (int) $request->get('all') === 1) {
                 $categories = $query->orderByRaw('COALESCE(order_level, 999999) asc')
