@@ -433,6 +433,7 @@ class ProductController extends Controller
         try {
             $product = Product::with([
                 'images',
+                'vendor',
                 'primaryImage',
                 'brand',
                 'category',
