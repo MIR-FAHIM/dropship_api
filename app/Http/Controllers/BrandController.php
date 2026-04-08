@@ -61,7 +61,7 @@ class BrandController extends Controller
                 $query->where('status', $request->status);
             }
 
-            $query->latest();
+            $query->with('logo')->latest();
 
             // /brands/list?all=1 (no pagination)
             if ($request->filled('all') && (int) $request->get('all') === 1) {
