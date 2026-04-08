@@ -39,7 +39,7 @@ class ProductController extends Controller
             $validated = $request->validate([
                 'name' => ['nullable', 'string', 'max:255'],
                 'added_by' => ['nullable', 'string', 'max:255'],
-                'user_id' => ['nullable', 'integer', 'exists:users,id'],
+                'vendor_id' => ['nullable', 'integer', 'exists:users,id'],
                 'category_id' => ['nullable', 'integer', 'exists:categories,id'],
                 'brand_id' => ['nullable', 'integer', 'exists:brands,id'],
 
@@ -122,7 +122,7 @@ class ProductController extends Controller
             $productData = [
                 'name' => $validated['name'] ?? null,
                 'added_by' => $validated['added_by'] ?? null,
-                'user_id' => $validated['user_id'] ?? null,
+                'vendor_id' => $validated['vendor_id'] ?? null,
                 'category_id' => $validated['category_id'] ?? null,
                 'brand_id' => $validated['brand_id'] ?? null,
                 'photos' => $photos,

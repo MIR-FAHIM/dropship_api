@@ -13,7 +13,7 @@ return new class extends Migration
 
             $table->string('name', 200)->index();
             $table->string('added_by', 6)->default('admin');
-            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('vendor_id');
             $table->unsignedBigInteger('category_id');
             $table->unsignedBigInteger('brand_id')->nullable();
             $table->string('photos', 2000)->nullable();
