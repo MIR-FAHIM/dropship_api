@@ -260,4 +260,5 @@ Route::prefix('vendors')->group(function () {
     Route::put('/update/{id}', [VendorController::class, 'updateVendor']);
     Route::patch('/is-active/{id}', [VendorController::class, 'isActiveVendor']);
     Route::delete('/remove/{id}', [VendorController::class, 'removeVendor']);
+    Route::get('/products/{vendor_id}', [VendorController::class, 'getVendorProductList']);
 });

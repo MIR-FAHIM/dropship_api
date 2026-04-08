@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Product;
 use App\Models\Vendor;
 use App\Models\User;
 use App\Service\ApiTokenService;
@@ -234,6 +235,28 @@ class VendorController extends Controller
             return $this->success('Vendor updated successfully', $vendor->load('user'));
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /vendors/products/{vendor_id}
+     */
+    public function getVendorProductList($vendorId)
+    {
+        try {
+            $vendor = Vendor::find($vendorId);
+
+            if (!$vendor) {
+                return $this->failed('Vendor not found', null, 404);
+            }
+
+            $products = Product::where('vendor_id', $vendorId)
+                ->orderBy('id', 'desc')
+                ->paginate(20);
+
+            return $this->success('Vendor products fetched', $products);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
