@@ -252,7 +252,20 @@ class VendorController extends Controller
                 return $this->failed('Vendor not found', null, 404);
             }
 
-            $products = Product::where('vendor_id', $vendorId)
+            $products = Product::with([
+                'images',
+                'vendor',
+                'primaryImage',
+                'brand',
+                'category',
+                'subCategory',
+                'averageReview',
+                'shop',
+                'related',
+                'productAttributes.attribute',
+                'productAttributes.value',
+                'productDiscount',
+            ])->where('vendor_id', $vendorId)
                 ->orderBy('id', 'desc')
                 ->paginate(20);
 
