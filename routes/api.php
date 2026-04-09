@@ -24,6 +24,9 @@ use App\Http\Controllers\DeliveryController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\FacebookPostController;
 use App\Http\Controllers\VendorController;
+use App\Http\Controllers\TaskController;
+use App\Http\Controllers\TaskPriorityController;
+use App\Http\Controllers\TaskTypeController;
 
 // Authentication endpoints
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
@@ -262,4 +265,28 @@ Route::prefix('vendors')->group(function () {
     Route::patch('/is-active/{id}', [VendorController::class, 'isActiveVendor']);
     Route::delete('/remove/{id}', [VendorController::class, 'removeVendor']);
     Route::get('/products/{vendor_id}', [VendorController::class, 'getVendorProductList']);
+});
+
+Route::prefix('task-priorities')->group(function () {
+    Route::post('/create', [TaskPriorityController::class, 'create']);
+    Route::get('/list', [TaskPriorityController::class, 'list']);
+    Route::get('/details/{id}', [TaskPriorityController::class, 'details']);
+    Route::put('/update/{id}', [TaskPriorityController::class, 'update']);
+    Route::delete('/delete/{id}', [TaskPriorityController::class, 'delete']);
+});
+
+Route::prefix('task-types')->group(function () {
+    Route::post('/create', [TaskTypeController::class, 'create']);
+    Route::get('/list', [TaskTypeController::class, 'list']);
+    Route::get('/details/{id}', [TaskTypeController::class, 'details']);
+    Route::put('/update/{id}', [TaskTypeController::class, 'update']);
+    Route::delete('/delete/{id}', [TaskTypeController::class, 'delete']);
+});
+
+Route::prefix('tasks')->group(function () {
+    Route::post('/create', [TaskController::class, 'create']);
+    Route::get('/list', [TaskController::class, 'list']);
+    Route::get('/details/{id}', [TaskController::class, 'details']);
+    Route::put('/update/{id}', [TaskController::class, 'update']);
+    Route::delete('/delete/{id}', [TaskController::class, 'delete']);
 });
