@@ -291,5 +291,6 @@ Route::prefix('tasks')->group(function () {
     Route::get('/status-list', [TaskTypeController::class, 'statusList']);
     Route::get('/details/{id}', [TaskController::class, 'details']);
     Route::put('/update/{id}', [TaskController::class, 'update']);
+    Route::patch('/update-status/{id}', [TaskController::class, 'updateStatus']);
     Route::delete('/delete/{id}', [TaskController::class, 'delete']);
 });

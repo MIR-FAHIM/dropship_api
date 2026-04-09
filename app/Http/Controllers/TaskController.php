@@ -170,4 +170,29 @@ class TaskController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+    public function updateStatus(Request $request, $id)
+    {
+        try {
+            $task = Task::find($id);
+
+            if (!$task) {
+                return $this->failed('Task not found', null, 404);
+            }
+
+            $validated = $request->validate([
+                'status_id' => ['required', 'integer', 'exists:task_statuses,id'],
+            ]);
+
+            $task->status_id = $validated['status_id'];
+            $task->save();
+            $task->load(['priority', 'taskType', 'status', 'creator']);
+
+            return $this->success('Task status updated successfully', $task);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 }
