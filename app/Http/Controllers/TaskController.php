@@ -62,7 +62,7 @@ class TaskController extends Controller
     public function list(Request $request)
     {
         try {
-            $query = Task::with(['priority', 'taskType', 'creator']);
+            $query = Task::with(['priority', 'taskType', 'status', 'creator']);
 
             if ($request->filled('is_active')) {
                 $query->where('is_active', (bool) $request->is_active);

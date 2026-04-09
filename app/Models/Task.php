@@ -48,6 +48,10 @@ class Task extends Model
     {
         return $this->belongsTo(TaskType::class, 'task_type_id');
     }
+    public function status()
+    {
+        return $this->belongsTo(TaskStatus::class, 'status_id');
+    }
 
     public function creator()
     {
