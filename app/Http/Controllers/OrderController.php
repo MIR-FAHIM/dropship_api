@@ -296,7 +296,7 @@ class OrderController extends Controller
             ]);
 
             $statusId = (int) $validated['status_id'];
-            if ($statusId === 12) {
+            if ($statusId === 9) {
                 $hasCredit = Transaction::where('order_id', $order->id)
                     ->where('trx_type', 'credit')
                     ->exists();
