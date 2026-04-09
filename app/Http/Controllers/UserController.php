@@ -167,7 +167,7 @@ class UserController extends Controller
             }
 
             $perPage = (int) ($request->get('per_page', 20));
-            $users = $query->latest()->paginate($perPage);
+            $users = $query->where('user_type', 'admin')->latest()->paginate($perPage);
 
             return $this->success('Admins fetched successfully', $users);
         } catch (\Throwable $e) {
