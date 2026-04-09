@@ -27,6 +27,7 @@ use App\Http\Controllers\VendorController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskPriorityController;
 use App\Http\Controllers\TaskTypeController;
+use App\Models\TaskType;
 
 // Authentication endpoints
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
@@ -286,6 +287,7 @@ Route::prefix('task-types')->group(function () {
 Route::prefix('tasks')->group(function () {
     Route::post('/create', [TaskController::class, 'create']);
     Route::get('/list', [TaskController::class, 'list']);
+    Route::get('/status-list', [TaskTypeController::class, 'statusList']);
     Route::get('/details/{id}', [TaskController::class, 'details']);
     Route::put('/update/{id}', [TaskController::class, 'update']);
     Route::delete('/delete/{id}', [TaskController::class, 'delete']);

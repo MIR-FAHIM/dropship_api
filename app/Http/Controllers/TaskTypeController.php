@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\TaskType;
+use App\Models\TaskStatus;
 use Illuminate\Http\Request;
 
 class TaskTypeController extends Controller
@@ -61,6 +62,28 @@ class TaskTypeController extends Controller
             $perPage = (int) $request->get('per_page', 20);
 
             return $this->success('Task types fetched successfully', $query->paginate($perPage));
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+    public function statusList(Request $request)
+    {
+        try {
+            $query = TaskStatus::query();
+
+            if ($request->filled('is_active')) {
+                $query->where('is_active', (bool) $request->is_active);
+            }
+
+            $query->latest();
+
+            if ($request->filled('all') && (int) $request->get('all') === 1) {
+                return $this->success('Task statuses fetched successfully', $query->get());
+            }
+
+            $perPage = (int) $request->get('per_page', 20);
+
+            return $this->success('Task statuses fetched successfully', $query->paginate($perPage));
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
