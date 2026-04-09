@@ -15,8 +15,8 @@ return new class extends Migration
             $table->text('task_details')->nullable();
             $table->boolean('is_active')->default(true);
 
-            $table->foreignId('priority_id')->nullable();
-            $table->foreignId('task_type_id')->nullable();
+            $table->integer('priority_id')->nullable();
+            $table->integer('task_type_id')->nullable();
 
             $table->boolean('is_remind')->default(false);
             $table->boolean('is_waiting')->default(false);
@@ -28,7 +28,7 @@ return new class extends Migration
             $table->unsignedBigInteger('project_phase_id')->nullable();
             $table->unsignedBigInteger('prospect_id')->nullable();
 
-            $table->foreignId('created_by')->nullable();
+            $table->unsignedBigInteger('created_by')->nullable();
             $table->unsignedBigInteger('status_id')->nullable();
             $table->unsignedBigInteger('department_id')->nullable();
 
