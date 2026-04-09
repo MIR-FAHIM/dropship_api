@@ -14,4 +14,10 @@ class OrderStatus extends Model
         'is_active',
         'type',
         ];
+
+    public function orders()
+    {
+        return $this->hasMany(Order::class, 'status', 'id');
+    }
+    
 }

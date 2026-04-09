@@ -99,7 +99,7 @@ class OrderController extends Controller
                 'user_id' => $validated['user_id'],
                 'order_number' => $orderNumber,
 
-                'status' => 'pending',
+                'status' => 1,
                 'payment_status' => 'unpaid',
 
                 'customer_name' => $validated['customer_name'] ?? null,
@@ -147,7 +147,7 @@ class OrderController extends Controller
                     'line_total' => $ci->line_total,
                     'line_total_reseller_profit' => $ci->line_total_reseller_profit,
 
-                    'status' => 'pending',
+                    'status' => 1,
                 ]);
             }
 
@@ -195,7 +195,8 @@ class OrderController extends Controller
         try {
             $perPage = (int) $request->get('per_page', 20);
 
-            $orders = Order::latest()
+            $orders = Order::with(['status', 'user'])
+                ->latest()
                 ->paginate($perPage);
 
             return $this->success('Orders fetched successfully', $orders);
@@ -213,7 +214,7 @@ class OrderController extends Controller
         try {
             $perPage = (int) $request->get('per_page', 20);
 
-            $orders = Order::where('status', 'completed')
+            $orders = Order::where('status', 9)
                 ->with(['items', 'user'])
                 ->latest()
                 ->paginate($perPage);
@@ -234,7 +235,7 @@ class OrderController extends Controller
             $perPage = (int) $request->get('per_page', 20);
 
             $orders = Order::where('user_id', $userId)
-                ->where('status', 'completed')
+                ->where('status', 9)
                 ->with(['items'])
                 ->latest()
                 ->paginate($perPage);
@@ -284,8 +285,7 @@ class OrderController extends Controller
                 'note' => ['nullable', 'string'],
             ]);
 
-            $status = OrderStatus::find($validated['status_id']);
-            $order->status = $status ? $status->name : $order->status;
+            $order->status = $validated['status_id'];
             $order->save();
 
             OrderStatusHistory::create([
@@ -371,6 +371,23 @@ class OrderController extends Controller
             return $this->success('Order item status updated successfully', $item);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /orders/status-summary
+     * Returns all order statuses with their respective order counts.
+     */
+    public function orderStatusSummary()
+    {
+        try {
+            $statuses = OrderStatus::withCount([
+                'orders'
+            ])->get();
+
+            return $this->success('Order status summary fetched successfully', $statuses);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

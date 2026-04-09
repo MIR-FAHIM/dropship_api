@@ -135,6 +135,7 @@ Route::prefix('orders')->group(function () {
     Route::get('/completed/{userId}', [OrderController::class, 'completedOrdersByUser']);
 
     Route::get('/details/{id}', [OrderController::class, 'getOrderDetails']);
+    Route::get('/status-summary', [OrderController::class, 'orderStatusSummary']);
 
     Route::post('update/status/{id}', [OrderController::class, 'updateOrderStatus']);
 
