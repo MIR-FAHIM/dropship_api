@@ -39,6 +39,7 @@ Route::prefix('users')->group(function () {
     Route::post('/dropshipper-register', [UserController::class, 'dropshipperRegister'])->withoutMiddleware('token');
     Route::post('/create', [UserController::class, 'createUser'])->withoutMiddleware('token');
 
+    Route::get('/admin-list', [UserController::class, 'listAdmins']);
     Route::get('/list', [UserController::class, 'listUsers']);
     Route::get('/customers', [UserController::class, 'getCustomers']);
     Route::get('/vendors', [UserController::class, 'getVendors']);

@@ -149,6 +149,31 @@ class UserController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+    public function listAdmins(Request $request)
+    {
+        try {
+            $query = User::query();
+
+            if ($request->filled('role')) {
+                $query->where('role', $request->role);
+            }
+
+            if ($request->filled('is_banned')) {
+                $query->where('is_banned', (int) $request->is_banned);
+            }
+
+            if ($request->filled('status')) {
+                $query->where('status', $request->status);
+            }
+
+            $perPage = (int) ($request->get('per_page', 20));
+            $users = $query->latest()->paginate($perPage);
+
+            return $this->success('Admins fetched successfully', $users);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 
     /**
      * GET /users/customers?per_page=20
