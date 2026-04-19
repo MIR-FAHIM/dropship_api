@@ -47,7 +47,8 @@ class AttributeController extends Controller
     public function getAttributes()
     {
         try {
-            $attributes = Attribute::all();
+            // Eager load 'values' relationship for each attribute
+            $attributes = Attribute::with('values')->get();
 
             return response()->json([
                 'status' => true,
