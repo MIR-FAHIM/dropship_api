@@ -39,7 +39,9 @@ class ReportController extends Controller
     {
         try {
             $productsCount = Product::count();
-            $shopsCount = Shops::count();
+            $totalVendor = User::where('user_type', 'vendor')->count();
+            $totalAdmin = User::where('user_type', 'admin')->count();
+            $totalDropshipper = User::where('user_type', 'dropshipper')->count();
             // Users use `user_type` (default 'customer') in the users table
             $customersCount = User::where('user_type', 'customer')->count();
 
@@ -86,7 +88,9 @@ class ReportController extends Controller
 
             $data = [
                 'products_count' => $productsCount,
-                'shops_count' => $shopsCount,
+                'total_vendor' => $totalVendor,
+                'total_admin' => $totalAdmin,
+                'total_dropshipper' => $totalDropshipper,
                 'customers_count' => $customersCount,
                 'orders_count' => $ordersCount,
                 'active_carts' => $activeCarts,
