@@ -68,7 +68,7 @@ class ProductAttributeController extends Controller
     public function list(Request $request)
     {
         try {
-            $query = ProductAttribute::with(['product', 'attribute', 'value']);
+            $query = ProductAttribute::with([ 'attribute', 'value']);
 
             if ($request->filled('product_id')) {
                 $query->where('product_id', $request->product_id);
