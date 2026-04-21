@@ -41,16 +41,9 @@ class ProductAttributeController extends Controller
                 'is_active' => ['nullable', 'boolean'],
             ]);
 
-            // Prevent duplicate combination (DB has unique constraint too)
-            $exists = ProductAttribute::where('sku', $validated['sku'])
-              
-                ->where('attribute_id', $validated['attribute_id'])
-                ->where('attribute_value_id', $validated['attribute_value_id'])
-                ->first();
+           
+       
 
-            if ($exists) {
-                return $this->failed('Product attribute combination already exists', null, 409);
-            }
 
             $pa = ProductAttribute::create([
                 'product_id' => $validated['product_id'],
