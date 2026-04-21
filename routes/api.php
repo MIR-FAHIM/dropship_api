@@ -207,6 +207,7 @@ Route::prefix('product-attributes')->group(function () {
     Route::post('/create', [ProductAttributeController::class, 'create']);
     Route::get('/list', [ProductAttributeController::class, 'list']);
     Route::get('/details/{id}', [ProductAttributeController::class, 'details']);
+    Route::get('/by-product/{product_id}', [ProductAttributeController::class, 'getProductAttribute']);
     Route::put('/update/{id}', [ProductAttributeController::class, 'update']);
     Route::delete('/delete/{id}', [ProductAttributeController::class, 'delete']);
 });

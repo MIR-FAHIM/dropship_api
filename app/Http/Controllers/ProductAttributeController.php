@@ -60,7 +60,20 @@ class ProductAttributeController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
-
+    public function getProductAttribute($product_id)
+    {
+        try {
+            $attributes = ProductAttribute::with(['attribute', 'value'])
+                ->where('product_id', $product_id)
+                ->get();
+            if ($attributes->isEmpty()) {
+                return $this->failed('No product attributes found for this product', null, 404);
+            }
+            return $this->success('Product attributes fetched successfully', $attributes);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
     /**
      * GET /product-attributes/list
      * Optional query: product_id
@@ -68,7 +81,7 @@ class ProductAttributeController extends Controller
     public function list(Request $request)
     {
         try {
-            $query = ProductAttribute::with([ 'attribute', 'value']);
+            $query = ProductAttribute::with(['product', 'attribute', 'value']);
 
             if ($request->filled('product_id')) {
                 $query->where('product_id', $request->product_id);
