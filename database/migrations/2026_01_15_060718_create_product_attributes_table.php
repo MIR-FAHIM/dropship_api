@@ -16,6 +16,7 @@ return new class extends Migration
 
             // Relations
             $table->unsignedBigInteger('product_id');
+            $table->string('sku')->nullable();
             $table->unsignedBigInteger('attribute_id');
             $table->unsignedBigInteger('attribute_value_id');
 

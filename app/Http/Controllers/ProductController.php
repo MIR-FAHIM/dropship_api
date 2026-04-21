@@ -54,6 +54,7 @@ class ProductController extends Controller
                 'description' => ['nullable', 'string'],
 
                 'unit_price' => ['nullable', 'numeric', 'min:0'],
+                'max_resell_price' => ['nullable', 'numeric', 'min:0'],
                 'purchase_price' => ['nullable', 'numeric', 'min:0'],
 
                 'variant_product' => ['nullable', 'boolean'],
@@ -132,6 +133,7 @@ class ProductController extends Controller
                 'tags' => $validated['tags'] ?? null,
                 'description' => $validated['description'] ?? null,
                 'unit_price' => $validated['unit_price'] ?? null,
+                'max_resell_price' => $validated['max_resell_price'] ?? null,
                 'purchase_price' => $validated['purchase_price'] ?? null,
                 'variant_product' => array_key_exists('variant_product', $validated) ? (bool) $validated['variant_product'] : null,
                 'attributes' => $validated['attributes'] ?? null,

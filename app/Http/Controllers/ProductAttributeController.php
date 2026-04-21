@@ -34,6 +34,7 @@ class ProductAttributeController extends Controller
         try {
             $validated = $request->validate([
                 'product_id' => ['required', 'integer', 'exists:products,id'],
+                'sku' => ['required', 'string', 'max:255'],
                 'attribute_id' => ['required', 'integer', 'exists:attributes,id'],
                 'attribute_value_id' => ['required', 'integer', 'exists:attribute_values,id'],
                 'stock' => ['nullable', 'integer', 'min:0'],
@@ -41,7 +42,8 @@ class ProductAttributeController extends Controller
             ]);
 
             // Prevent duplicate combination (DB has unique constraint too)
-            $exists = ProductAttribute::where('product_id', $validated['product_id'])
+            $exists = ProductAttribute::where('sku', $validated['sku'])
+              
                 ->where('attribute_id', $validated['attribute_id'])
                 ->where('attribute_value_id', $validated['attribute_value_id'])
                 ->first();
