@@ -33,7 +33,7 @@ class ProductAttributeController extends Controller
     {
         try {
             $validated = $request->validate([
-                'product_id' => ['required', 'integer', 'exists:products,id'],
+                'product_id' => ['required', 'integer'],
                 'sku' => ['required', 'string', 'max:255'],
                 'attribute_id' => ['required', 'integer', 'exists:attributes,id'],
                 'attribute_value_id' => ['required', 'integer', 'exists:attribute_values,id'],
