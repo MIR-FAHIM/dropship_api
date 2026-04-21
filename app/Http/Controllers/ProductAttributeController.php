@@ -53,7 +53,7 @@ class ProductAttributeController extends Controller
                 'is_active' => array_key_exists('is_active', $validated) ? (bool) $validated['is_active'] : true,
             ]);
 
-            return $this->success('Product attribute created successfully', $pa, 201);
+            return $this->success('Product attribute created successfully', 201);
         } catch (ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
