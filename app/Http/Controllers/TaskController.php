@@ -107,7 +107,7 @@ class TaskController extends Controller
     public function details($id)
     {
         try {
-            $task = Task::with(['priority', 'taskType', 'creator', 'assignedTo.assignTo', 'taskImages'])->find($id);
+            $task = Task::with(['priority', 'taskType', 'creator', 'assignedTo.assignTo', 'taskImages.taskImage'])->find($id);
 
             if (!$task) {
                 return $this->failed('Task not found', null, 404);

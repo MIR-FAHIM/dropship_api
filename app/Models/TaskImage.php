@@ -28,6 +28,10 @@ class TaskImage extends Model
     {
         return $this->belongsTo(Task::class);
     }
+    public function taskImage()
+    {
+        return $this->belongsTo(Upload::class, 'task_image_id');
+    }
 
     /**
      * Get the user who added the image.
