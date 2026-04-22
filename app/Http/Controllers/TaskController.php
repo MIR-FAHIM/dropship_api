@@ -210,7 +210,7 @@ class TaskController extends Controller
         try {
             $validated = $request->validate([
                 'task_id' => ['required', 'integer', 'exists:tasks,id'],
-                'task_image_id' => ['nullable', 'integer', 'exists:task_images,id'],
+                'task_image_id' => ['nullable', 'integer'],
                 'type' => ['nullable', 'string', 'max:255'],
                 'is_active' => ['nullable', 'boolean'],
                 // 'image' => ['required', 'image', 'max:2048'], // Uncomment if handling file uploads
