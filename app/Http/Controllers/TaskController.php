@@ -3,10 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\Task;
+use App\Models\TaskImage;
+use App\Models\AssignedTask;
 use Illuminate\Http\Request;
 
 class TaskController extends Controller
+
+
+
 {
+
     private function success($message, $data = null, int $code = 200)
     {
         return response()->json([
@@ -189,6 +195,60 @@ class TaskController extends Controller
             $task->load(['priority', 'taskType', 'status', 'creator']);
 
             return $this->success('Task status updated successfully', $task);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Add an image to a task.
+     */
+    public function addTaskImage(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'task_id' => ['required', 'integer', 'exists:tasks,id'],
+                'task_image_id' => ['nullable', 'integer', 'exists:task_images,id'],
+                'type' => ['nullable', 'string', 'max:255'],
+                'is_active' => ['nullable', 'boolean'],
+                // 'image' => ['required', 'image', 'max:2048'], // Uncomment if handling file uploads
+            ]);
+
+            $taskImage = new TaskImage($validated);
+            $taskImage->added_by = $request->user()->id ?? $request->input('added_by');
+            $taskImage->save();
+
+            // If handling file uploads, add logic here
+
+            return $this->success('Task image added successfully', $taskImage, 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Assign a task to a user.
+     */
+    public function assignTask(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'task_id' => ['required', 'integer', 'exists:tasks,id'],
+                'assign_to' => ['required', 'integer', 'exists:users,id'],
+                'note' => ['nullable', 'string'],
+            ]);
+
+            $assignedTask = new AssignedTask($validated);
+            $assignedTask->added_by = $request->user()->id ?? $request->input('added_by');
+            $assignedTask->save();
+
+            $assignedTask->load(['task', 'addedBy', 'assignTo']);
+
+            return $this->success('Task assigned successfully', $assignedTask, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {

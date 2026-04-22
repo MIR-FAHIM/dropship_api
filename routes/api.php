@@ -1,3 +1,5 @@
+Route::post('/tasks/assign', [TaskController::class, 'assignTask']);
+Route::post('/tasks/add-image', [TaskController::class, 'addTaskImage']);
 <?php
 
 use App\Http\Controllers\UserController;
@@ -288,6 +290,8 @@ Route::prefix('task-types')->group(function () {
 
 Route::prefix('tasks')->group(function () {
     Route::post('/create', [TaskController::class, 'create']);
+    Route::post('/add-task-image', [TaskController::class, 'addTaskImage']);
+    Route::post('/assign', [TaskController::class, 'assignTask']);
     Route::get('/list', [TaskController::class, 'list']);
     Route::get('/status-list', [TaskTypeController::class, 'statusList']);
     Route::get('/details/{id}', [TaskController::class, 'details']);
