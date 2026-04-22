@@ -55,7 +55,7 @@ class TaskController extends Controller
             ]);
 
             $task = Task::create($validated);
-            $task->load(['priority', 'taskType', 'creator']);
+            $task->load(['priority', 'taskType', 'creator', 'assignedTo', 'taskImages']);
 
             return $this->success('Task created successfully', $task, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -107,7 +107,7 @@ class TaskController extends Controller
     public function details($id)
     {
         try {
-            $task = Task::with(['priority', 'taskType', 'creator'])->find($id);
+            $task = Task::with(['priority', 'taskType', 'creator', 'assignedTo', 'taskImages'])->find($id);
 
             if (!$task) {
                 return $this->failed('Task not found', null, 404);
@@ -150,7 +150,7 @@ class TaskController extends Controller
 
             $task->fill($validated);
             $task->save();
-            $task->load(['priority', 'taskType', 'creator']);
+            $task->load(['priority', 'taskType', 'creator', 'assignedTo', 'taskImages']);
 
             return $this->success('Task updated successfully', $task);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -192,7 +192,7 @@ class TaskController extends Controller
 
             $task->status_id = $validated['status_id'];
             $task->save();
-            $task->load(['priority', 'taskType', 'status', 'creator']);
+            $task->load(['priority', 'taskType', 'status', 'creator', 'assignedTo', 'taskImages']);
 
             return $this->success('Task status updated successfully', $task);
         } catch (\Illuminate\Validation\ValidationException $e) {
