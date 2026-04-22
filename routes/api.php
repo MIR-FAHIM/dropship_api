@@ -1,5 +1,3 @@
-Route::post('/tasks/assign', [TaskController::class, 'assignTask']);
-Route::post('/tasks/add-image', [TaskController::class, 'addTaskImage']);
 <?php
 
 use App\Http\Controllers\UserController;
