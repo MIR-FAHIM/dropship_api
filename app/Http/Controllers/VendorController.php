@@ -253,7 +253,7 @@ class VendorController extends Controller
             }
 
             $products = Product::with([
-                'images',
+                'images.image',
                 'vendor',
                 'primaryImage',
                 'brand',
