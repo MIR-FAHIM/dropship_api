@@ -441,7 +441,7 @@ class ProductController extends Controller
     {
         try {
             $product = Product::with([
-                'images.image',
+                'images',
                 'vendor',
                 'primaryImage',
                 'brand',
