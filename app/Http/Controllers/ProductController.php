@@ -441,7 +441,7 @@ class ProductController extends Controller
     {
         try {
             $product = Product::with([
-                'images',
+                'images.image',
                 'vendor',
                 'primaryImage',
                 'brand',
@@ -622,7 +622,7 @@ class ProductController extends Controller
             }
 
             $validated = $request->validate([
-                'image' => ['nullable', 'string', 'max:255'],
+                'image' => ['nullable', 'integer'],
                 'alt_text' => ['nullable', 'string', 'max:255'],
                 'sort_order' => ['nullable', 'integer'],
                 'is_primary' => ['nullable', 'boolean'],
