@@ -29,7 +29,7 @@ class ProductImage extends Model
     }
     public function image()
     {
-        return $this->belongsTo(Upload::class, 'image', 'id');
+        return $this->belongsTo(Upload::class, 'image');
     }
 
 
