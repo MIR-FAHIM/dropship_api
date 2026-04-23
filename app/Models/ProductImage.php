@@ -27,4 +27,10 @@ class ProductImage extends Model
     {
         return $this->belongsTo(Product::class, 'product_id');
     }
+    public function image()
+    {
+        return $this->belongsTo(Upload::class, 'image', 'id');
+    }
+
+
 }
