@@ -120,6 +120,13 @@ class ProductController extends Controller
                 }
             }
 
+            // Generate slug from product name if not provided
+            $slug = $validated['slug'] ?? null;
+            if (!$slug && !empty($request->name)) {
+                // Use Str::slug helper
+                $slug = \Illuminate\Support\Str::slug($request->name);
+            }
+
             $productData = [
                 'name' => $validated['name'] ?? null,
                 'added_by' => $validated['added_by'] ?? null,
@@ -167,7 +174,7 @@ class ProductController extends Controller
                 'meta_description' => $validated['meta_description'] ?? null,
                 'meta_img' => $validated['meta_img'] ?? null,
                 'pdf' => $validated['pdf'] ?? null,
-                'slug' => $validated['slug'] ?? null,
+                'slug' => $slug,
                 'refundable' => array_key_exists('refundable', $validated) ? (bool) $validated['refundable'] : null,
                 'earn_point' => $validated['earn_point'] ?? null,
                 'rating' => $validated['rating'] ?? null,
