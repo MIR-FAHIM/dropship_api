@@ -58,6 +58,10 @@ class Category extends Model
     {
         return $this->belongsTo(Upload::class, 'icon');
     }
+    public function products()
+    {
+        return $this->hasMany(Product::class, 'category_id');
+    }
     public function productCount()
     {
         return $this->hasMany(Product::class, 'category_id')->count();
