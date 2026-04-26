@@ -193,7 +193,7 @@ class CategoryController extends Controller
     {
         try {
             $categories = Category::with('banner')
-            ->withCount('products')
+                ->withCount('products')
                 ->orderByRaw('COALESCE(order_level, 999999) asc')
                 ->get();
 
@@ -207,7 +207,16 @@ class CategoryController extends Controller
                 return $children->map(function ($category) use (&$buildTree) {
                     $nested = $buildTree($category->id);
                     $category->setRelation('children', $nested);
-                    return $category;
+                    // Convert to array to ensure products_count is included
+                    return [
+                        'id' => $category->id,
+                        'name' => $category->name,
+                        'parent_id' => $category->parent_id,
+                        'products_count' => $category->products_count,
+                        'banner' => $category->banner,
+                        'children' => $nested,
+                        // Add other fields as needed
+                    ];
                 });
             };
 
