@@ -422,7 +422,7 @@ class OrderController extends Controller
                     }
                 }
 
-                return $this->success('Order status updated successfully', $order);
+                return $this->success('Settle reseller profit successfully', $order);
             }
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
