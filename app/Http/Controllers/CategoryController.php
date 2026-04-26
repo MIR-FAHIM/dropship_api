@@ -192,7 +192,7 @@ class CategoryController extends Controller
         public function getCategoryWithAllChildren()
     {
         try {
-            $categories = Category::with('banner')
+            $categories = Category::with('banner', 'productCount')
                 ->orderByRaw('COALESCE(order_level, 999999) asc')
                 ->get();
 
