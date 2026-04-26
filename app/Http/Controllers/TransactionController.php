@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Transaction;
+use App\Models\ResellerTransaction;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 
@@ -120,4 +121,32 @@ class TransactionController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+   public function resellerTransactions(Request $request)
+{
+    try {
+        $perPage = (int) $request->get('per_page', 20);
+
+        $query = ResellerTransaction::where('status', 'completed');
+        $this->applyDateFilters($query, $request);
+
+        // Calculate sums for debit and credit
+        $debit = (float) $query->where('trx_type', 'debit')->sum('amount');
+        $credit = (float) $query->where('trx_type', 'credit')->sum('amount');
+        $balance = $credit - $debit;
+
+        // Reset query for items (remove trx_type filter)
+        $items = ResellerTransaction::where('status', 'completed');
+        $this->applyDateFilters($items, $request);
+        $items = $items->latest()->paginate($perPage);
+
+        return $this->success('Reseller transactions fetched', [
+            'debit' => $debit,
+            'credit' => $credit,
+            'balance' => $balance,
+            'items' => $items,
+        ]);
+    } catch (\Throwable $e) {
+        return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+    }
+}
 }

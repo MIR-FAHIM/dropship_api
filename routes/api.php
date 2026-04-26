@@ -245,6 +245,7 @@ Route::prefix('transactions')->group(function () {
     Route::get('/credit', [TransactionController::class, 'creditTransaction']);
     Route::get('/debit', [TransactionController::class, 'debitTransaction']);
     Route::get('/report', [TransactionController::class, 'transactionReport']);
+    Route::get('/reseller', [TransactionController::class, 'resellerTransactions']);
 });
 
 // Facebook endpoints
