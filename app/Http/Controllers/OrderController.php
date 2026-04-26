@@ -367,7 +367,7 @@ public function settleResellerProfit(Request $request, $id)
         if ($user->user_type === 'admin') {
             $statusId = $order->status;
 
-            if ($statusId === 9) {
+            if ($statusId === '9') {
                 // Check if debit transaction already exists
                 $hasDebit = Transaction::where('order_id', $order->id)
                     ->where('trx_type', 'debit')
