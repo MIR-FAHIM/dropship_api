@@ -100,7 +100,11 @@ class CategoryController extends Controller
                 return $this->failed('Category not found', null, 404);
             }
 
-            return $this->success('Category fetched successfully', $category);
+            // Add product count for this category and keep all attributes
+            $categoryArray = $category->toArray();
+            $categoryArray['products_count'] = $category->products()->count();
+
+            return $this->success('Category fetched successfully', $categoryArray);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
@@ -193,7 +197,6 @@ class CategoryController extends Controller
     {
         try {
             $categories = Category::with('banner')
-                ->withCount('products')
                 ->orderByRaw('COALESCE(order_level, 999999) asc')
                 ->get();
 
@@ -207,16 +210,7 @@ class CategoryController extends Controller
                 return $children->map(function ($category) use (&$buildTree) {
                     $nested = $buildTree($category->id);
                     $category->setRelation('children', $nested);
-                    // Convert to array to ensure products_count is included
-                    return [
-                        'id' => $category->id,
-                        'name' => $category->name,
-                        'parent_id' => $category->parent_id,
-                        'products_count' => $category->products_count,
-                        'banner' => $category->banner->banner,
-                        'children' => $nested,
-                        // Add other fields as needed
-                    ];
+                    return $category;
                 });
             };
 
