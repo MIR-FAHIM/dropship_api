@@ -9,6 +9,7 @@ use App\Models\OrderStatus;
 use App\Models\OrderStatusHistory;
 use App\Models\Transaction;
 use App\Models\OrderItem;
+use App\Models\ResellerTransaction;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -395,6 +396,15 @@ public function settleResellerProfit(Request $request, $id)
                     'order_id' => $order->id,
                     'type' => 'order_status',
                     'note' => 'Debit transaction (reseller profit) for order #' . $order->order_number,
+                ]);
+                ResellerTransaction::create([
+                    'amount' => $profitAmount,
+                    'trx_type' => 'credit',
+                    'status' => 'completed',
+                    'source' => 'Admin Action',
+                    'order_id' => $order->id,
+                    'type' => 'order_status',
+                    'note' => 'Credit transaction (reseller profit) for order #' . $order->order_number,
                 ]);
 
                 // Update user balance

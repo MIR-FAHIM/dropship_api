@@ -6,7 +6,7 @@ DROP TABLE content_images;
 USE database_name;
 DESCRIBE content_images;
 php artisan make:model TaskImage -m  
-php artisan make:model AssignedTask -m  
+php artisan make:model ResellerTransaction -m  
 php artisan make:migration UserReview
 php artisan route:list
 php artisan route:clear
