@@ -130,8 +130,9 @@ class TransactionController extends Controller
         $this->applyDateFilters($query, $request);
 
         // Calculate sums for debit and credit
-        $debit = (float) $query->where('trx_type', 'debit')->sum('amount');
         $credit = (float) $query->where('trx_type', 'credit')->sum('amount');
+        $debit = (float) $query->where('trx_type', 'debit')->sum('amount');
+       
         $balance = $credit - $debit;
 
         // Reset query for items (remove trx_type filter)
