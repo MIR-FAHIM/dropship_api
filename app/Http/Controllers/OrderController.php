@@ -337,10 +337,7 @@ class OrderController extends Controller
                     'note' => 'Debit transaction (reseller profit) for order #' . $order->order_number,
                 ]);
 
-                if ($profitAmount > 0 && $order->user_id) {
-                    User::where('id', $order->user_id)
-                        ->increment('balance', $profitAmount);
-                }
+                
             }
 
             return $this->success('Order status updated successfully', $order);
