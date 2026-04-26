@@ -193,7 +193,7 @@ class CategoryController extends Controller
     {
         try {
             $categories = Category::with('banner')
-            ->withCount('products')
+            
                 ->orderByRaw('COALESCE(order_level, 999999) asc')
                 ->get();
 
