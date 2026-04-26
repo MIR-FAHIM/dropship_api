@@ -85,7 +85,7 @@ class OrderController extends Controller
                 $subtotal += (float) ($ci->line_total ?? 0);
                 $resellerProfit += (float) ($ci->line_total_reseller_profit ?? 0);
             }
-      
+
 
             // For now: shipping_fee & discount are kept null (or 0) until you add those modules
             $shippingFee = 0;
@@ -297,6 +297,8 @@ class OrderController extends Controller
 
             $statusId = (int) $validated['status_id'];
             if ($statusId === 9) {
+                $order->payment_status = 'paid';
+                $order->save();
                 $hasCredit = Transaction::where('order_id', $order->id)
                     ->where('trx_type', 'credit')
                     ->exists();
