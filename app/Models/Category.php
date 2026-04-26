@@ -62,10 +62,7 @@ class Category extends Model
     {
         return $this->hasMany(Product::class, 'category_id');
     }
-    public function productCount()
-    {
-        return $this->hasMany(Product::class, 'category_id')->count();
-    }
+
 
     /**
      * Child categories (self-referencing).
