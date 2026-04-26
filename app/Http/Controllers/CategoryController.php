@@ -213,7 +213,7 @@ class CategoryController extends Controller
                         'name' => $category->name,
                         'parent_id' => $category->parent_id,
                         'products_count' => $category->products_count,
-                        'banner' => $category->banner,
+                        'banner' => $category->banner->banner,
                         'children' => $nested,
                         // Add other fields as needed
                     ];
