@@ -350,6 +350,86 @@ class OrderController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+    public function settleResellerProfit(Request $request, $id)
+    {
+        try {
+            $order = Order::find($id);
+            if (!$order) {
+                return $this->failed('Order not found', null, 404);
+            }
+
+            $user = User::find($order->user_id);
+            if (!$user) {
+                return $this->failed('User not found', null, 404);
+            }
+            if ($user->user_type === 'admin') {
+
+                $statusId = $order->status;
+
+
+                if ($statusId === 9) {
+                    $order->status = 10;
+                    $order->save();
+
+                    OrderStatusHistory::create([
+                        'order_id' => $order->id,
+                        'status_id' => 10,
+                        'note' => 'Settled reseller profit for order',
+                        'changed_by' => $request->changed_by,
+                    ]);
+
+                    $hasDebit = Transaction::where('order_id', $order->id)
+                        ->where('trx_type', 'debit')
+                        ->exists();
+                    if ($hasDebit) {
+                        return $this->failed('Debit transaction already exists for this order', null, 409);
+                    }
+
+                    Transaction::create([
+                        'amount' => $order->reseller_profit,
+                        'trx_type' => 'debit',
+                        'status' => 'completed',
+                        'source' => 'Admin Action',
+                        'order_id' => $order->id,
+                        'type' => 'order_status',
+                        'note' => 'Debit transaction for order #' . $order->order_number,
+                    ]);
+                }
+
+                if ($statusId === 9) {
+                    $hasDebit = Transaction::where('order_id', $order->id)
+                        ->where('trx_type', 'debit')
+                        ->exists();
+                    if ($hasDebit) {
+                        return $this->failed('Debit transaction already exists for this order', null, 409);
+                    }
+
+                    $profitAmount = (float) ($order->reseller_profit ?? 0);
+
+                    Transaction::create([
+                        'amount' => $profitAmount,
+                        'trx_type' => 'debit',
+                        'status' => 'completed',
+                        'source' => 'Admin Action',
+                        'order_id' => $order->id,
+                        'type' => 'order_status',
+                        'note' => 'Debit transaction (reseller profit) for order #' . $order->order_number,
+                    ]);
+
+                    if ($profitAmount > 0 && $order->user_id) {
+                        User::where('id', $order->user_id)
+                            ->increment('balance', $profitAmount);
+                    }
+                }
+
+                return $this->success('Order status updated successfully', $order);
+            }
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 
     /**
      * PATCH /orders/item/status/{id}

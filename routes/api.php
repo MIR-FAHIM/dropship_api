@@ -143,6 +143,7 @@ Route::prefix('orders')->group(function () {
     Route::get('/status-summary', [OrderController::class, 'orderStatusSummary']);
 
     Route::post('update/status/{id}', [OrderController::class, 'updateOrderStatus']);
+    Route::post('settle/reseller-profit/{id}', [OrderController::class, 'settleResellerProfit']);
 
     // Item status update (for vendor/admin workflows)
     Route::patch('/item/status/{id}', [OrderController::class, 'updateOrderItemStatus']);
