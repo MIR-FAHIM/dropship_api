@@ -6,6 +6,7 @@ use App\Models\Task;
 use App\Models\TaskImage;
 use App\Models\AssignedTask;
 use Illuminate\Http\Request;
+use App\Service\NotificationService;
 
 class TaskController extends Controller
 
@@ -29,6 +30,13 @@ class TaskController extends Controller
             'message' => $message,
             'errors' => $errors
         ], $code);
+    }
+
+    protected $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
     }
 
     public function create(Request $request)
@@ -56,6 +64,9 @@ class TaskController extends Controller
 
             $task = Task::create($validated);
             $task->load(['priority', 'taskType', 'creator', 'assignedTo', 'taskImages']);
+
+            // Create notification after task creation
+           
 
             return $this->success('Task created successfully', $task, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -241,13 +252,24 @@ class TaskController extends Controller
                 'assign_to' => ['required', 'integer', 'exists:users,id'],
                 'note' => ['nullable', 'string'],
             ]);
+            $task = Task::find($validated['task_id']);
 
             $assignedTask = new AssignedTask($validated);
             $assignedTask->added_by = $request->user()->id ?? $request->input('added_by');
             $assignedTask->save();
 
             $assignedTask->load(['task', 'addedBy', 'assignTo']);
-
+ $this->notificationService->createNotification([
+                'title'      => 'New Task Created',
+                'subtitle'   => $task->task_title,
+                'created_by' => $task->created_by,
+                'send_to'    => $validated['assign_to'],
+                'is_seen'    => false,
+                'type'       => 'task',
+                'is_active'  => true,
+                'image'      => null, // Set image path if needed
+                'module'     => 'task',
+            ]);
             return $this->success('Task assigned successfully', $assignedTask, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
