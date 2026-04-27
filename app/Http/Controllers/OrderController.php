@@ -405,13 +405,14 @@ public function settleResellerProfit(Request $request, $id)
                     'order_id' => $order->id,
                     'type' => 'order_status',
                     'note' => 'Credit transaction (reseller profit) for order #' . $order->order_number,
+                    'reseller_id' => $order->user_id,
                 ]);
 
                 // Update user balance
-                if ($profitAmount > 0 && $order->user_id) {
-                    User::where('id', $order->user_id)
-                        ->increment('balance', $profitAmount);
-                }
+                // if ($profitAmount > 0 && $order->user_id) {
+                //     User::where('id', $order->user_id)
+                //         ->increment('balance', $profitAmount);
+                // }
 
                 return $this->success('Settle reseller profit successfully', $order);
             } else {

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Models\ResellerTransaction;
 use App\Service\ApiTokenService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -256,8 +257,20 @@ class UserController extends Controller
             if (!$user) {
                 return $this->failed('User not found', null, 404);
             }
+            $query = ResellerTransaction::where('reseller_id', $user->id)
+                ->where('status', 'completed');
 
-            return $this->success('User balance fetched successfully', ['balance' => $user->balance]);
+            $credit = (float) (clone $query)->where('trx_type', 'credit')->sum('amount');
+            $debit = (float) (clone $query)->where('trx_type', 'debit')->sum('amount');
+
+            $balance = $credit - $debit;
+            $resellerBalance = [
+                'credit' => $credit,
+                'debit' => $debit,
+                'balance' => $balance,
+            ];
+
+            return $this->success('User balance fetched successfully', ['balance' => $resellerBalance]);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

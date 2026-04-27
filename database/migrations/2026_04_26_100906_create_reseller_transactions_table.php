@@ -21,6 +21,7 @@ return new class extends Migration
             $table->text('note')->nullable();
             $table->string('status')->default('pending');
             $table->unsignedBigInteger('order_id')->nullable();
+            $table->unsignedBigInteger('reseller_id')->nullable();
             $table->string('type')->nullable();
             $table->timestamps();
         });
