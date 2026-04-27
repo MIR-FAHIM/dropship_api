@@ -126,7 +126,7 @@ class TransactionController extends Controller
         try {
             $perPage = (int) $request->get('per_page', 20);
 
-            $query = ResellerTransaction::where('status', 'completed');
+            $query = ResellerTransaction::where('status', 'completed')->where('reseller_id', $request->reseller_id);
             $this->applyDateFilters($query, $request);
 
             // Calculate sums for debit and credit
@@ -136,7 +136,7 @@ class TransactionController extends Controller
             $balance = $credit - $debit;
 
             // Reset query for items (remove trx_type filter)
-            $items = ResellerTransaction::where('status', 'completed');
+            $items = ResellerTransaction::where('status', 'completed')->where('reseller_id', $request->reseller_id);
             $this->applyDateFilters($items, $request);
             $items = $items->latest()->paginate($perPage);
 
