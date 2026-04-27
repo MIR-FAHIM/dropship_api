@@ -14,6 +14,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Service\NotificationService;
 
 class OrderController extends Controller
 {
@@ -34,7 +35,12 @@ class OrderController extends Controller
             'errors' => $errors
         ], $code);
     }
+    protected $notificationService;
 
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
     /**
      * POST /orders/checkout
      * Body: user_id, customer_name, customer_phone, shipping_address, zone, district, area, lat, lon, note
@@ -161,7 +167,17 @@ class OrderController extends Controller
             DB::commit();
 
             $order->load(['items']);
-
+ $this->notificationService->createNotification([
+                'title'      => 'New Order Created',
+                'subtitle'   => $order->id,
+                'created_by' => $order->user_id,
+                'send_to'    => $order->user_id,
+                'is_seen'    => false,
+                'type'       => 'order',
+                'is_active'  => true,
+                'image'      => null, // Set image path if needed
+                'module'     => 'order',
+            ]);
             return $this->success('Checkout successful. Order created.', $order, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();

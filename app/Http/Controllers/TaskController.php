@@ -66,7 +66,7 @@ class TaskController extends Controller
             $task->load(['priority', 'taskType', 'creator', 'assignedTo', 'taskImages']);
 
             // Create notification after task creation
-           
+
 
             return $this->success('Task created successfully', $task, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -259,7 +259,7 @@ class TaskController extends Controller
             $assignedTask->save();
 
             $assignedTask->load(['task', 'addedBy', 'assignTo']);
- $this->notificationService->createNotification([
+            $this->notificationService->createNotification([
                 'title'      => 'New Task Created',
                 'subtitle'   => $task->task_title,
                 'created_by' => $task->created_by,
