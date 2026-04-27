@@ -294,7 +294,7 @@ Route::prefix('tasks')->group(function () {
     Route::post('/assign', [TaskController::class, 'assignTask']);
     Route::get('/list', [TaskController::class, 'list']);
     Route::get('/status-list', [TaskTypeController::class, 'statusList']);
-    Route::get('/details/{id}', [TaskController::class, 'details']);
+    Route::get('/details/{id}', [TaskController::class, 'details'])->withoutMiddleware('token');
     Route::put('/update/{id}', [TaskController::class, 'update']);
     Route::patch('/update-status/{id}', [TaskController::class, 'updateStatus']);
     Route::delete('/delete/{id}', [TaskController::class, 'delete']);

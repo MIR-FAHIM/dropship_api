@@ -34,7 +34,7 @@ return new class extends Migration
 
             $table->decimal('completion_percentage', 5, 2)->default(0);
             $table->boolean('show_completion_percentage')->default(false);
-
+           $table->string('task_link')->nullable();
             $table->timestamps();
         });
     }

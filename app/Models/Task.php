@@ -24,6 +24,7 @@ class Task extends Model
         'prospect_id',
         'created_by',
         'status_id',
+        'task_link',
         'department_id',
         'completion_percentage',
         'show_completion_percentage',
