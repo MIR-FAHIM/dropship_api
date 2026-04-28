@@ -339,6 +339,67 @@ class ProductController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+    public function listHomeProducts(Request $request)
+    {
+        try {
+            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'brand', 'productDiscount']);
+
+            if ($request->filled('shop_id')) {
+                $query->where('shop_id', $request->shop_id);
+            }
+
+            if ($request->filled('category_id')) {
+                $query->where('category_id', $request->category_id);
+            }
+
+            if ($request->filled('sub_category_id')) {
+                $query->where('sub_category_id', $request->sub_category_id);
+            }
+
+            if ($request->filled('brand_id')) {
+                $query->where('brand_id', $request->brand_id);
+            }
+
+            if ($request->filled('status')) {
+                $query->where('status', $request->status);
+            }
+
+            if ($request->filled('is_active')) {
+                $query->where('is_active', (int) $request->is_active);
+            }
+
+            if ($request->filled('search')) {
+                $search = trim($request->search);
+                // split into tokens so multi-word searches behave well
+                $tokens = preg_split('/\s+/', $search);
+
+                $query->where(function ($q) use ($tokens) {
+                    foreach ($tokens as $token) {
+                        $t = "%" . $token . "%";
+                        $q->where(function ($qq) use ($t) {
+                            $qq->where('name', 'like', $t)
+                               
+                                ->orWhere('slug', 'like', $t)
+                                ->orWhereHas('category', function ($qc) use ($t) {
+                                    $qc->where('name', 'like', $t);
+                                })
+                               
+                                ->orWhereHas('brand', function ($qc) use ($t) {
+                                    $qc->where('name', 'like', $t);
+                                });
+                        });
+                    }
+                });
+            }
+
+            $perPage = (int) $request->get('per_page', 20);
+            $products = $query->latest()->paginate($perPage);
+
+            return $this->success('Products fetched successfully', $products, 200,);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
     public function listFeaturedProducts(Request $request)
     {
         try {
