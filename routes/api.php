@@ -307,6 +307,6 @@ Route::prefix('notifications')->group(function () {
 });
 Route::prefix('address')->group(function () {
 
-    Route::get('/divisions', [AddressController::class, 'divisionsList']);
-    Route::get('/districts', [AddressController::class, 'getDistrictList']);
+    Route::get('/divisions', [AddressController::class, 'divisionsList'])->withoutMiddleware('token');
+    Route::get('/districts', [AddressController::class, 'getDistrictList'])->withoutMiddleware('token');
 });
