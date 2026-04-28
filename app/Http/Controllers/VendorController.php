@@ -48,6 +48,8 @@ class VendorController extends Controller
                 'contact_person' => ['nullable', 'string', 'max:255'],
                 'emergency_contact' => ['nullable', 'string', 'max:255'],
                 'zone' => ['nullable', 'string', 'max:255'],
+                'state' => ['nullable', 'string', 'max:255'],
+                'city' => ['nullable', 'string', 'max:255'],
                 'whatsapp' => ['nullable', 'string', 'max:50'],
                 'owner_name' => ['nullable', 'string', 'max:255'],
                 'shop_type' => ['nullable', 'string', 'max:255'],
@@ -61,6 +63,8 @@ class VendorController extends Controller
                     'password' => Hash::make($validated['password']),
                     'phone' => $validated['phone'] ?? null,
                     'address' => $validated['address'] ?? null,
+                    'state' => $validated['state'] ?? null,
+                    'city' => $validated['city'] ?? null,
                     'user_type' => 'vendor',
                 ]);
 
@@ -89,9 +93,9 @@ class VendorController extends Controller
 
             return $this->success('Vendor registered successfully', $result, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            $errors = $e->errors();
-            $firstError = collect($errors)->flatten()->first();
-            return $this->failed($firstError ?? 'Validation failed', null, 422);
+          $errors = $e->errors();
+$firstError = collect($errors)->flatten()->first();
+return $this->failed($firstError ?? 'Validation failed', null, 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
