@@ -89,7 +89,9 @@ class VendorController extends Controller
 
             return $this->success('Vendor registered successfully', $result, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            return $this->failed('Validation failed', $e->errors(), 422);
+            $errors = $e->errors();
+            $firstError = collect($errors)->flatten()->first();
+            return $this->failed($firstError ?? 'Validation failed', null, 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
