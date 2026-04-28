@@ -11,6 +11,7 @@ use App\Http\Controllers\DeliveryAddressController;
 use App\Http\Controllers\WishListController;
 use App\Http\Controllers\BannerController;
 use App\Http\Controllers\AttributeController;
+use App\Http\Controllers\AddressController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ProductAttributeController;
@@ -39,7 +40,6 @@ Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
 Route::prefix('users')->group(function () {
     Route::post('/dropshipper-register', [UserController::class, 'dropshipperRegister'])->withoutMiddleware('token');
     Route::post('/create', [UserController::class, 'createUser'])->withoutMiddleware('token');
-
     Route::get('/admin-list', [UserController::class, 'listAdmins']);
     Route::get('/list', [UserController::class, 'listUsers']);
     Route::get('/customers', [UserController::class, 'getCustomers']);
@@ -242,7 +242,7 @@ Route::prefix('deliveries')->group(function () {
     Route::get('/assigned/{deliveryManId}', [DeliveryController::class, 'getAssignedDelivery']);
     Route::get('/completed/{deliveryManId}', [DeliveryController::class, 'getCompletedDelivery']);
 });
-   
+
 Route::prefix('transactions')->group(function () {
     Route::get('/credit', [TransactionController::class, 'creditTransaction']);
     Route::get('/debit', [TransactionController::class, 'debitTransaction']);
@@ -302,7 +302,11 @@ Route::prefix('tasks')->group(function () {
     Route::delete('/delete/{id}', [TaskController::class, 'delete']);
 });
 Route::prefix('notifications')->group(function () {
-  
-    Route::get('/all-list', [NotificationController::class, 'getAllNotification']);
 
+    Route::get('/all-list', [NotificationController::class, 'getAllNotification']);
+});
+Route::prefix('address')->group(function () {
+
+    Route::get('/divisions', [AddressController::class, 'divisionsList']);
+    Route::get('/districts', [AddressController::class, 'getDistrictList']);
 });
