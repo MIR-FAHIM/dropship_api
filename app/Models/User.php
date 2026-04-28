@@ -30,6 +30,7 @@ class User extends Model
         'verification_code',
         'new_email_verificiation_code',
         'password',
+        'remember_token',
         'device_token',
         'avatar',
         'avatar_original',
