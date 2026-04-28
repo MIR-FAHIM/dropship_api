@@ -32,15 +32,15 @@ class AddressController extends Controller
 	}
 
 	/**
-	 * GET /districts?division_id=1
-	 * Returns all districts, optionally filtered by division_id
+	 * GET /districts/{id}
+	 * Returns all districts for a specific division
 	 */
-	public function getDistrictList(Request $request)
+	public function getDistrictList($id)
 	{
 		try {
 			$query = District::query();
-			if ($request->filled('division_id')) {
-				$query->where('division_id', $request->division_id);
+			if ($id) {
+				$query->where('division_id', $id);
 			}
 			$districts = $query->get();
 			return response()->json([
