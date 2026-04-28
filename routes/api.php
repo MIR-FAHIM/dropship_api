@@ -23,6 +23,7 @@ use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\DeliveryController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\FacebookPostController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\VendorController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskPriorityController;
@@ -299,4 +300,9 @@ Route::prefix('tasks')->group(function () {
     Route::put('/update/{id}', [TaskController::class, 'update']);
     Route::patch('/update-status/{id}', [TaskController::class, 'updateStatus']);
     Route::delete('/delete/{id}', [TaskController::class, 'delete']);
+});
+Route::prefix('notifications')->group(function () {
+  
+    Route::get('/all-list', [NotificationController::class, 'getAllNotification']);
+
 });
