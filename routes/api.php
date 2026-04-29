@@ -29,6 +29,7 @@ use App\Http\Controllers\VendorController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskPriorityController;
 use App\Http\Controllers\TaskTypeController;
+use App\Http\Controllers\UserBankAccountController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -310,4 +311,11 @@ Route::prefix('address')->group(function () {
 
     Route::get('/divisions', [AddressController::class, 'divisionsList'])->withoutMiddleware('token');
     Route::get('/districts/{id}', [AddressController::class, 'getDistrictList'])->withoutMiddleware('token');
+});
+Route::prefix('paymentmethods')->group(function () {
+
+    Route::get('/get-payment-methods', [UserBankAccountController::class, 'getPaymentMethod']);
+    Route::get('/get-user-bank-accounts', [UserBankAccountController::class, 'getUserBankAccount']);
+    Route::post('/add-user-bank-account', [UserBankAccountController::class, 'addUserBankAccount']);
+    Route::post('/add-payment-method', [UserBankAccountController::class, 'addPaymentMethod']);
 });

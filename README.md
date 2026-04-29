@@ -5,13 +5,13 @@ SHOW TABLES;
 DROP TABLE content_images;
 USE database_name;
 DESCRIBE content_images;
-php artisan make:model Notification -m  
+php artisan make:model UserBankAccount -m  
 php artisan make:model District -m  
 php artisan make:model ResellerTransaction -m  
 php artisan make:migration UserReview
 php artisan route:list
 php artisan route:clear
-php artisan make:controller AddressController
+php artisan make:controller UserBankAccountController
 php artisan make:controller VendorController --resource
 php artisan make:model DonationProjectImage -m //table and model
 // change a parameter type 
