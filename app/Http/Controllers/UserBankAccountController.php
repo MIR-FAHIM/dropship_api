@@ -49,11 +49,11 @@ class UserBankAccountController extends Controller
 	}
 
 	// Get all user bank accounts (optionally filter by user_id)
-	public function getUserBankAccount(Request $request)
+	public function getUserBankAccount($id)
 	{
 		$query = UserBankAccount::query();
-		if ($request->has('user_id')) {
-			$query->where('user_id', $request->user_id);
+		if ($id) {
+			$query->where('user_id', $id);
 		}
 		$accounts = $query->with(['user', 'paymentMethod'])->get();
 		return response()->json(['status' => 'success', 'data' => $accounts]);
