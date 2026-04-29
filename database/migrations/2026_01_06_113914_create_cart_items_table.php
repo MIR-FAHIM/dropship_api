@@ -26,9 +26,8 @@ return new class extends Migration
 
             // Multivendor requirement (who sells this item)
             $table->foreignId('shop_id')
-                ->nullable()
-                ->constrained('shops')
-                ->nullOnDelete();
+                ->nullable();
+                
 
             // Quantity and pricing snapshot (cart-time)
             $table->integer('qty')->nullable();
