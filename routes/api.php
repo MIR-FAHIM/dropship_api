@@ -313,9 +313,9 @@ Route::prefix('address')->group(function () {
     Route::get('/districts/{id}', [AddressController::class, 'getDistrictList'])->withoutMiddleware('token');
 });
 Route::prefix('paymentmethods')->group(function () {
-
+    
     Route::get('/get-payment-methods', [UserBankAccountController::class, 'getPaymentMethod']);
-    Route::get('/get-user-bank-accounts', [UserBankAccountController::class, 'getUserBankAccount']);
+    Route::get('/get-user-bank-accounts/{id}', [UserBankAccountController::class, 'getUserBankAccount']);
     Route::post('/add-user-bank-account', [UserBankAccountController::class, 'addUserBankAccount']);
     Route::post('/add-payment-method', [UserBankAccountController::class, 'addPaymentMethod']);
 });
