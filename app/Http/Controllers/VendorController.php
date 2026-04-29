@@ -179,9 +179,9 @@ return $this->failed($firstError ?? 'Validation failed', null, 422);
             $vendor->update(['is_active' => $newActive]);
 
             $user = $vendor->user;
-            if ($user) {
+          
                 $user->update(['banned' => $newActive ? 0 : 1]);
-            }
+            
 
             $status = $newActive ? 'activated' : 'deactivated';
 
