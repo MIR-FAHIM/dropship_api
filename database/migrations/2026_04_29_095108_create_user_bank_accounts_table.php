@@ -24,8 +24,7 @@ return new class extends Migration
             $table->unsignedBigInteger('payment_method_id')->nullable();
             $table->timestamps();
 
-            $table->foreign('user_id')->nullable();
-            $table->foreign('payment_method_id')->nullable();
+           
         });
     }
 
