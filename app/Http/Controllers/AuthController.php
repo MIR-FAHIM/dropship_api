@@ -109,6 +109,8 @@ class AuthController extends Controller
             $validated = $request->validate([
                 'email' => ['nullable', 'email', 'required_without:phone'],
                 'phone' => ['nullable', 'string', 'required_without:email'],
+                'expires_in_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
+                'name' => ['nullable', 'string', 'max:255'],
             ]);
 
             $user = null;
@@ -133,7 +135,7 @@ class AuthController extends Controller
                     $local,
                 ]));
 
-                $user = User::whereIn('phone', $variants)->where('role', 'vendor')->first();
+                $user = User::whereIn('phone', $variants)->where('user_type', 'vendor')->first();
             }
 
             if (!$user) {
@@ -145,7 +147,23 @@ class AuthController extends Controller
                 return $this->failed('Vendor account is not active', null, 403);
             }
 
-            return $this->success('Vendor found', $user);
+            $scopes = ['basic'];
+            if ($user->role === 'admin') {
+                $scopes[] = 'admin';
+            }
+
+            $days = $validated['expires_in_days'] ?? 30;
+            $name = $validated['name'] ?? 'login-vendor-token';
+
+            $created = ApiTokenService::create($user, $scopes, $days, $name);
+
+            return $this->success('Login successful', [
+                'token' => $created['plain'],
+                'token_type' => 'Bearer',
+                'expires_at' => $created['token']->expires_at,
+                'token_id' => $created['token']->id,
+                'user' => $user,
+            ], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
