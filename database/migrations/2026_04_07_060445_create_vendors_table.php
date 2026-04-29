@@ -23,7 +23,7 @@ return new class extends Migration
             $table->string('owner_name')->nullable();
             $table->string('shop_type')->nullable();
             $table->text('description')->nullable();
-            $table->boolean('is_active')->default(true);
+            $table->boolean('is_active')->default(false);
             $table->timestamps();
         });
     }

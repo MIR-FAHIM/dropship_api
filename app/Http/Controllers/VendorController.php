@@ -78,6 +78,7 @@ class VendorController extends Controller
                     'owner_name' => $validated['owner_name'] ?? null,
                     'shop_type' => $validated['shop_type'] ?? null,
                     'description' => $validated['description'] ?? null,
+                  
                 ]);
 
                 $created = ApiTokenService::create($user, ['basic'], 30, 'vendor-register-token');
@@ -165,13 +166,24 @@ return $this->failed($firstError ?? 'Validation failed', null, 422);
                 return $this->failed('Vendor not found', null, 404);
             }
 
+            // Validate if is_active is present, otherwise treat as toggle
             $validated = $request->validate([
-                'is_active' => ['required', 'boolean'],
+                'is_active' => ['sometimes', 'boolean'],
             ]);
 
-            $vendor->update(['is_active' => $validated['is_active']]);
+            $current = (bool) $vendor->is_active;
+            $newActive = array_key_exists('is_active', $validated)
+                ? (bool) $validated['is_active']
+                : !$current;
 
-            $status = $validated['is_active'] ? 'activated' : 'deactivated';
+            $vendor->update(['is_active' => $newActive]);
+
+            $user = $vendor->user;
+            if ($user) {
+                $user->update(['banned' => $newActive ? 0 : 1]);
+            }
+
+            $status = $newActive ? 'activated' : 'deactivated';
 
             return $this->success("Vendor {$status} successfully", $vendor);
         } catch (\Illuminate\Validation\ValidationException $e) {
