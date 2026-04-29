@@ -52,9 +52,9 @@ class UserBankAccountController extends Controller
 	public function getUserBankAccount($id)
 	{
 		$query = UserBankAccount::query();
-		if ($id) {
+		
 			$query->where('user_id', $id);
-		}
+		
 		$accounts = $query->with(['user', 'paymentMethod'])->get();
 		return response()->json(['status' => 'success', 'data' => $accounts]);
 	}
