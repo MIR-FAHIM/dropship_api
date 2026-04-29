@@ -114,7 +114,7 @@ class AuthController extends Controller
             $user = null;
 
             if (!empty($validated['email'])) {
-                $user = User::where('email', $validated['email'])->where('role', 'vendor')->first();
+                $user = User::where('email', $validated['email'])->where('user_type', 'vendor')->first();
             } elseif (!empty($validated['phone'])) {
                 $rawPhone = trim($validated['phone']);
                 $digits = preg_replace('/\D+/', '', $rawPhone);
