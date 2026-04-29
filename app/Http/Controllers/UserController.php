@@ -348,7 +348,7 @@ class UserController extends Controller
     /**
      * PATCH /users/ban/{id}
      */
-    public function banUser($id)
+    public function banToggle($id)
     {
         try {
             $user = User::find($id);
@@ -357,10 +357,12 @@ class UserController extends Controller
                 return $this->failed('User not found', null, 404);
             }
 
-            $user->is_banned = true;
+            // Toggle banned status using only 'banned' column
+            $user->banned = !$user->banned;
             $user->save();
 
-            return $this->success('User banned successfully', $user);
+            $status = $user->banned ? 'banned' : 'unbanned';
+            return $this->success("User {$status} successfully", $user);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
