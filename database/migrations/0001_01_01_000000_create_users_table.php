@@ -81,8 +81,8 @@ return new class extends Migration
             // 24) balance double(20,2) NOT NULL default 0.00
             $table->double('balance', 20, 2)->default(0.00);
 
-            // 25) banned tinyint NOT NULL default 0
-            $table->tinyInteger('banned')->default(0);
+            // 25) banned tinyint NOT NULL default 1
+            $table->tinyInteger('banned')->default(1);
 
             // 26) referral_code varchar(255) NULL
             $table->string('referral_code', 255)->nullable();

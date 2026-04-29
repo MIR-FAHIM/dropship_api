@@ -71,6 +71,11 @@ class AuthController extends Controller
                 return $this->failed('Invalid credentials', null, 401);
             }
 
+            // Check if user is banned (not activated)
+            if (isset($user->banned) && $user->banned == 1) {
+                return $this->failed('You need to activate your account', null, 403);
+            }
+
             $scopes = ['basic'];
             if ($user->role === 'admin') {
                 $scopes[] = 'admin';
