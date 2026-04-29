@@ -99,7 +99,59 @@ class AuthController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+   /**
+     * POST /auth/login-as-vendor
+     * Checks if a vendor exists by email or phone (no password required)
+     */
+    public function loginAsVendor(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'email' => ['nullable', 'email', 'required_without:phone'],
+                'phone' => ['nullable', 'string', 'required_without:email'],
+            ]);
 
+            $user = null;
+
+            if (!empty($validated['email'])) {
+                $user = User::where('email', $validated['email'])->where('role', 'vendor')->first();
+            } elseif (!empty($validated['phone'])) {
+                $rawPhone = trim($validated['phone']);
+                $digits = preg_replace('/\D+/', '', $rawPhone);
+
+                $local = preg_replace('/^88/', '', $digits);
+                $local = preg_replace('/^0/', '', $local);
+
+                $variants = array_filter(array_unique([
+                    $rawPhone,
+                    $digits,
+                    '+88' . '0' . $local,
+                    '+88' . $local,
+                    '88' . '0' . $local,
+                    '88' . $local,
+                    '0' . $local,
+                    $local,
+                ]));
+
+                $user = User::whereIn('phone', $variants)->where('role', 'vendor')->first();
+            }
+
+            if (!$user) {
+                return $this->failed('Vendor not found', null, 404);
+            }
+
+            // Optionally, check if vendor is banned
+            if (isset($user->banned) && $user->banned == 1) {
+                return $this->failed('Vendor account is not active', null, 403);
+            }
+
+            return $this->success('Vendor found', $user);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
     /**
      * POST /auth/logout
      */
