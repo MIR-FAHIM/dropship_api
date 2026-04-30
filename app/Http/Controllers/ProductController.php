@@ -149,7 +149,8 @@ class ProductController extends Controller
                 'variations' => $validated['variations'] ?? null,
                 'todays_deal' => array_key_exists('todays_deal', $validated) ? (bool) $validated['todays_deal'] : null,
                 'published' => array_key_exists('published', $validated) ? (bool) $validated['published'] : null,
-                'approved' => array_key_exists('approved', $validated) ? (bool) $validated['approved'] : null,
+                'approved' => 0,
+                // 'approved' => array_key_exists('approved', $validated) ? (bool) $validated['approved'] : null,
                 'stock_visibility_state' => $validated['stock_visibility_state'] ?? null,
                 'cash_on_delivery' => array_key_exists('cash_on_delivery', $validated) ? (bool) $validated['cash_on_delivery'] : null,
                 'featured' => array_key_exists('featured', $validated) ? (bool) $validated['featured'] : null,
@@ -304,7 +305,7 @@ class ProductController extends Controller
             }
 
             if ($request->filled('is_active')) {
-                $query->where('is_active', (int) $request->is_active);
+                $query->where('approved', (int) $request->is_active);
             }
 
             if ($request->filled('search')) {
