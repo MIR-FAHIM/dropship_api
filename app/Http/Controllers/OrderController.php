@@ -334,7 +334,7 @@ class OrderController extends Controller
                 ]);
             }
 
-            if ($statusId === 13) {
+            if ($statusId === 10) {
                 $hasDebit = Transaction::where('order_id', $order->id)
                     ->where('trx_type', 'debit')
                     ->exists();
@@ -353,6 +353,17 @@ class OrderController extends Controller
                     'type' => 'order_status',
                     'note' => 'Debit transaction (reseller profit) for order #' . $order->order_number,
                 ]);
+
+                  ResellerTransaction::create([
+                        'amount' => $profitAmount,
+                        'trx_type' => 'credit',
+                        'status' => 'completed',
+                        'source' => 'Admin Action',
+                        'order_id' => $order->id,
+                        'type' => 'order_status',
+                        'note' => 'Credit transaction (reseller profit) for order #' . $order->order_number,
+                        'reseller_id' => $order->user_id,
+                    ]);
             }
 
             return $this->success('Order status updated successfully', $order);
