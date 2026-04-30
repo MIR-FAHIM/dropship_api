@@ -64,10 +64,10 @@ class WithdrawController extends Controller
 	/**
 	 * Get withdraw requests for the authenticated user.
 	 */
-	public function getUserWithdrawRequest(Request $request)
+	public function getUserWithdrawRequest($id)
 	{
 		try {
-			$userId = Auth::id() ?? $request->user_id;
+			$userId = $id;
 			$withdraws = WithdrawRequest::with(['bank'])->where('user_id', $userId)->orderByDesc('id')->get();
 			return response()->json(['success' => true, 'data' => $withdraws]);
 		} catch (\Exception $e) {

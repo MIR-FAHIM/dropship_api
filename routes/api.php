@@ -43,7 +43,7 @@ Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
 Route::prefix('withdraws')->group(function () {
     Route::post('/add', [WithdrawController::class, 'addWithdrawRequest']);
     Route::get('/all', [WithdrawController::class, 'getAllWithdrawRequest']);
-    Route::get('/user', [WithdrawController::class, 'getUserWithdrawRequest']);
+    Route::get('/user/{id}', [WithdrawController::class, 'getUserWithdrawRequest']);
 });
 
 Route::prefix('users')->group(function () {
