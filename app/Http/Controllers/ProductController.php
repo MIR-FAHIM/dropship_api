@@ -813,8 +813,8 @@ class ProductController extends Controller
 
     /**
      * PATCH /products/approval/{id}
-     * Approve or reject a product (approved = 1 or 2)
-     * Request: { "approved": 1|2 }
+     * Approve or reject a product (approved = 1 or 0)
+     * Request: { "approved": 1|0 } - if not provided, it will toggle the current status
      */
     public function productApproval(Request $request, $id)
     {
@@ -826,11 +826,11 @@ class ProductController extends Controller
         // If approved is provided, validate and set it. Otherwise, toggle.
         if ($request->has('approved')) {
             $validated = $request->validate([
-                'approved' => ['required', 'integer', Rule::in([1, 2])],
+                'approved' => ['required', 'integer', Rule::in([1, 0])],
             ]);
             $product->approved = $validated['approved'];
         } else {
-            $product->approved = ($product->approved == 1) ? 2 : 1;
+            $product->approved = ($product->approved == 1) ? 0 : 1;
         }
         $product->save();
 
