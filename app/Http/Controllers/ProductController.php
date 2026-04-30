@@ -343,7 +343,8 @@ class ProductController extends Controller
     public function listHomeProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'brand', 'productDiscount']);
+            $query = Product::query()->with(['primaryImage', 'images',
+             'category', 'subCategory', 'brand', 'productDiscount'])->where('approved', 1);
 
             if ($request->filled('shop_id')) {
                 $query->where('shop_id', $request->shop_id);
@@ -366,7 +367,7 @@ class ProductController extends Controller
             }
 
             if ($request->filled('is_active')) {
-                $query->where('is_active', (int) $request->is_active);
+                $query->where('approved', (int) $request->is_active);
             }
 
             if ($request->filled('search')) {
