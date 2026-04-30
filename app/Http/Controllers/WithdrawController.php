@@ -31,7 +31,7 @@ class WithdrawController extends Controller
 				'user_id' => Auth::id() ?? $request->user_id,
 				'amount' => $validated['amount'],
 				'status' => 'pending',
-				'payment_method' => $userBank->id,
+				'payment_method' => $userBank->payment_method_id,
 				'bank_id' => $validated['bank_id'] ?? null,
 				'note' => $validated['note'] ?? null,
 				'type' => $validated['type'] ?? null,
