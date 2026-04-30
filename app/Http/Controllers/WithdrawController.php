@@ -30,7 +30,7 @@ class WithdrawController extends Controller
 				return response()->json(['success' => false, 'message' => 'Invalid bank account.'], 400);
 			}
 			$withdraw = WithdrawRequest::create([
-				'user_id' => Auth::id() ?? $request->user_id,
+				'user_id' => $request->user_id,
 				'amount' => $validated['amount'],
 				'status' => 'pending',
 				'payment_method' => $userBank->payment_method_id,
