@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 
 use App\Models\WithdrawRequest;
+use App\Models\UserBankAccount;
 use Illuminate\Support\Facades\Auth;
 
 class WithdrawController extends Controller
@@ -16,17 +17,23 @@ class WithdrawController extends Controller
 	{
 		$validated = $request->validate([
 			'amount' => 'required|numeric|min:1',
-			'payment_method' => 'required|string',
+			'user_id' => 'required|exists:users,id',
+			
 			'bank_id' => 'nullable|exists:user_bank_accounts,id',
 			'note' => 'nullable|string',
 			'type' => 'nullable|string',
 		]);
+$userBank = UserBankAccount::where('id', $validated['bank_id'])->where('user_id',$request->user_id)->first();
+        if (!$userBank) {
+            return response()->json(['success' => false, 'message' => 'Invalid bank account.'], 400);
+        }
+
 
 		$withdraw = WithdrawRequest::create([
 			'user_id' => Auth::id() ?? $request->user_id,
 			'amount' => $validated['amount'],
 			'status' => 'pending',
-			'payment_method' => $validated['payment_method'],
+			'payment_method' =>$userBank->id,
 			'bank_id' => $validated['bank_id'] ?? null,
 			'note' => $validated['note'] ?? null,
 			'type' => $validated['type'] ?? null,
