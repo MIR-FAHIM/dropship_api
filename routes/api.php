@@ -40,7 +40,7 @@ Route::post('/auth/logout', [AuthController::class, 'logout']);
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
 // Withdraw Requests
-Route::prefix('withdraw')->group(function () {
+Route::prefix('withdraws')->group(function () {
     Route::post('/add', [WithdrawController::class, 'addWithdrawRequest']);
     Route::get('/all', [WithdrawController::class, 'getAllWithdrawRequest']);
     Route::get('/user', [WithdrawController::class, 'getUserWithdrawRequest']);
