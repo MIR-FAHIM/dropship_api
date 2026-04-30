@@ -30,6 +30,7 @@ use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskPriorityController;
 use App\Http\Controllers\TaskTypeController;
 use App\Http\Controllers\UserBankAccountController;
+use App\Http\Controllers\WithdrawController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -38,6 +39,12 @@ Route::post('/auth/login-as-vendor', [AuthController::class, 'loginAsVendor']);
 Route::post('/auth/logout', [AuthController::class, 'logout']);
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
+// Withdraw Requests
+Route::prefix('withdraw')->group(function () {
+    Route::post('/add', [WithdrawController::class, 'addWithdrawRequest']);
+    Route::get('/all', [WithdrawController::class, 'getAllWithdrawRequest']);
+    Route::get('/user', [WithdrawController::class, 'getUserWithdrawRequest']);
+});
 
 Route::prefix('users')->group(function () {
     Route::post('/dropshipper-register', [UserController::class, 'dropshipperRegister'])->withoutMiddleware('token');
