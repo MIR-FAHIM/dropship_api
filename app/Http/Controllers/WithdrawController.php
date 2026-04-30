@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 
 use App\Models\WithdrawRequest;
+use App\Models\Transaction;
+use App\Models\ResellerTransaction;
 use App\Models\UserBankAccount;
 use Illuminate\Support\Facades\Auth;
 
@@ -70,6 +72,54 @@ class WithdrawController extends Controller
 			$userId = $id;
 			$withdraws = WithdrawRequest::with(['bank'])->where('user_id', $userId)->orderByDesc('id')->get();
 			return response()->json(['success' => true, 'data' => $withdraws]);
+		} catch (\Exception $e) {
+			return response()->json([
+				'success' => false,
+				'message' => $e->getMessage(),
+			], 500);
+		}
+	}
+
+	/**
+	 * Change the status of a withdraw request.
+	 */
+	public function withdrawStatusChange(Request $request, $id)
+	{
+		try {
+			$validated = $request->validate([
+				'status' => 'required|in:pending,approved,rejected',
+			]);
+			$withdraw = WithdrawRequest::findOrFail($id);
+			$withdraw->status = $validated['status'];
+			$withdraw->save();
+            if ($validated['status'] === 'approved') {
+                // Record Transaction as debit
+                Transaction::create([
+                    'amount' => $withdraw->amount,
+                    'ref_id' => $withdraw->id,
+                    'trx_id' => 'WD-' . $withdraw->id . '-' . time(),
+                    'trx_type' => 'debit',
+                    'note' => 'Withdraw approved',
+                    'status' => 'success',
+                    'source' => 'withdraw',
+                    'order_id' => null,
+                    'type' => 'withdraw',
+                ]);
+                // Record ResellerTransaction as debit
+               ResellerTransaction::create([
+                    'amount' => $withdraw->amount,
+                    'reseller_id' => $withdraw->user_id,
+                    'ref_id' => $withdraw->id,
+                    'trx_id' => 'WD-' . $withdraw->id . '-' . time(),
+                    'trx_type' => 'debit',
+                    'note' => 'Withdraw approved',
+                    'status' => 'success',
+                    'source' => 'withdraw',
+                    'order_id' => null,
+                    'type' => 'withdraw',
+                ]);
+            }
+			return response()->json(['success' => true, 'data' => $withdraw]);
 		} catch (\Exception $e) {
 			return response()->json([
 				'success' => false,

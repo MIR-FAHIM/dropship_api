@@ -44,6 +44,7 @@ Route::prefix('withdraws')->group(function () {
     Route::post('/add', [WithdrawController::class, 'addWithdrawRequest']);
     Route::get('/all', [WithdrawController::class, 'getAllWithdrawRequest']);
     Route::get('/user/{id}', [WithdrawController::class, 'getUserWithdrawRequest']);
+    Route::post('/status-change/{id}', [WithdrawController::class, 'withdrawStatusChange']);
 });
 
 Route::prefix('users')->group(function () {
