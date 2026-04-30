@@ -348,7 +348,7 @@ class OrderController extends Controller
                     'amount' => $profitAmount,
                     'trx_type' => 'debit',
                     'status' => 'completed',
-                    'source' => 'cod',
+                    'source' => 'Reseller settlement',
                     'order_id' => $order->id,
                     'type' => 'order_status',
                     'note' => 'Debit transaction (reseller profit) for order #' . $order->order_number,

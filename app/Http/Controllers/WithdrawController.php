@@ -93,18 +93,7 @@ class WithdrawController extends Controller
 			$withdraw->status = $validated['status'];
 			$withdraw->save();
             if ($validated['status'] === 'approved') {
-                // Record Transaction as debit
-                Transaction::create([
-                    'amount' => $withdraw->amount,
-                    'ref_id' => $withdraw->id,
-                    'trx_id' => 'WD-' . $withdraw->id . '-' . time(),
-                    'trx_type' => 'debit',
-                    'note' => 'Withdraw approved',
-                    'status' => 'success',
-                    'source' => 'withdraw',
-                    'order_id' => null,
-                    'type' => 'withdraw',
-                ]);
+             
                 // Record ResellerTransaction as debit
                ResellerTransaction::create([
                     'amount' => $withdraw->amount,
