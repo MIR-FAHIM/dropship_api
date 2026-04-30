@@ -737,7 +737,8 @@ class ProductController extends Controller
             public function listCategoryProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'brand', 'productDiscount', 'averageReview']);
+            $query = Product::query()->with(['primaryImage', 'images', 'category', 
+            'subCategory', 'brand', 'productDiscount', 'averageReview'])->where('approved', 1);
 
             if ($request->filled('category_id')) {
                 $categoryId = (int) $request->category_id;
