@@ -102,7 +102,7 @@ class WithdrawController extends Controller
                     'trx_id' => 'WD-' . $withdraw->id . '-' . time(),
                     'trx_type' => 'debit',
                     'note' => 'Withdraw approved',
-                    'status' => 'success',
+                    'status' => 'completed',
                     'source' => 'withdraw',
                     'order_id' => null,
                     'type' => 'withdraw',
