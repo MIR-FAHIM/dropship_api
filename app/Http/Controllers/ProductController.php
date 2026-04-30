@@ -1,5 +1,6 @@
 <?php
 
+
 namespace App\Http\Controllers;
 
 use App\Models\Product;
@@ -10,6 +11,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ProductController extends Controller
+
+
 {
     private function success($message, $data = null, int $code = 200)
     {
@@ -318,12 +321,12 @@ class ProductController extends Controller
                         $t = "%" . $token . "%";
                         $q->where(function ($qq) use ($t) {
                             $qq->where('name', 'like', $t)
-                               
+
                                 ->orWhere('slug', 'like', $t)
                                 ->orWhereHas('category', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 })
-                               
+
                                 ->orWhereHas('brand', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 });
@@ -343,8 +346,14 @@ class ProductController extends Controller
     public function listHomeProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images',
-             'category', 'subCategory', 'brand', 'productDiscount'])->where('approved', 1);
+            $query = Product::query()->with([
+                'primaryImage',
+                'images',
+                'category',
+                'subCategory',
+                'brand',
+                'productDiscount'
+            ])->where('approved', 1);
 
             if ($request->filled('shop_id')) {
                 $query->where('shop_id', $request->shop_id);
@@ -380,12 +389,12 @@ class ProductController extends Controller
                         $t = "%" . $token . "%";
                         $q->where(function ($qq) use ($t) {
                             $qq->where('name', 'like', $t)
-                               
+
                                 ->orWhere('slug', 'like', $t)
                                 ->orWhereHas('category', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 })
-                               
+
                                 ->orWhereHas('brand', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 });
@@ -407,7 +416,7 @@ class ProductController extends Controller
         try {
             $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'brand', 'productDiscount']);
 
-          
+
 
             if ($request->filled('featured')) {
                 $query->where('featured', $request->featured);
@@ -427,12 +436,12 @@ class ProductController extends Controller
                         $t = "%" . $token . "%";
                         $q->where(function ($qq) use ($t) {
                             $qq->where('name', 'like', $t)
-                               
+
                                 ->orWhere('slug', 'like', $t)
                                 ->orWhereHas('category', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 })
-                               
+
                                 ->orWhereHas('brand', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 });
@@ -454,7 +463,7 @@ class ProductController extends Controller
         try {
             $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'brand', 'productDiscount']);
 
-          
+
 
             if ($request->filled('todays_deal')) {
                 $query->where('todays_deal', $request->todays_deal);
@@ -474,12 +483,12 @@ class ProductController extends Controller
                         $t = "%" . $token . "%";
                         $q->where(function ($qq) use ($t) {
                             $qq->where('name', 'like', $t)
-                               
+
                                 ->orWhere('slug', 'like', $t)
                                 ->orWhereHas('category', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 })
-                               
+
                                 ->orWhereHas('brand', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 });
@@ -540,7 +549,7 @@ class ProductController extends Controller
                 return $this->failed('Product not found', null, 404);
             }
             // Normalize photos input: accept comma string or single id and convert to array
-            
+
             $validated = $request->validate([
                 'name' => ['sometimes', 'nullable', 'string', 'max:255'],
                 'added_by' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -548,7 +557,7 @@ class ProductController extends Controller
                 'category_id' => ['sometimes', 'nullable', 'integer', 'exists:categories,id'],
                 'brand_id' => ['sometimes', 'nullable', 'integer', 'exists:brands,id'],
 
-               
+
                 'thumbnail_img' => ['sometimes', 'nullable', 'integer', 'exists:uploads,id'],
 
                 'video_provider' => ['sometimes', 'nullable', 'string', 'max:100'],
@@ -617,20 +626,22 @@ class ProductController extends Controller
             }
 
             // Normalize boolean flags explicitly when present
-            foreach ([
-                'variant_product',
-                'todays_deal',
-                'published',
-                'approved',
-                'cash_on_delivery',
-                'featured',
-                'seller_featured',
-                'is_quantity_multiplied',
-                'refundable',
-                'digital',
-                'auction_product',
-                'wholesale_product',
-            ] as $flag) {
+            foreach (
+                [
+                    'variant_product',
+                    'todays_deal',
+                    'published',
+                    'approved',
+                    'cash_on_delivery',
+                    'featured',
+                    'seller_featured',
+                    'is_quantity_multiplied',
+                    'refundable',
+                    'digital',
+                    'auction_product',
+                    'wholesale_product',
+                ] as $flag
+            ) {
                 if (array_key_exists($flag, $validated)) {
                     $validated[$flag] = (bool) $validated[$flag];
                 }
@@ -639,7 +650,7 @@ class ProductController extends Controller
             $product->fill($validated);
             $product->save();
 
-           
+
 
             return $this->success('Product updated successfully', $product);
         } catch (ValidationException $e) {
@@ -734,11 +745,18 @@ class ProductController extends Controller
         }
     }
 
-            public function listCategoryProducts(Request $request)
+    public function listCategoryProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category', 
-            'subCategory', 'brand', 'productDiscount', 'averageReview'])->where('approved', 1);
+            $query = Product::query()->with([
+                'primaryImage',
+                'images',
+                'category',
+                'subCategory',
+                'brand',
+                'productDiscount',
+                'averageReview'
+            ])->where('approved', 1);
 
             if ($request->filled('category_id')) {
                 $categoryId = (int) $request->category_id;
@@ -750,7 +768,7 @@ class ProductController extends Controller
                 });
             }
 
-          
+
 
             if ($request->filled('featured')) {
                 $query->where('featured', $request->featured);
@@ -770,12 +788,12 @@ class ProductController extends Controller
                         $t = "%" . $token . "%";
                         $q->where(function ($qq) use ($t) {
                             $qq->where('name', 'like', $t)
-                               
+
                                 ->orWhere('slug', 'like', $t)
                                 ->orWhereHas('category', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 })
-                               
+
                                 ->orWhereHas('brand', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 });
@@ -791,5 +809,31 @@ class ProductController extends Controller
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * PATCH /products/approval/{id}
+     * Approve or reject a product (approved = 1 or 2)
+     * Request: { "approved": 1|2 }
+     */
+    public function productApproval(Request $request, $id)
+    {
+        $product = Product::find($id);
+        if (!$product) {
+            return $this->failed('Product not found', null, 404);
+        }
+
+        // If approved is provided, validate and set it. Otherwise, toggle.
+        if ($request->has('approved')) {
+            $validated = $request->validate([
+                'approved' => ['required', 'integer', Rule::in([1, 2])],
+            ]);
+            $product->approved = $validated['approved'];
+        } else {
+            $product->approved = ($product->approved == 1) ? 2 : 1;
+        }
+        $product->save();
+
+        return $this->success('Product approval status updated', $product);
     }
 }
