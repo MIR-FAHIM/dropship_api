@@ -224,6 +224,8 @@ class CartController extends Controller
         }
     }
 
+
+
     /**
      * Remove cart item
      * DELETE /carts/items/delete/{itemId}
@@ -249,6 +251,34 @@ class CartController extends Controller
             return $this->success('Cart item removed successfully', $cart);
         } catch (\Throwable $e) {
             DB::rollBack();
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Add or update note on a cart item
+     * PATCH /carts/items/{itemId}/note
+     * Body: note
+     */
+    public function addNoteInCartItem(Request $request, $itemId)
+    {
+        try {
+            $validated = $request->validate([
+                'note' => ['nullable', 'string', 'max:500'],
+            ]);
+
+            $item = CartItem::find($itemId);
+            if (!$item) {
+                return $this->failed('Cart item not found', null, 404);
+            }
+
+            $item->note = $validated['note'] ?? null;
+            $item->save();
+
+            return $this->success('Note updated successfully', $item);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }

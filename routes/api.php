@@ -134,6 +134,7 @@ Route::prefix('carts')->group(function () {
     Route::post('/items/add', [CartController::class, 'addItemToCart']);
     Route::put('/items/update/{itemId}', [CartController::class, 'updateCartItemQty']);
     Route::delete('/items/delete/{itemId}', [CartController::class, 'removeCartItem']);
+    Route::patch('/items/note/{itemId}', [CartController::class, 'addNoteInCartItem']);
 
     Route::delete('/clear/{userId}', [CartController::class, 'clearCart']);
 });
