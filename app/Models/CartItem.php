@@ -20,6 +20,7 @@ class CartItem extends Model
         'line_total',
         'line_total_reseller_profit',
         'status',
+        'note',
     ];
 
     protected $casts = [

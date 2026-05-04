@@ -145,6 +145,7 @@ class CartController extends Controller
                         ? round(((int) $validated['qty']) * ($resellerPrice - $unitPrice), 2)
                         : null,
                     'status' => 'active',
+                    'note' => $request->input('note') ?? null,
                 ]);
             }
 

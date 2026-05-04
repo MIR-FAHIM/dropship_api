@@ -155,6 +155,7 @@ class OrderController extends Controller
                     'line_total_reseller_profit' => $ci->line_total_reseller_profit,
 
                     'status' => 1,
+                    'note' => $ci->note ?? null,
                 ]);
             }
 

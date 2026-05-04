@@ -40,6 +40,7 @@ return new class extends Migration
 
             // Optional control
             $table->string('status')->nullable(); 
+            $table->string('note')->nullable(); 
             // active, saved_for_later, removed
 
             $table->timestamps();
