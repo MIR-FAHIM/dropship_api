@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\Vendor;
 use App\Models\User;
 use App\Service\ApiTokenService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -288,6 +291,137 @@ return $this->failed($firstError ?? 'Validation failed', null, 422);
                 ->paginate(20);
 
             return $this->success('Vendor products fetched', $products);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /vendors/dashboard/report/{vendor_id}
+     */
+    public function getVendorDashboardReport($vendorId)
+    {
+        try {
+            $vendor = Vendor::with('user')->find($vendorId);
+
+            if (!$vendor) {
+                return $this->failed('Vendor not found', null, 404);
+            }
+
+            // --- Products ---
+            $totalProducts = Product::where('vendor_id', $vendorId)->count();
+            $publishedProducts = Product::where('vendor_id', $vendorId)->where('published', 1)->count();
+            $approvedProducts = Product::where('vendor_id', $vendorId)->where('approved', 1)->count();
+            $lowStockProducts = Product::where('vendor_id', $vendorId)
+                ->whereColumn('current_stock', '<=', 'low_stock_quantity')
+                ->count();
+            $outOfStockProducts = Product::where('vendor_id', $vendorId)
+                ->where('current_stock', '<=', 0)
+                ->count();
+
+            // Product IDs for this vendor (used in order queries)
+            $productIds = Product::where('vendor_id', $vendorId)->pluck('id');
+
+            // --- Orders ---
+            // Distinct order IDs that contain at least one vendor product
+            $vendorOrderIds = OrderItem::whereIn('product_id', $productIds)
+                ->distinct()
+                ->pluck('order_id');
+
+            $totalOrders = $vendorOrderIds->count();
+
+            // Orders grouped by status name
+            $ordersByStatus = DB::table('orders')
+                ->join('order_items', 'orders.id', '=', 'order_items.order_id')
+                ->join('order_statuses', 'orders.status', '=', 'order_statuses.id')
+                ->whereIn('order_items.product_id', $productIds)
+                ->select('order_statuses.name as status', DB::raw('COUNT(DISTINCT orders.id) as total'))
+                ->groupBy('order_statuses.name')
+                ->get();
+
+            // --- Sales (based on order_items line_total for vendor products) ---
+            $now = Carbon::now();
+
+            $totalSell = (float) OrderItem::whereIn('product_id', $productIds)->sum('line_total');
+
+            $thisMonthSell = (float) OrderItem::whereIn('product_id', $productIds)
+                ->whereYear('created_at', $now->year)
+                ->whereMonth('created_at', $now->month)
+                ->sum('line_total');
+
+            $lastMonthSell = (float) OrderItem::whereIn('product_id', $productIds)
+                ->whereYear('created_at', $now->copy()->subMonth()->year)
+                ->whereMonth('created_at', $now->copy()->subMonth()->month)
+                ->sum('line_total');
+
+            $todaySell = (float) OrderItem::whereIn('product_id', $productIds)
+                ->whereDate('created_at', $now->toDateString())
+                ->sum('line_total');
+
+            $yesterdaySell = (float) OrderItem::whereIn('product_id', $productIds)
+                ->whereDate('created_at', $now->copy()->subDay()->toDateString())
+                ->sum('line_total');
+
+            $last7DaysSell = (float) OrderItem::whereIn('product_id', $productIds)
+                ->whereDate('created_at', '>=', $now->copy()->subDays(6)->toDateString())
+                ->sum('line_total');
+
+            // Daily breakdown for last 7 days
+            $dailyBreakdown = [];
+            for ($i = 0; $i < 7; $i++) {
+                $date = $now->copy()->subDays($i)->toDateString();
+                $dailyBreakdown[] = [
+                    'date' => $date,
+                    'sell' => (float) OrderItem::whereIn('product_id', $productIds)
+                        ->whereDate('created_at', $date)
+                        ->sum('line_total'),
+                ];
+            }
+
+            // Monthly breakdown for last 6 months
+            $monthlyBreakdown = [];
+            for ($i = 0; $i < 6; $i++) {
+                $month = $now->copy()->subMonths($i);
+                $monthlyBreakdown[] = [
+                    'month' => $month->format('Y-m'),
+                    'sell' => (float) OrderItem::whereIn('product_id', $productIds)
+                        ->whereYear('created_at', $month->year)
+                        ->whereMonth('created_at', $month->month)
+                        ->sum('line_total'),
+                ];
+            }
+
+            // --- Top 5 selling products ---
+            $topProducts = Product::where('vendor_id', $vendorId)
+                ->orderBy('num_of_sale', 'desc')
+                ->take(5)
+                ->get(['id', 'name', 'num_of_sale', 'current_stock', 'unit_price']);
+
+            return $this->success('Vendor dashboard report fetched', [
+                'vendor' => $vendor,
+                'products' => [
+                    'total' => $totalProducts,
+                    'published' => $publishedProducts,
+                    'approved' => $approvedProducts,
+                    'low_stock' => $lowStockProducts,
+                    'out_of_stock' => $outOfStockProducts,
+                ],
+                'orders' => [
+                    'total' => $totalOrders,
+                    'by_status' => $ordersByStatus,
+                ],
+                'sales' => [
+                    'total' => $totalSell,
+                    'this_month' => $thisMonthSell,
+                    'last_month' => $lastMonthSell,
+                    'today' => $todaySell,
+                    'yesterday' => $yesterdaySell,
+                    'last_7_days' => $last7DaysSell,
+                    'daily_breakdown' => $dailyBreakdown,
+                    'monthly_breakdown' => $monthlyBreakdown,
+                ],
+                'top_selling_products' => $topProducts,
+            ]);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

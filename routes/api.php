@@ -130,12 +130,10 @@ Route::prefix('shops')->group(function () {
 
 Route::prefix('carts')->group(function () {
     Route::get('/active/{userId}', [CartController::class, 'getActiveCart']);
-
     Route::post('/items/add', [CartController::class, 'addItemToCart']);
     Route::put('/items/update/{itemId}', [CartController::class, 'updateCartItemQty']);
     Route::delete('/items/delete/{itemId}', [CartController::class, 'removeCartItem']);
     Route::patch('/items/note/{itemId}', [CartController::class, 'addNoteInCartItem']);
-
     Route::delete('/clear/{userId}', [CartController::class, 'clearCart']);
 });
 
@@ -284,6 +282,7 @@ Route::prefix('vendors')->group(function () {
     Route::patch('/is-active/{id}', [VendorController::class, 'isActiveVendor']);
     Route::delete('/remove/{id}', [VendorController::class, 'removeVendor']);
     Route::get('/products/{vendor_id}', [VendorController::class, 'getVendorProductList']);
+    Route::get('/dashboard/report/{vendor_id}', [VendorController::class, 'getVendorDashboardReport']);
 });
 
 Route::prefix('task-priorities')->group(function () {
