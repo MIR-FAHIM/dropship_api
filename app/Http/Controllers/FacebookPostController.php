@@ -240,12 +240,12 @@ class FacebookPostController extends Controller
             $response = null;
 
             if (count($imageUrls) > 1) {
-                // Multi-image: upload each as unpublished+temporary, then attach to a feed post
+                // Multi-image: upload each as unpublished, then attach all to a feed post via JSON
                 $mediaFbids = [];
                 foreach ($imageUrls as $url) {
                     $uploadResp = Http::asForm()->post(
                         "https://graph.facebook.com/v19.0/{$page->page_id}/photos",
-                        ['url' => $url, 'published' => false, 'temporary' => true, 'access_token' => $token]
+                        ['url' => $url, 'published' => false, 'access_token' => $token]
                     );
                     if (!$uploadResp->successful()) {
                         return $this->failed('Failed to upload image', [
@@ -256,18 +256,15 @@ class FacebookPostController extends Controller
                     $mediaFbids[] = $uploadResp->json('id');
                 }
 
-                // Chain attach() calls — Laravel's correct way to send multipart/form-data
-                $httpRequest = Http::attach('message', $caption)
-                    ->attach('access_token', $token);
-
-                foreach ($mediaFbids as $i => $fbid) {
-                    $httpRequest = $httpRequest->attach(
-                        "attached_media[{$i}]",
-                        json_encode(['media_fbid' => (string) $fbid])
-                    );
-                }
-
-                $response = $httpRequest->post("https://graph.facebook.com/v19.0/{$page->page_id}/feed");
+                // Send as JSON — Graph API accepts it and handles attached_media array natively
+                $response = Http::post(
+                    "https://graph.facebook.com/v19.0/{$page->page_id}/feed",
+                    [
+                        'message'        => $caption,
+                        'access_token'   => $token,
+                        'attached_media' => array_map(fn($fbid) => ['media_fbid' => $fbid], $mediaFbids),
+                    ]
+                );
                 $fbPostId = $response->json('id') ?? '';
 
             } elseif (count($imageUrls) === 1) {
