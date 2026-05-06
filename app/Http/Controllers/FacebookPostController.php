@@ -207,7 +207,12 @@ class FacebookPostController extends Controller
                 return $this->failed('Product not found', null, 404);
             }
 
-            $token   = Crypt::decryptString($page->page_access_token);
+            try {
+                $token = Crypt::decryptString($page->page_access_token);
+            } catch (\Illuminate\Contracts\Encryption\DecryptException $e) {
+                // Token was stored as plain text (legacy records)
+                $token = $page->page_access_token;
+            }
             $caption = $validated['caption'] ?? $product->name ?? 'New product';
             $baseUrl = 'https://apidropship.resellerbrain.com/storage/app/public/';
 
