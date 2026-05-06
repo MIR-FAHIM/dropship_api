@@ -205,15 +205,17 @@ class FacebookPostController extends Controller
                 return $this->failed('Product not found', null, 404);
             }
 
-           
-                $token = $page->page_access_token;
-        ;
-         
+
+            $token = $page->page_access_token;
+
+
 
             $caption = $validated['caption'] ?? $product->name ?? 'New product';
-            $imageUrl = $product->primaryImage->file_name ;
+            $imageUrl = $product->primaryImage?->file_name
+                ? 'https://apidropship.braintodo.com/storage/app/public/' . ltrim($product->primaryImage->file_name, '/')
+                : null;
 
- 
+
 
             $graphUrl = $imageUrl
                 ? "https://graph.facebook.com/v19.0/{$page->page_id}/photos"
