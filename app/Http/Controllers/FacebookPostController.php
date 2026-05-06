@@ -245,31 +245,29 @@ class FacebookPostController extends Controller
                 foreach ($imageUrls as $url) {
                     $uploadResp = Http::asForm()->post(
                         "https://graph.facebook.com/v19.0/{$page->page_id}/photos",
-                        ['url' => $url, 'published' => 'false', 'temporary' => 'true', 'access_token' => $token]
+                        ['url' => $url, 'published' => false, 'temporary' => true, 'access_token' => $token]
                     );
                     if (!$uploadResp->successful()) {
                         return $this->failed('Failed to upload image', [
-                            'image_url'          => $url,
-                            'facebook_response'  => $uploadResp->json(),
+                            'image_url'         => $url,
+                            'facebook_response' => $uploadResp->json(),
                         ], 502);
                     }
                     $mediaFbids[] = $uploadResp->json('id');
                 }
 
-                // Build multipart body — Facebook requires multipart/form-data for attached_media
-                $multipart = [
-                    ['name' => 'message',      'contents' => $caption],
-                    ['name' => 'access_token', 'contents' => $token],
-                ];
+                // Chain attach() calls — Laravel's correct way to send multipart/form-data
+                $httpRequest = Http::attach('message', $caption)
+                    ->attach('access_token', $token);
+
                 foreach ($mediaFbids as $i => $fbid) {
-                    $multipart[] = [
-                        'name'     => "attached_media[{$i}]",
-                        'contents' => json_encode(['media_fbid' => (string) $fbid]),
-                    ];
+                    $httpRequest = $httpRequest->attach(
+                        "attached_media[{$i}]",
+                        json_encode(['media_fbid' => (string) $fbid])
+                    );
                 }
 
-                $response = Http::withOptions(['multipart' => $multipart])
-                    ->post("https://graph.facebook.com/v19.0/{$page->page_id}/feed");
+                $response = $httpRequest->post("https://graph.facebook.com/v19.0/{$page->page_id}/feed");
                 $fbPostId = $response->json('id') ?? '';
 
             } elseif (count($imageUrls) === 1) {
