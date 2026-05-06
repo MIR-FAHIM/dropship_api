@@ -8,7 +8,7 @@ DESCRIBE content_images;
 php artisan make:model UserBankAccount -m  
 php artisan make:model District -m  
  
-php artisan make:migration UserReview
+php artisan make:migration FacebookContentSuggestion
 php artisan route:list
 php artisan route:clear
 php artisan make:controller WithdrawController

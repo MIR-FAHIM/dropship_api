@@ -212,7 +212,7 @@ class FacebookPostController extends Controller
 
             $caption = $validated['caption'] ?? $product->name ?? 'New product';
             $imageUrl = $product->primaryImage?->file_name
-                ? 'https://apidropship.braintodo.com/storage/app/public/' . ltrim($product->primaryImage->file_name, '/')
+                ? 'https://apidropship.resellerbrain.com/storage/app/public/' . ltrim($product->primaryImage->file_name, '/')
                 : null;
 
  
