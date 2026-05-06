@@ -177,17 +177,19 @@ class FacebookPostController extends Controller
 
     /**
      * POST /facebook/posts/publish
+     *
+     * Supports publishing a single image, multiple images (carousel),
+     * or a text-only post. Pass `image_urls` array to override product images.
      */
     public function publishContent(Request $request)
     {
         try {
             $validated = $request->validate([
                 'facebook_page_id' => ['required', 'integer', 'exists:facebook_pages,id'],
-                'product_id' => ['required', 'integer', 'exists:products,id'],
-                'fb_post_id' => ['nullable', 'string', 'max:255'],
-                'status' => ['nullable', 'string', 'max:100'],
-                'caption' => ['nullable', 'string', 'max:2000'],
-                'image_url' => ['nullable', 'url'],
+                'product_id'       => ['required', 'integer', 'exists:products,id'],
+                'caption'          => ['nullable', 'string', 'max:2000'],
+                'image_urls'       => ['nullable', 'array', 'max:10'],
+                'image_urls.*'     => ['url'],
             ]);
 
             $page = FacebookPage::find($validated['facebook_page_id']);
@@ -205,52 +207,91 @@ class FacebookPostController extends Controller
                 return $this->failed('Product not found', null, 404);
             }
 
-           
-                $token = $page->page_access_token;
-        ;
-         
-
+            $token   = Crypt::decryptString($page->page_access_token);
             $caption = $validated['caption'] ?? $product->name ?? 'New product';
-            $imageUrl = $product->primaryImage?->file_name
-                ? 'https://apidropship.resellerbrain.com/storage/app/public/' . ltrim($product->primaryImage->file_name, '/')
-                : null;
+            $baseUrl = 'https://apidropship.resellerbrain.com/storage/app/public/';
 
- 
+            // Resolve image URLs: use provided list or fall back to product images
+            if (!empty($validated['image_urls'])) {
+                $imageUrls = $validated['image_urls'];
+            } else {
+                $imageUrls = [];
 
-            $graphUrl = $imageUrl
-                ? "https://graph.facebook.com/v19.0/{$page->page_id}/photos"
-                : "https://graph.facebook.com/v19.0/{$page->page_id}/feed";
+                if ($product->primaryImage?->file_name) {
+                    $imageUrls[] = $baseUrl . ltrim($product->primaryImage->file_name, '/');
+                }
 
-            $payload = $imageUrl
-                ? ['url' => $imageUrl, 'caption' => $caption]
-                : ['message' => $caption];
+                foreach ($product->images()->with('image')->get() as $pi) {
+                    if ($pi->image?->file_name) {
+                        $imageUrls[] = $baseUrl . ltrim($pi->image->file_name, '/');
+                    }
+                }
 
-            $response = Http::asForm()->post($graphUrl, array_merge($payload, [
-                'access_token' => $token,
-            ]));
-            $responseBody = $response->json();
-            $fbPostId = $response->json('post_id')
-                ?? $response->json('id')
-                ?? '';
+                $imageUrls = array_values(array_unique($imageUrls));
+            }
+
+            $fbPostId = '';
+            $response = null;
+
+            if (count($imageUrls) > 1) {
+                // Multi-image: upload each as unpublished, then attach all to a feed post
+                $mediaFbids = [];
+                foreach ($imageUrls as $url) {
+                    $uploadResp = Http::asForm()->post(
+                        "https://graph.facebook.com/v19.0/{$page->page_id}/photos",
+                        ['url' => $url, 'published' => 'false', 'access_token' => $token]
+                    );
+                    if (!$uploadResp->successful()) {
+                        return $this->failed('Failed to upload image', [
+                            'image_url'          => $url,
+                            'facebook_response'  => $uploadResp->json(),
+                        ], 502);
+                    }
+                    $mediaFbids[] = $uploadResp->json('id');
+                }
+
+                $attachedMedia = [];
+                foreach ($mediaFbids as $i => $fbid) {
+                    $attachedMedia["attached_media[{$i}]"] = json_encode(['media_fbid' => $fbid]);
+                }
+
+                $response = Http::asForm()->post(
+                    "https://graph.facebook.com/v19.0/{$page->page_id}/feed",
+                    array_merge(['message' => $caption, 'access_token' => $token], $attachedMedia)
+                );
+                $fbPostId = $response->json('id') ?? '';
+
+            } elseif (count($imageUrls) === 1) {
+                // Single image: post directly to /photos
+                $response = Http::asForm()->post(
+                    "https://graph.facebook.com/v19.0/{$page->page_id}/photos",
+                    ['url' => $imageUrls[0], 'caption' => $caption, 'access_token' => $token]
+                );
+                $fbPostId = $response->json('post_id') ?? $response->json('id') ?? '';
+
+            } else {
+                // Text-only post
+                $response = Http::asForm()->post(
+                    "https://graph.facebook.com/v19.0/{$page->page_id}/feed",
+                    ['message' => $caption, 'access_token' => $token]
+                );
+                $fbPostId = $response->json('id') ?? '';
+            }
 
             $post = FacebookPost::create([
                 'facebook_page_id' => $validated['facebook_page_id'],
-                'product_id' => $validated['product_id'],
-                'fb_post_id' => $fbPostId,
-                'status' => $response->successful() ? 'published' : 'failed',
+                'product_id'       => $validated['product_id'],
+                'fb_post_id'       => $fbPostId,
+                'status'           => $response->successful() ? 'published' : 'failed',
             ]);
 
             if (!$response->successful()) {
                 return $this->failed('Failed to publish content', [
                     'facebook_response' => $response->json(),
-                    'post' => $post,
-                    'payload' => [
-                        'graph_url' => $graphUrl,
-                        'caption' => $caption,
-                        'image_url' => $imageUrl,
-                    ],
+                    'post'              => $post,
                 ], 502);
             }
+
             return $this->success('Content published', $post, 201);
         } catch (ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
