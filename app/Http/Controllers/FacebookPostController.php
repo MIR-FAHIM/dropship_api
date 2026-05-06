@@ -227,8 +227,9 @@ class FacebookPostController extends Controller
                 }
 
                 foreach ($product->images()->with('image')->get() as $pi) {
-                    if ($pi->image?->file_name) {
-                        $imageUrls[] = $baseUrl . ltrim($pi->image->file_name, '/');
+                    $upload = $pi->getRelation('image');
+                    if ($upload?->file_name) {
+                        $imageUrls[] = $baseUrl . ltrim($upload->file_name, '/');
                     }
                 }
 
