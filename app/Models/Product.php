@@ -99,7 +99,7 @@ class Product extends Model
     }
     public function vendor()
     {
-        return $this->belongsTo(User::class, 'vendor_id');
+        return $this->belongsTo(Vendor::class, 'vendor_id');
     }
 
     public function images()
