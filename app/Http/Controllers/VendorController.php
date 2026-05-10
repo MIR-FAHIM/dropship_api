@@ -124,13 +124,13 @@ return $this->failed($firstError ?? 'Validation failed', null, 422);
     public function getVendorId($id)
     {
         try {
-            $vendor = Vendor::with('user')->find($id);
+            $vendor = Vendor::where('user_id', $id)->first();
 
             if (!$vendor) {
                 return $this->failed('Vendor not found', null, 404);
             }
 
-            return $this->success('Vendor fetched successfully', $vendor);
+            return $this->success('Vendor fetched successfully', ['vendor_id' => $vendor->id]);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
