@@ -42,6 +42,7 @@ class User extends Model
         'phone',
         'balance',
         'banned',
+        'role',
         'referral_code',
         'customer_package_id',
         'remaining_uploads',

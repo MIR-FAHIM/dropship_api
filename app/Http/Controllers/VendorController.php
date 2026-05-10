@@ -118,6 +118,23 @@ return $this->failed($firstError ?? 'Validation failed', null, 422);
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+    /**
+     * GET /vendors/vendor/id/{id}
+     */
+    public function getVendorId($id)
+    {
+        try {
+            $vendor = Vendor::with('user')->find($id);
+
+            if (!$vendor) {
+                return $this->failed('Vendor not found', null, 404);
+            }
+
+            return $this->success('Vendor fetched successfully', $vendor);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 
     /**
      * GET /vendors/profile/{id}

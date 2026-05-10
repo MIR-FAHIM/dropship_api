@@ -77,6 +77,7 @@ return new class extends Migration
 
             // 23) phone varchar(20) NULL
             $table->string('phone', 20)->nullable();
+            $table->string('role', 100)->nullable();
 
             // 24) balance double(20,2) NOT NULL default 0.00
             $table->double('balance', 20, 2)->default(0.00);
