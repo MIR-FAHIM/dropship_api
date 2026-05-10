@@ -285,7 +285,7 @@ class ProductController extends Controller
     public function listProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'brand', 'productDiscount']);
+            $query = Product::query()->with(['primaryImage', 'images', 'category',  'subCategory', 'vendor', 'brand', 'productDiscount']);
 
             if ($request->filled('shop_id')) {
                 $query->where('shop_id', $request->shop_id);
@@ -351,6 +351,7 @@ class ProductController extends Controller
                 'images',
                 'category',
                 'subCategory',
+                'vendor',
                 'brand',
                 'productDiscount'
             ])->where('approved', 1);
@@ -414,7 +415,7 @@ class ProductController extends Controller
     public function listFeaturedProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'brand', 'productDiscount']);
+            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'vendor', 'brand', 'productDiscount']);
 
 
 
@@ -461,7 +462,7 @@ class ProductController extends Controller
     public function listTodayDealProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'brand', 'productDiscount']);
+            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'vendor', 'brand', 'productDiscount']);
 
 
 
