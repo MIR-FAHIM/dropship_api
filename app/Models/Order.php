@@ -64,6 +64,11 @@ class Order extends Model
         return $this->hasOne(AssignDeliveryMan::class, 'order_id')
             ->where('status', 'assigned');
     }
+    public function deliveryInformation()
+    {
+        return $this->hasOne(DeliveryAssignedInfo::class, 'order_id');
+    ;
+    }
 
     /**
      * Order has many order items (the truth)

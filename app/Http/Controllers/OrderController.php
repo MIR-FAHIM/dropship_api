@@ -273,6 +273,7 @@ class OrderController extends Controller
             $order = Order::with([
                 'items',
                 'deliveryMan.deliveryMan',
+                'deliveryInformation',
                 'statusHistory.status'
             ])->find($id);
 
