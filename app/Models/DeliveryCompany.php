@@ -13,6 +13,7 @@ class DeliveryCompany extends Model
         'company_name',
         'balance',
         'support_number',
+        'base_url',
         'contact_person_name',
         'email',
         'secondary_number',

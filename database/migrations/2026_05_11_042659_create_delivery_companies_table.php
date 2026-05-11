@@ -14,6 +14,7 @@ return new class extends Migration
         Schema::create('delivery_companies', function (Blueprint $table) {
             $table->id();
             $table->string('company_name');
+            $table->string('base_url')->nullable()->comment('Base URL for API calls');
             $table->decimal('balance', 15, 2)->default(0);
             $table->string('support_number')->nullable();
             $table->string('contact_person_name')->nullable();
