@@ -114,6 +114,20 @@ class CarrybeeService
     }
 
     /**
+     * GET /orders
+     */
+    public function getOrders(): array
+    {
+        $response = Http::withHeaders($this->authHeaders())
+            ->get(self::BASE_URL . '/orders');
+
+        return [
+            'status' => $response->status(),
+            'body'   => $response->json(),
+        ];
+    }
+
+    /**
      * POST /orders
      */
     public function createOrder(array $data): array

@@ -331,6 +331,7 @@ Route::prefix('delivery-companies')->group(function () {
     Route::get('/carrybee/{companyId}/area-suggestion', [DeliveryCompanyController::class, 'carrybeeAreaSuggestion']);
     Route::get('/carrybee/{companyId}/stores', [DeliveryCompanyController::class, 'carrybeeGetStores']);
     Route::post('/carrybee/{companyId}/stores', [DeliveryCompanyController::class, 'carrybeeCreateStore']);
+    Route::get('/carrybee/{companyId}/orders', [DeliveryCompanyController::class, 'carrybeeGetOrders']);
     Route::post('/carrybee/{companyId}/orders', [DeliveryCompanyController::class, 'carrybeeCreateOrder']);
     Route::post('/carrybee/{companyId}/orders/{consignmentId}/cancel', [DeliveryCompanyController::class, 'carrybeeCancelOrder']);
     Route::get('/carrybee/{companyId}/orders/{consignmentId}/details', [DeliveryCompanyController::class, 'carrybeeOrderDetails']);

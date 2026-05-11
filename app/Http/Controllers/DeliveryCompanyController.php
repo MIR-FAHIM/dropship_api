@@ -299,6 +299,31 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
+     * GET /delivery-companies/carrybee/{companyId}/orders
+     */
+    
+    public function carrybeeGetOrders($companyId)
+    {
+        try {
+            $service = $this->carrybeeService($companyId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->getOrders();
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Orders fetched successfully', $result['body']);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * POST /delivery-companies/carrybee/{companyId}/orders
      */
     public function carrybeeCreateOrder(Request $request, $companyId)
