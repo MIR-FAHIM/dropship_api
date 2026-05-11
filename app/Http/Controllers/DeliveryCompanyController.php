@@ -369,7 +369,7 @@ class DeliveryCompanyController extends Controller
 
             $order = $result['body']['data']['data']['order'] ?? null;
 
-            if ($order) {
+            
                 DeliveryAssignedInfo::updateOrCreate(
                     ['order_id' => $orderId],
                     [
@@ -384,7 +384,7 @@ class DeliveryCompanyController extends Controller
                         'transfer_status_id' => $order['transfer_status_id'] ?? 1,
                     ]
                 );
-            }
+            
 
             return $this->success('Order created successfully', $result['body'], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
