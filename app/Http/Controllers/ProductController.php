@@ -567,6 +567,7 @@ class ProductController extends Controller
                 'description' => ['sometimes', 'nullable', 'string'],
 
                 'unit_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+                'max_resell_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
                 'purchase_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
 
                 'variant_product' => ['sometimes', 'nullable', 'boolean'],
