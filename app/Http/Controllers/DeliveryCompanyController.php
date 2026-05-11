@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\DeliveryCompany;
+use App\Service\CarrybeeService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -109,6 +110,187 @@ class DeliveryCompanyController extends Controller
             $company->save();
 
             return $this->success('Delivery company updated successfully', $company);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Carrybee third-party API proxy methods
+    // -------------------------------------------------------------------------
+
+    /**
+     * Resolve a DeliveryCompany and build a CarrybeeService instance.
+     * Returns the service or a failed JSON response.
+     */
+    private function carrybeeService($companyId)
+    {
+        $company = DeliveryCompany::find($companyId);
+
+        if (!$company) {
+            return $this->failed('Delivery company not found', null, 404);
+        }
+
+        if (!$company->api_key || !$company->secret_key || !$company->client_context) {
+            return $this->failed('Carrybee credentials are incomplete for this company', null, 422);
+        }
+
+        return new CarrybeeService($company->api_key, $company->secret_key, $company->client_context);
+    }
+
+    /**
+     * GET /delivery-companies/carrybee/cities
+     * No credentials required.
+     */
+    public function carrybeeCities()
+    {
+        try {
+            $result = CarrybeeService::getCities();
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Cities fetched successfully', $result['body']);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /delivery-companies/carrybee/{companyId}/cities/{cityId}/zones
+     */
+    public function carrybeeZones($companyId, int $cityId)
+    {
+        try {
+            $service = $this->carrybeeService($companyId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service; // error response
+            }
+
+            $result = $service->getZones($cityId);
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Zones fetched successfully', $result['body']);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /delivery-companies/carrybee/{companyId}/cities/{cityId}/zones/{zoneId}/areas
+     */
+    public function carrybeeAreas($companyId, int $cityId, int $zoneId)
+    {
+        try {
+            $service = $this->carrybeeService($companyId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->getAreas($cityId, $zoneId);
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Areas fetched successfully', $result['body']);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /delivery-companies/carrybee/{companyId}/area-suggestion?search=
+     */
+    public function carrybeeAreaSuggestion(Request $request, $companyId)
+    {
+        try {
+            $request->validate([
+                'search' => ['required', 'string', 'max:255'],
+            ]);
+
+            $service = $this->carrybeeService($companyId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->areaSuggestion($request->search);
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Area suggestions fetched successfully', $result['body']);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /delivery-companies/carrybee/{companyId}/stores
+     */
+    public function carrybeeGetStores($companyId)
+    {
+        try {
+            $service = $this->carrybeeService($companyId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->getStores();
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Stores fetched successfully', $result['body']);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /delivery-companies/carrybee/{companyId}/stores
+     */
+    public function carrybeeCreateStore(Request $request, $companyId)
+    {
+        try {
+            $validated = $request->validate([
+                'name'                            => ['required', 'string', 'max:255'],
+                'contact_person_name'             => ['required', 'string', 'max:255'],
+                'contact_person_number'           => ['required', 'string', 'max:50'],
+                'contact_person_secondary_number' => ['nullable', 'string', 'max:50'],
+                'address'                         => ['required', 'string', 'max:500'],
+                'city_id'                         => ['required', 'integer'],
+                'zone_id'                         => ['required', 'integer'],
+                'area_id'                         => ['required', 'integer'],
+            ]);
+
+            $service = $this->carrybeeService($companyId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->createStore($validated);
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Store created successfully', $result['body'], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {

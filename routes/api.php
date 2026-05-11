@@ -323,6 +323,14 @@ Route::prefix('delivery-companies')->group(function () {
     Route::post('/add', [DeliveryCompanyController::class, 'addDeliveryCompany']);
     Route::get('/list', [DeliveryCompanyController::class, 'getDeliveryCompany']);
     Route::put('/update/{id}', [DeliveryCompanyController::class, 'updateDeliveryCompany']);
+
+    // Carrybee third-party API proxy
+    Route::get('/carrybee/cities', [DeliveryCompanyController::class, 'carrybeeCities'])->withoutMiddleware('token');
+    Route::get('/carrybee/{companyId}/cities/{cityId}/zones', [DeliveryCompanyController::class, 'carrybeeZones']);
+    Route::get('/carrybee/{companyId}/cities/{cityId}/zones/{zoneId}/areas', [DeliveryCompanyController::class, 'carrybeeAreas']);
+    Route::get('/carrybee/{companyId}/area-suggestion', [DeliveryCompanyController::class, 'carrybeeAreaSuggestion']);
+    Route::get('/carrybee/{companyId}/stores', [DeliveryCompanyController::class, 'carrybeeGetStores']);
+    Route::post('/carrybee/{companyId}/stores', [DeliveryCompanyController::class, 'carrybeeCreateStore']);
 });
 Route::prefix('address')->group(function () {
 
