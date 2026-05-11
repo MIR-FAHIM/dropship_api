@@ -361,6 +361,10 @@ class DeliveryCompanyController extends Controller
             $orderId = $validated['order_id'];
             unset($validated['order_id']);
 
+            if (DeliveryAssignedInfo::where('order_id', $orderId)->exists()) {
+                return $this->failed('A delivery order has already been created for this order', null, 409);
+            }
+
             $result = $service->createOrder($validated);
 
             if ($result['status'] >= 400) {
