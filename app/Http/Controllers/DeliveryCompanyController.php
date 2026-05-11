@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\DeliveryAssignedInfo;
 use App\Models\DeliveryCompany;
 use App\Service\CarrybeeService;
 use Illuminate\Http\Request;
@@ -301,7 +302,7 @@ class DeliveryCompanyController extends Controller
     /**
      * GET /delivery-companies/carrybee/{companyId}/orders
      */
-    
+
     public function carrybeeGetOrders($companyId)
     {
         try {
@@ -330,6 +331,7 @@ class DeliveryCompanyController extends Controller
     {
         try {
             $validated = $request->validate([
+                'order_id'                    => ['required', 'integer', 'exists:orders,id'],
                 'store_id'                    => ['required'],
                 'merchant_order_id'           => ['required', 'string', 'max:255'],
                 'delivery_type'               => ['required', 'integer'],
@@ -356,10 +358,32 @@ class DeliveryCompanyController extends Controller
                 return $service;
             }
 
+            $orderId = $validated['order_id'];
+            unset($validated['order_id']);
+
             $result = $service->createOrder($validated);
 
             if ($result['status'] >= 400) {
                 return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            $order = $result['body']['data']['order'] ?? null;
+
+            if ($order) {
+                DeliveryAssignedInfo::updateOrCreate(
+                    ['order_id' => $orderId],
+                    [
+                        'consignment_id'     => $order['consignment_id'],
+                        'merchant_order_id'  => $order['merchant_order_id'] ?? null,
+                        'recipient_name'     => $order['recipient_name'],
+                        'recipient_phone'    => $order['recipient_phone'],
+                        'recipient_address'  => $order['recipient_address'],
+                        'collectable_amount' => $order['collectable_amount'] ?? 0,
+                        'delivery_fee'       => $order['delivery_fee'] ?? 0,
+                        'total_fee'          => $order['total_fee'] ?? 0,
+                        'transfer_status_id' => $order['transfer_status_id'] ?? 1,
+                    ]
+                );
             }
 
             return $this->success('Order created successfully', $result['body'], 201);
