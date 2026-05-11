@@ -367,7 +367,7 @@ class DeliveryCompanyController extends Controller
                 return $this->failed('Carrybee API error', $result['body'], $result['status']);
             }
 
-            $order = $result['body']['data']['order'] ?? null;
+            $order = $result['body']['data']['data']['order'] ?? null;
 
             if ($order) {
                 DeliveryAssignedInfo::updateOrCreate(
