@@ -4,6 +4,8 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\BrandController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\DeliveryCompanyController;
+
 use App\Http\Controllers\ShopController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\OrderController;
@@ -316,6 +318,11 @@ Route::prefix('tasks')->group(function () {
 Route::prefix('notifications')->group(function () {
 
     Route::get('/all-list', [NotificationController::class, 'getAllNotification']);
+});
+Route::prefix('delivery-companies')->group(function () {
+    Route::post('/add', [DeliveryCompanyController::class, 'addDeliveryCompany']);
+    Route::get('/list', [DeliveryCompanyController::class, 'getDeliveryCompany']);
+    Route::put('/update/{id}', [DeliveryCompanyController::class, 'updateDeliveryCompany']);
 });
 Route::prefix('address')->group(function () {
 

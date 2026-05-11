@@ -11,7 +11,7 @@ php artisan make:model District -m
 php artisan make:migration FacebookContentSuggestion
 php artisan route:list
 php artisan route:clear
-php artisan make:controller WithdrawController
+php artisan make:controller DeliveryCompanyController
 php artisan make:controller VendorController --resource
 php artisan make:model DonationProjectImage -m //table and model
 // change a parameter type 
