@@ -112,4 +112,48 @@ class CarrybeeService
             'body'   => $response->json(),
         ];
     }
+
+    /**
+     * POST /orders
+     */
+    public function createOrder(array $data): array
+    {
+        $response = Http::withHeaders($this->authHeaders())
+            ->post(self::BASE_URL . '/orders', $data);
+
+        return [
+            'status' => $response->status(),
+            'body'   => $response->json(),
+        ];
+    }
+
+    /**
+     * POST /orders/{consignmentId}/cancel
+     */
+    public function cancelOrder(string $consignmentId, string $cancellationReason): array
+    {
+        $response = Http::withHeaders($this->authHeaders())
+            ->post(self::BASE_URL . "/orders/{$consignmentId}/cancel", [
+                'cancellation_reason' => $cancellationReason,
+            ]);
+
+        return [
+            'status' => $response->status(),
+            'body'   => $response->json(),
+        ];
+    }
+
+    /**
+     * GET /orders/{consignmentId}/details
+     */
+    public function getOrderDetails(string $consignmentId): array
+    {
+        $response = Http::withHeaders($this->authHeaders())
+            ->get(self::BASE_URL . "/orders/{$consignmentId}/details");
+
+        return [
+            'status' => $response->status(),
+            'body'   => $response->json(),
+        ];
+    }
 }

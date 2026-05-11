@@ -297,4 +297,105 @@ class DeliveryCompanyController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * POST /delivery-companies/carrybee/{companyId}/orders
+     */
+    public function carrybeeCreateOrder(Request $request, $companyId)
+    {
+        try {
+            $validated = $request->validate([
+                'store_id'                    => ['required'],
+                'merchant_order_id'           => ['required', 'string', 'max:255'],
+                'delivery_type'               => ['required', 'integer'],
+                'product_type'                => ['required', 'integer'],
+                'recipient_phone'             => ['required', 'string', 'max:50'],
+                'recipient_secendary_phone'   => ['nullable', 'string', 'max:50'],
+                'recipient_name'              => ['required', 'string', 'max:255'],
+                'recipient_address'           => ['required', 'string', 'max:500'],
+                'city_id'                     => ['required', 'integer'],
+                'zone_id'                     => ['required', 'integer'],
+                'area_id'                     => ['required', 'integer'],
+                'special_instruction'         => ['nullable', 'string'],
+                'product_description'         => ['nullable', 'string'],
+                'item_weight'                 => ['required', 'numeric', 'min:0'],
+                'item_quantity'               => ['required', 'integer', 'min:1'],
+                'collectable_amount'          => ['required', 'numeric', 'min:0'],
+                'is_closed_box'               => ['nullable', 'boolean'],
+                'is_exchange'                 => ['nullable', 'boolean'],
+            ]);
+
+            $service = $this->carrybeeService($companyId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->createOrder($validated);
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Order created successfully', $result['body'], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /delivery-companies/carrybee/{companyId}/orders/{consignmentId}/cancel
+     */
+    public function carrybeeCancelOrder(Request $request, $companyId, string $consignmentId)
+    {
+        try {
+            $validated = $request->validate([
+                'cancellation_reason' => ['required', 'string', 'max:500'],
+            ]);
+
+            $service = $this->carrybeeService($companyId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->cancelOrder($consignmentId, $validated['cancellation_reason']);
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Order cancelled successfully', $result['body']);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /delivery-companies/carrybee/{companyId}/orders/{consignmentId}/details
+     */
+    public function carrybeeOrderDetails($companyId, string $consignmentId)
+    {
+        try {
+            $service = $this->carrybeeService($companyId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->getOrderDetails($consignmentId);
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Order details fetched successfully', $result['body']);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 }
