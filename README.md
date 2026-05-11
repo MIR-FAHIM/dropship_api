@@ -5,7 +5,7 @@ SHOW TABLES;
 DROP TABLE content_images;
 USE database_name;
 DESCRIBE content_images;
-php artisan make:model DeliveryCompany -m  
+php artisan make:model DeliveryAssignedInfo -m  
 php artisan make:model District -m  
  
 php artisan make:migration FacebookContentSuggestion
