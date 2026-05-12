@@ -16,6 +16,7 @@ return new class extends Migration
             $table->unsignedBigInteger('order_id')->unique();
             $table->foreign('order_id')->references('id')->on('orders')->onDelete('cascade');
             $table->string('consignment_id', 50)->unique();
+            $table->string('delivery_company_id', 50)->nullable();
             $table->string('merchant_order_id', 100)->nullable();
             $table->string('recipient_name', 150);
             $table->string('recipient_phone', 20);

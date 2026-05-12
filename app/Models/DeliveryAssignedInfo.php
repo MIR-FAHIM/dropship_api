@@ -12,6 +12,7 @@ class DeliveryAssignedInfo extends Model
     protected $fillable = [
         'order_id',
         'consignment_id',
+        'delivery_company_id',
         'merchant_order_id',
         'recipient_name',
         'recipient_phone',

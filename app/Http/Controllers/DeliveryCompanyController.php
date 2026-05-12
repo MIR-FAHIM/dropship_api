@@ -379,6 +379,7 @@ class DeliveryCompanyController extends Controller
                     [
                         'consignment_id'     => $order['consignment_id'],
                         'merchant_order_id'  => $order['merchant_order_id'] ?? null,
+                        'delivery_company_id'  =>'1', // Assuming '1' is the ID for Carrybee, adjust as needed
                         'recipient_name'     => $order['recipient_name'],
                         'recipient_phone'    => $order['recipient_phone'],
                         'recipient_address'  => $order['recipient_address'],
@@ -447,6 +448,16 @@ class DeliveryCompanyController extends Controller
             }
 
             return $this->success('Order details fetched successfully', $result['body']);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+    public function getAssinedDeliveryOrderList($companyId)
+    {
+        try {
+           $orders = DeliveryAssignedInfo::where('delivery_company_id', $companyId)->get();
+
+            return $this->success('Assingned Delivery order fetched successfully', $orders);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
