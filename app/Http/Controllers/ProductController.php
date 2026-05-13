@@ -529,6 +529,7 @@ class ProductController extends Controller
                 'productAttributes.attribute',
                 'productAttributes.value',
                 'productDiscount',
+                'productClicks',
             ])->find($id);
 
             if (!$product) {

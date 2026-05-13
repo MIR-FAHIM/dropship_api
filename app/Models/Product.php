@@ -102,6 +102,12 @@ class Product extends Model
     {
         return $this->belongsTo(Vendor::class, 'vendor_id');
     }
+    public function productClicks()
+    {
+        return $this->hasOne(ProductClicks::class, 'product_id')
+            ->selectRaw('product_id, COUNT(*) as clicks_count')
+            ->groupBy('product_id');
+    }
 
     public function images()
     {
