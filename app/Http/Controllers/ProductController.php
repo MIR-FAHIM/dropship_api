@@ -513,7 +513,7 @@ class ProductController extends Controller
     /**
      * GET /products/details/{id}
      */
-    public function getProductDetails($id)
+    public function getProductDetails($id, Request $request)
     {
         try {
             $product = Product::with([
@@ -537,9 +537,9 @@ class ProductController extends Controller
 
             ProductClicks::create([
                 'product_id' => $product->id,
-                'page' => 'product_details',
-              //  'clicked_by' => auth()->id(),
-                'is_guest' => 1,
+                'page' => $request->page ?? 'product_details',
+                'clicked_by' => $request->user_id,
+                'is_guest' => $request->user_id ? 0 : 1,
                // 'ip_address' => $request->ip(),
             ]);
 
