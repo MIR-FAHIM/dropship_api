@@ -15,6 +15,7 @@ class Product extends Model
         'added_by',
         'vendor_id',
         'category_id',
+        'sku',
         'brand_id',
         'photos',
         'thumbnail_img',

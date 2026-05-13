@@ -15,6 +15,7 @@ return new class extends Migration
             $table->string('added_by', 6)->default('admin');
             $table->unsignedBigInteger('vendor_id');
             $table->unsignedBigInteger('category_id');
+            $table->string('sku')->unique()->nullable();
             $table->unsignedBigInteger('brand_id')->nullable();
             $table->string('photos', 2000)->nullable();
             $table->string('thumbnail_img', 100)->nullable();

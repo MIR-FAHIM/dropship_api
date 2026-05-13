@@ -55,6 +55,7 @@ class ProductController extends Controller
                 'video_link' => ['nullable', 'string', 'max:255'],
                 'tags' => ['nullable', 'string', 'max:255'],
                 'description' => ['nullable', 'string'],
+                'sku' => ['nullable', 'string'],
 
                 'unit_price' => ['nullable', 'numeric', 'min:0'],
                 'max_resell_price' => ['nullable', 'numeric', 'min:0'],
@@ -565,6 +566,7 @@ class ProductController extends Controller
                 'video_link' => ['sometimes', 'nullable', 'string', 'max:255'],
                 'tags' => ['sometimes', 'nullable', 'string', 'max:255'],
                 'description' => ['sometimes', 'nullable', 'string'],
+                'sku' => ['sometimes', 'nullable', 'string'],
 
                 'unit_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
                 'max_resell_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
