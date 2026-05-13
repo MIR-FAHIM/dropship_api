@@ -4,6 +4,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Product;
+use App\Models\ProductClicks;
 use App\Models\ProductImage;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -533,6 +534,14 @@ class ProductController extends Controller
             if (!$product) {
                 return $this->failed('Product not found', null, 404);
             }
+
+            ProductClicks::create([
+                'product_id' => $product->id,
+                'page' => 'product_details',
+              //  'clicked_by' => auth()->id(),
+                'is_guest' => 1,
+               // 'ip_address' => $request->ip(),
+            ]);
 
             return $this->success('Product fetched successfully', $product);
         } catch (\Throwable $e) {
