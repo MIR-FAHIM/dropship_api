@@ -5,7 +5,6 @@ use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\BrandController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\DeliveryCompanyController;
-
 use App\Http\Controllers\ShopController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\OrderController;
@@ -71,7 +70,6 @@ Route::prefix('users')->group(function () {
 
 Route::prefix('categories')->group(function () {
     Route::post('/create', [CategoryController::class, 'createCategory']);
-
     Route::get('/list', [CategoryController::class, 'listCategories'])->withoutMiddleware('token');
     Route::get('/details/{id}', [CategoryController::class, 'getCategoryDetails']);
     Route::get('/children/{id}', [CategoryController::class, 'getCategoryChildren']);

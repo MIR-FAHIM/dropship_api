@@ -122,7 +122,7 @@ class CategoryController extends Controller
                 'parent_id' => ['nullable', 'integer', 'exists:categories,id', Rule::notIn([$id])],
                 'name' => ['nullable', 'string', 'max:255'],
                 'slug' => ['nullable', 'string', 'max:255', Rule::unique('categories', 'slug')->ignore($category->id)],
-                'icon' => ['nullable', 'string', 'max:255'],
+                'icon' => ['nullable'],
                 'image' => ['nullable', 'string', 'max:255'],
                 'sort_order' => ['nullable', 'integer'],
                 'status' => ['nullable', 'string', 'max:50'],
