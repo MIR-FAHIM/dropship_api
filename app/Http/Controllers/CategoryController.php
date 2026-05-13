@@ -180,6 +180,7 @@ class CategoryController extends Controller
             $children = Category::where('parent_id', $id)
                 ->orderByRaw('COALESCE(order_level, 999999) asc')
                 ->latest()
+                ->with('icon')
                 ->get();
 
             return $this->success('Sub-categories fetched successfully', $children);
