@@ -137,6 +137,7 @@ class ProductController extends Controller
                 'vendor_id' => $validated['vendor_id'] ?? null,
                 'category_id' => $validated['category_id'] ?? null,
                 'brand_id' => $validated['brand_id'] ?? null,
+                'sku' => $validated['sku'] ?? null,
                 'photos' => $photos,
                 'thumbnail_img' => $validated['thumbnail_img'] ?? null,
                 'video_provider' => $validated['video_provider'] ?? null,
