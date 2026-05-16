@@ -236,6 +236,42 @@ class OrderController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+      /**
+     * GET /orders/vendor/{vendorId}?per_page=20
+     * List orders for a vendor by shop_id in order items
+     */
+    public function vendorOrderList($vendorId, Request $request)
+    {
+        try {
+            $perPage = (int) $request->get('per_page', 20);
+
+            // Get all order_ids that have items belonging to this vendor's shop
+            $orderIds = OrderItem::where('shop_id', $vendorId)
+                ->pluck('order_id')
+                ->unique();
+
+            if ($orderIds->isEmpty()) {
+                return $this->failed('No orders found for this vendor', null, 404);
+            }
+
+            $orders = Order::with([
+                'items' => function ($query) use ($vendorId) {
+                    // Only return items that belong to this vendor's shop
+                    $query->where('shop_id', $vendorId)->with('shop');
+                },
+                'statusHistory.status',
+                'deliveryInformation',
+            ])
+                ->whereIn('id', $orderIds)
+                ->latest()
+                ->paginate($perPage);
+
+            return $this->success('Vendor orders fetched successfully', $orders);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
     public function allOrders(Request $request)
     {
         try {

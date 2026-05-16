@@ -151,7 +151,7 @@ Route::prefix('orders')->group(function () {
     // Completed orders
     Route::get('/completed', [OrderController::class, 'completedOrders']);
     Route::get('/completed/{userId}', [OrderController::class, 'completedOrdersByUser']);
-
+    Route::get('/vendor/{vendorId}', [OrderController::class, 'vendorOrderList']);
     Route::get('/details/{id}', [OrderController::class, 'getOrderDetails']);
     Route::get('/status-summary', [OrderController::class, 'orderStatusSummary']);
 
