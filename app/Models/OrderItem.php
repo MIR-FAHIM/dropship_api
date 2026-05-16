@@ -55,6 +55,6 @@ class OrderItem extends Model
      */
     public function shop()
     {
-        return $this->belongsTo(Shops::class, 'shop_id');
+        return $this->belongsTo(Vendor::class, 'shop_id');
     }
 }
