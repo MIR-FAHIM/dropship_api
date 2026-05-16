@@ -271,6 +271,7 @@ class OrderController extends Controller
     {
         try {
             $order = Order::with([
+                'user',
                 'items.shop',
                 'deliveryMan.deliveryMan',
                 'deliveryInformation',
