@@ -264,6 +264,7 @@ class OrderController extends Controller
                 'deliveryInformation',
             ])
                 ->whereIn('id', $orderIds)
+                ->where('status', '!=', 1)
                 ->latest()
                 ->paginate($perPage);
 
