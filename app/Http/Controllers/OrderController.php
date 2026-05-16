@@ -207,7 +207,35 @@ class OrderController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+    public function updateOrder(Request $request, $id)
+    {
+        try {
+            $order = Order::find($id);
+            if (!$order) {
+                return $this->failed('Order not found', null, 404);
+            }
 
+            $validated = $request->validate([
+                'customer_name'    => ['nullable', 'string', 'max:255'],
+                'customer_phone'   => ['nullable', 'string', 'max:50'],
+                'shipping_address' => ['nullable', 'string', 'max:1000'],
+                'zone'             => ['nullable', 'string', 'max:100'],
+                'district'         => ['nullable', 'string', 'max:100'],
+                'area'             => ['nullable', 'string', 'max:100'],
+                'lat'              => ['nullable', 'numeric'],
+                'lon'              => ['nullable', 'numeric'],
+                'note'             => ['nullable', 'string'],
+            ]);
+
+            $order->update($validated);
+
+            return $this->success('Order updated successfully', $order);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
     public function allOrders(Request $request)
     {
         try {

@@ -147,6 +147,7 @@ Route::prefix('orders')->group(function () {
     Route::get('/list/{userId}', [OrderController::class, 'listOrdersByUser']);
     Route::get('/all/orders', [OrderController::class, 'allOrders']);
 
+    Route::put('/update/{id}', [OrderController::class, 'updateOrder']);
     // Completed orders
     Route::get('/completed', [OrderController::class, 'completedOrders']);
     Route::get('/completed/{userId}', [OrderController::class, 'completedOrdersByUser']);
