@@ -22,6 +22,7 @@ use App\Http\Middleware\ApiTokenAuth;
 use App\Http\Controllers\UploadController;
 use App\Http\Controllers\RelatedProductController;
 use App\Http\Controllers\ReviewController;
+use App\Http\Controllers\ProductClicksController;
 use App\Http\Controllers\DeliveryController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\FacebookPostController;
@@ -228,6 +229,14 @@ Route::prefix('product-attributes')->group(function () {
 
 Route::prefix('reports')->group(function () {
     Route::get('/dashboard', [ReportController::class, 'dashboard']);
+});
+
+// Product Clicks Report endpoints
+Route::prefix('product-clicks')->group(function () {
+    Route::get('/report/monthwise', [ProductClicksController::class, 'monthwiseReport']);
+    Route::get('/report/daywise', [ProductClicksController::class, 'daywiseReport']);
+    Route::get('/report/last-7-days', [ProductClicksController::class, 'last7DaysReport']);
+    Route::get('/leaderboard', [ProductClicksController::class, 'leaderboard']);
 });
 
 Route::prefix('product-discounts')->group(function () {
