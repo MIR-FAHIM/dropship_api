@@ -769,8 +769,8 @@ class ProductController extends Controller
         try {
             $query = Product::query()->with([
                 'primaryImage',
-                'vendor.division',
-                'vendor.district',
+                'vendor',
+            
                 'images',
                 'category',
                 'subCategory',
