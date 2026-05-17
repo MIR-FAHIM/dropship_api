@@ -14,6 +14,8 @@ class Vendor extends Model
         'shop_name',
         'contact_person',
         'emergency_contact',
+        'division',
+        'district',
         'zone',
         'whatsapp',
         'owner_name',

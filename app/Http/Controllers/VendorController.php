@@ -76,6 +76,8 @@ class VendorController extends Controller
                     'shop_name' => $validated['shop_name'],
                     'contact_person' => $validated['contact_person'] ?? null,
                     'emergency_contact' => $validated['emergency_contact'] ?? null,
+                    'division' => $validated['state'] ?? null,
+                    'district' => $validated['city'] ?? null,
                     'zone' => $validated['zone'] ?? null,
                     'whatsapp' => $validated['whatsapp'] ?? null,
                     'owner_name' => $validated['owner_name'] ?? null,

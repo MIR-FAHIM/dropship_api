@@ -18,6 +18,8 @@ return new class extends Migration
             $table->string('shop_name');
             $table->string('contact_person')->nullable();
             $table->string('emergency_contact')->nullable();
+            $table->integer('division')->nullable();
+            $table->integer('district')->nullable();
             $table->string('zone')->nullable();
             $table->string('whatsapp')->nullable();
             $table->string('owner_name')->nullable();
