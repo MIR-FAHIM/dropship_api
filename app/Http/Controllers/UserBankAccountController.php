@@ -36,6 +36,7 @@ class UserBankAccountController extends Controller
 		$validated = $request->validate([
 			'user_id' => 'required|exists:users,id',
 			'bank_name' => 'required|string|max:255',
+			'acc_name' => 'nullable|string|max:255',
 			'type' => 'nullable|string|max:255',
 			'account_no' => 'required|string|max:255',
 			'branch' => 'nullable|string|max:255',

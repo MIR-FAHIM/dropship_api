@@ -15,6 +15,7 @@ return new class extends Migration
             $table->id();
             $table->unsignedBigInteger('user_id');
             $table->string('bank_name');
+            $table->string('acc_name')->nullable();
             $table->string('type')->nullable();
             $table->string('account_no');
             $table->string('branch')->nullable();
