@@ -808,7 +808,7 @@ class ProductController extends Controller
                         $q->where(function ($qq) use ($t) {
                             $qq->where('name', 'like', $t)
 
-                                ->orWhere('slug', 'like', $t)
+                                ->orWhere('sku', 'like', $t)
                                 ->orWhereHas('category', function ($qc) use ($t) {
                                     $qc->where('name', 'like', $t);
                                 })
