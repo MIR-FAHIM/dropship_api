@@ -28,4 +28,12 @@ class Vendor extends Model
     {
         return $this->belongsTo(User::class);
     }
+    public function division()
+    {
+        return $this->belongsTo(Division::class);
+    }
+    public function district()
+    {
+        return $this->belongsTo(District::class);
+    }
 }
