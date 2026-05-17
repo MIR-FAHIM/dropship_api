@@ -30,10 +30,10 @@ class Vendor extends Model
     }
     public function division()
     {
-        return $this->belongsTo(Division::class);
+        return $this->belongsTo(Division::class, 'division');
     }
     public function district()
     {
-        return $this->belongsTo(District::class);
+        return $this->belongsTo(District::class, 'district');
     }
 }
