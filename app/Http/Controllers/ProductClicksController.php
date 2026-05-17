@@ -171,7 +171,7 @@ class ProductClicksController extends Controller
                 $query->whereDate('created_at', '<=', $request->input('end_date'));
             }
 
-            $rows = $query->with('product:id,name,slug,thumbnail,price,status')->get();
+            $rows = $query->with('product:id,name,sku')->get();
 
             $leaderboard = $rows->map(function ($row, $index) {
                 return [
