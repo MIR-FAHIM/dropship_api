@@ -292,7 +292,7 @@ class ProductController extends Controller
     public function listProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category',  'subCategory', 'vendor', 'brand', 'productDiscount']);
+            $query = Product::query()->with(['primaryImage', 'images', 'category',  'subCategory', 'vendor.division', 'vendor.district', 'brand', 'productDiscount']);
 
             if ($request->filled('shop_id')) {
                 $query->where('shop_id', $request->shop_id);
@@ -358,7 +358,8 @@ class ProductController extends Controller
                 'images',
                 'category',
                 'subCategory',
-                'vendor',
+                'vendor.division',
+                'vendor.district',
                 'brand',
                 'productDiscount'
             ])->where('approved', 1);
@@ -422,7 +423,7 @@ class ProductController extends Controller
     public function listFeaturedProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'vendor', 'brand', 'productDiscount']);
+            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'vendor.division', 'vendor.district', 'brand', 'productDiscount']);
 
 
 
@@ -469,7 +470,7 @@ class ProductController extends Controller
     public function listTodayDealProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'vendor', 'brand', 'productDiscount']);
+            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'vendor.division', 'vendor.district', 'brand', 'productDiscount']);
 
 
 
@@ -522,7 +523,8 @@ class ProductController extends Controller
         try {
             $product = Product::with([
                 'images.image',
-                'vendor',
+                'vendor.division',
+                'vendor.district',
                 'primaryImage',
                 'brand',
                 'category',
@@ -769,8 +771,8 @@ class ProductController extends Controller
         try {
             $query = Product::query()->with([
                 'primaryImage',
-                'vendor',
-            
+                'vendor.division',
+                'vendor.district',
                 'images',
                 'category',
                 'subCategory',
