@@ -138,7 +138,7 @@ class ProductController extends Controller
                 'vendor_id' => $validated['vendor_id'] ?? null,
                 'category_id' => $validated['category_id'] ?? null,
                 'brand_id' => $validated['brand_id'] ?? null,
-                'sku' => $validated['sku'] ?? null,
+                'sku' => null,
                 'photos' => $photos,
                 'thumbnail_img' => $validated['thumbnail_img'] ?? null,
                 'video_provider' => $validated['video_provider'] ?? null,
@@ -197,6 +197,10 @@ class ProductController extends Controller
             ];
 
             $product = Product::create($productData);
+
+            // Auto-generate SKU: p{id}v{vendor_id}
+            $product->sku = 'p' . $product->id . 'v' . ($product->vendor_id ?? '0');
+            $product->save();
 
             return $this->success('Product created successfully', $product, 201);
         } catch (ValidationException $e) {
