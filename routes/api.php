@@ -345,6 +345,12 @@ Route::prefix('delivery-companies')->group(function () {
     Route::post('/carrybee/{companyId}/orders/{consignmentId}/cancel', [DeliveryCompanyController::class, 'carrybeeCancelOrder']);
     Route::get('/carrybee/{companyId}/orders/{consignmentId}/details', [DeliveryCompanyController::class, 'carrybeeOrderDetails']);
     Route::post('/carrybee/{companyId}/address-details', [DeliveryCompanyController::class, 'carrybeeAddressDetails']);
+    // Order Drafts
+    Route::post('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftSave']);
+    Route::get('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftList']);
+    Route::get('/carrybee/order-drafts/{id}', [DeliveryCompanyController::class, 'orderDraftDetails']);
+    Route::put('/carrybee/order-drafts/{id}', [DeliveryCompanyController::class, 'orderDraftUpdate']);
+    Route::delete('/carrybee/order-drafts/{id}', [DeliveryCompanyController::class, 'orderDraftDelete']);
 });
 Route::prefix('address')->group(function () {
 

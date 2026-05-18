@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\DeliveryAssignedInfo;
 use App\Models\DeliveryCompany;
+use App\Models\CarryBeeOrderCreateForm;
 use App\Service\CarrybeeService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -350,6 +351,12 @@ class DeliveryCompanyController extends Controller
                 'collectable_amount'          => ['required', 'numeric', 'min:0'],
                 'is_closed_box'               => ['nullable', 'boolean'],
                 'is_exchange'                 => ['nullable', 'boolean'],
+                // Own fields
+                'own_vendor_id'               => ['nullable', 'integer', 'exists:users,id'],
+                'own_created_by'              => ['nullable', 'integer', 'exists:users,id'],
+                'own_admin_status'            => ['nullable', 'string', 'max:100'],
+                'own_is_vendor_ready'         => ['nullable', 'boolean'],
+                'own_note'                    => ['nullable', 'string'],
             ]);
 
             $service = $this->carrybeeService($companyId);
@@ -365,7 +372,20 @@ class DeliveryCompanyController extends Controller
                 return $this->failed('A delivery order has already been created for this order', null, 409);
             }
 
-            $result = $service->createOrder($validated);
+            // Save full form data as a draft record
+            CarryBeeOrderCreateForm::updateOrCreate(
+                ['order_id' => $orderId],
+                array_merge(['order_id' => $orderId], $validated)
+            );
+
+            // Strip own_* fields before forwarding to Carrybee API
+            $carrybeePayload = array_filter(
+                $validated,
+                fn($key) => !str_starts_with($key, 'own_'),
+                ARRAY_FILTER_USE_KEY
+            );
+
+            $result = $service->createOrder($carrybeePayload);
 
             if ($result['status'] >= 400) {
                 return $this->failed('Carrybee API error', $result['body'], $result['status']);
@@ -379,7 +399,7 @@ class DeliveryCompanyController extends Controller
                     [
                         'consignment_id'     => $order['consignment_id'],
                         'merchant_order_id'  => $order['merchant_order_id'] ?? null,
-                        'delivery_company_id'  =>'1', // Assuming '1' is the ID for Carrybee, adjust as needed
+                        'delivery_company_id'  => $companyId,
                         'recipient_name'     => $order['recipient_name'],
                         'recipient_phone'    => $order['recipient_phone'],
                         'recipient_address'  => $order['recipient_address'],
@@ -490,6 +510,169 @@ class DeliveryCompanyController extends Controller
            $orders = DeliveryAssignedInfo::where('delivery_company_id', $companyId)->get();
 
             return $this->success('Assingned Delivery order fetched successfully', $orders);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // CarryBee Order Draft (CarryBeeOrderCreateForm)
+    // -------------------------------------------------------------------------
+
+    /**
+     * POST /delivery-companies/order-drafts
+     * Save or update a draft without submitting to Carrybee.
+     */
+    public function orderDraftSave(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'order_id'                    => ['required', 'integer', 'exists:orders,id'],
+                'store_id'                    => ['nullable'],
+                'merchant_order_id'           => ['nullable', 'string', 'max:255'],
+                'delivery_type'               => ['nullable', 'integer'],
+                'product_type'                => ['nullable', 'integer'],
+                'recipient_phone'             => ['nullable', 'string', 'max:50'],
+                'recipient_secendary_phone'   => ['nullable', 'string', 'max:50'],
+                'recipient_name'              => ['nullable', 'string', 'max:255'],
+                'recipient_address'           => ['nullable', 'string', 'max:500'],
+                'city_id'                     => ['nullable', 'integer'],
+                'zone_id'                     => ['nullable', 'integer'],
+                'area_id'                     => ['nullable', 'integer'],
+                'special_instruction'         => ['nullable', 'string'],
+                'product_description'         => ['nullable', 'string'],
+                'item_weight'                 => ['nullable', 'numeric', 'min:0'],
+                'item_quantity'               => ['nullable', 'integer', 'min:1'],
+                'collectable_amount'          => ['nullable', 'numeric', 'min:0'],
+                'is_closed_box'               => ['nullable', 'boolean'],
+                'is_exchange'                 => ['nullable', 'boolean'],
+                'own_vendor_id'               => ['nullable', 'integer', 'exists:users,id'],
+                'own_created_by'              => ['nullable', 'integer', 'exists:users,id'],
+                'own_admin_status'            => ['nullable', 'string', 'max:100'],
+                'own_is_vendor_ready'         => ['nullable', 'boolean'],
+                'own_note'                    => ['nullable', 'string'],
+            ]);
+
+            $draft = CarryBeeOrderCreateForm::updateOrCreate(
+                ['order_id' => $validated['order_id']],
+                $validated
+            );
+
+            return $this->success('Order draft saved successfully', $draft->load('order', 'vendor', 'createdBy'), 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /delivery-companies/order-drafts
+     */
+    public function orderDraftList(Request $request)
+    {
+        try {
+            $query = CarryBeeOrderCreateForm::with('order', 'vendor', 'createdBy');
+
+            if ($request->filled('own_vendor_id')) {
+                $query->where('own_vendor_id', $request->own_vendor_id);
+            }
+            if ($request->filled('own_admin_status')) {
+                $query->where('own_admin_status', $request->own_admin_status);
+            }
+            if ($request->filled('own_is_vendor_ready')) {
+                $query->where('own_is_vendor_ready', filter_var($request->own_is_vendor_ready, FILTER_VALIDATE_BOOLEAN));
+            }
+
+            $perPage = (int) $request->get('per_page', 20);
+
+            return $this->success('Order drafts fetched successfully', $query->latest()->paginate($perPage));
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /delivery-companies/order-drafts/{id}
+     */
+    public function orderDraftDetails($id)
+    {
+        try {
+            $draft = CarryBeeOrderCreateForm::with('order', 'vendor', 'createdBy')->find($id);
+
+            if (!$draft) {
+                return $this->failed('Order draft not found', null, 404);
+            }
+
+            return $this->success('Order draft fetched successfully', $draft);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * PUT /delivery-companies/order-drafts/{id}
+     */
+    public function orderDraftUpdate(Request $request, $id)
+    {
+        try {
+            $draft = CarryBeeOrderCreateForm::find($id);
+
+            if (!$draft) {
+                return $this->failed('Order draft not found', null, 404);
+            }
+
+            $validated = $request->validate([
+                'store_id'                    => ['sometimes', 'nullable'],
+                'merchant_order_id'           => ['sometimes', 'nullable', 'string', 'max:255'],
+                'delivery_type'               => ['sometimes', 'nullable', 'integer'],
+                'product_type'                => ['sometimes', 'nullable', 'integer'],
+                'recipient_phone'             => ['sometimes', 'nullable', 'string', 'max:50'],
+                'recipient_secendary_phone'   => ['sometimes', 'nullable', 'string', 'max:50'],
+                'recipient_name'              => ['sometimes', 'nullable', 'string', 'max:255'],
+                'recipient_address'           => ['sometimes', 'nullable', 'string', 'max:500'],
+                'city_id'                     => ['sometimes', 'nullable', 'integer'],
+                'zone_id'                     => ['sometimes', 'nullable', 'integer'],
+                'area_id'                     => ['sometimes', 'nullable', 'integer'],
+                'special_instruction'         => ['sometimes', 'nullable', 'string'],
+                'product_description'         => ['sometimes', 'nullable', 'string'],
+                'item_weight'                 => ['sometimes', 'nullable', 'numeric', 'min:0'],
+                'item_quantity'               => ['sometimes', 'nullable', 'integer', 'min:1'],
+                'collectable_amount'          => ['sometimes', 'nullable', 'numeric', 'min:0'],
+                'is_closed_box'               => ['sometimes', 'nullable', 'boolean'],
+                'is_exchange'                 => ['sometimes', 'nullable', 'boolean'],
+                'own_vendor_id'               => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+                'own_created_by'              => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+                'own_admin_status'            => ['sometimes', 'nullable', 'string', 'max:100'],
+                'own_is_vendor_ready'         => ['sometimes', 'nullable', 'boolean'],
+                'own_note'                    => ['sometimes', 'nullable', 'string'],
+            ]);
+
+            $draft->fill($validated)->save();
+
+            return $this->success('Order draft updated successfully', $draft->load('order', 'vendor', 'createdBy'));
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * DELETE /delivery-companies/order-drafts/{id}
+     */
+    public function orderDraftDelete($id)
+    {
+        try {
+            $draft = CarryBeeOrderCreateForm::find($id);
+
+            if (!$draft) {
+                return $this->failed('Order draft not found', null, 404);
+            }
+
+            $draft->delete();
+
+            return $this->success('Order draft deleted successfully');
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
