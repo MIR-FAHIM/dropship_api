@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Http;
 
 class CarrybeeService
 {
-    private const BASE_URL = 'https://sandbox.carrybee.com/api/v2';
+    private const BASE_URL = 'https://developers.carrybee.com/api/v2';
 
     private string $clientId;
     private string $clientSecret;
