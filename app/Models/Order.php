@@ -32,6 +32,7 @@ class Order extends Model
         'discount',
         'total',
         'reseller_profit',
+        'vendor_id',
 
         'note',
     ];

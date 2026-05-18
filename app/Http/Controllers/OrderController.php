@@ -124,6 +124,7 @@ class OrderController extends Controller
                 'shipping_fee' => $shippingFee,
                 'discount' => $discount,
                 'total' => $total,
+                'vendor_id' => $cartItems->first()?->shop_id ?? null,
 
                 'note' => $validated['note'] ?? null,
             ]);
@@ -237,7 +238,7 @@ class OrderController extends Controller
         }
     }
 
-      /**
+    /**
      * GET /orders/vendor/{vendorId}?per_page=20
      * List orders for a vendor by shop_id in order items
      */
@@ -281,6 +282,8 @@ class OrderController extends Controller
             $orders = Order::with(['status', 'user', 'items.shop'])
                 ->latest()
                 ->paginate($perPage);
+
+        
 
             return $this->success('Orders fetched successfully', $orders);
         } catch (\Throwable $e) {
@@ -422,16 +425,16 @@ class OrderController extends Controller
                     'note' => 'Debit transaction (reseller profit) for order #' . $order->order_number,
                 ]);
 
-                  ResellerTransaction::create([
-                        'amount' => $profitAmount,
-                        'trx_type' => 'credit',
-                        'status' => 'completed',
-                        'source' => 'Admin Action',
-                        'order_id' => $order->id,
-                        'type' => 'order_status',
-                        'note' => 'Credit transaction (reseller profit) for order #' . $order->order_number,
-                        'reseller_id' => $order->user_id,
-                    ]);
+                ResellerTransaction::create([
+                    'amount' => $profitAmount,
+                    'trx_type' => 'credit',
+                    'status' => 'completed',
+                    'source' => 'Admin Action',
+                    'order_id' => $order->id,
+                    'type' => 'order_status',
+                    'note' => 'Credit transaction (reseller profit) for order #' . $order->order_number,
+                    'reseller_id' => $order->user_id,
+                ]);
             }
 
             return $this->success('Order status updated successfully', $order);
