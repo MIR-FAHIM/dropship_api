@@ -170,4 +170,19 @@ class CarrybeeService
             'body'   => $response->json(),
         ];
     }
+
+    /**
+     * POST /address-details
+     * Returns city_id and zone_id for a given address query.
+     */
+    public function getAddressDetails(string $query): array
+    {
+        $response = Http::withHeaders($this->authHeaders())
+            ->post(self::BASE_URL . '/address-details', ['query' => $query]);
+
+        return [
+            'status' => $response->status(),
+            'body'   => $response->json(),
+        ];
+    }
 }

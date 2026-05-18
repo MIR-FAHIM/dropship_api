@@ -452,6 +452,38 @@ class DeliveryCompanyController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * POST /delivery-companies/carrybee/{companyId}/address-details
+     * Body: { "query": "Baridhara Jame Masjid, baridhara, Dhaka" }
+     * Returns city_id and zone_id.
+     */
+    public function carrybeeAddressDetails(Request $request, $companyId)
+    {
+        try {
+            $request->validate([
+                'query' => ['required', 'string', 'max:500'],
+            ]);
+
+            $service = $this->carrybeeService($companyId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->getAddressDetails($request->query('query') ?? $request->input('query'));
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Address details', $result['body']['data'] ?? $result['body']);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
     public function getAssinedDeliveryOrderList($companyId)
     {
         try {
