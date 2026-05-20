@@ -5,13 +5,13 @@ SHOW TABLES;
 DROP TABLE content_images;
 USE database_name;
 DESCRIBE content_images;
-php artisan make:model CarryBeeOrderCreateForm -m  
+php artisan make:model VendorCarryBeeCredintial -m  
 php artisan make:model District -m  
  
 php artisan make:migration FacebookContentSuggestion
 php artisan route:list
 php artisan route:clear
-php artisan make:controller DeliveryCompanyController
+php artisan make:controller VendorCarryBeeCredintialController
 php artisan make:controller VendorController --resource
 php artisan make:model DonationProjectImage -m //table and model
 // change a parameter type 

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\VendorCarryBeeCredintialController;
 use App\Http\Controllers\BrandController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\DeliveryCompanyController;
@@ -363,4 +364,12 @@ Route::prefix('paymentmethods')->group(function () {
     Route::get('/get-user-bank-accounts/{id}', [UserBankAccountController::class, 'getUserBankAccount']);
     Route::post('/add-user-bank-account', [UserBankAccountController::class, 'addUserBankAccount']);
     Route::post('/add-payment-method', [UserBankAccountController::class, 'addPaymentMethod']);
+});
+
+Route::prefix('vendor-carrybee-credentials')->group(function () {
+    Route::post('/add', [VendorCarryBeeCredintialController::class, 'add']);
+    Route::get('/list', [VendorCarryBeeCredintialController::class, 'list']);
+    Route::get('/{id}', [VendorCarryBeeCredintialController::class, 'details']);
+    Route::put('/update/{id}', [VendorCarryBeeCredintialController::class, 'update']);
+    Route::delete('/delete/{id}', [VendorCarryBeeCredintialController::class, 'delete']);
 });
