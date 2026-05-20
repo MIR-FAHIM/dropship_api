@@ -279,7 +279,7 @@ class OrderController extends Controller
         try {
             $perPage = (int) $request->get('per_page', 20);
 
-            $orders = Order::with(['status', 'user', 'items.shop'])
+            $orders = Order::with(['status', 'user', 'vendor', 'items.shop'])
                 ->latest()
                 ->paginate($perPage);
 
