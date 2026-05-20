@@ -344,7 +344,8 @@ class OrderController extends Controller
                 'items.shop',
                 'deliveryMan.deliveryMan',
                 'deliveryInformation',
-                'statusHistory.status'
+                'statusHistory.status',
+                'carryBeeDraft', 
             ])->find($id);
 
             if (!$order) {

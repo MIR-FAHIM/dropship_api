@@ -73,7 +73,7 @@ class Order extends Model
     public function deliveryInformation()
     {
         return $this->hasOne(DeliveryAssignedInfo::class, 'order_id');
-    ;
+    
     }
 
     /**
@@ -87,5 +87,10 @@ class Order extends Model
     {
         return $this->hasMany(OrderStatusHistory::class, 'order_id')
         ->orderBy('created_at', 'desc');
+    }
+    public function carryBeeDraft()
+    {
+        return $this->hasOne(CarryBeeOrderCreateForm::class, 'order_id');
+        
     }
 }
