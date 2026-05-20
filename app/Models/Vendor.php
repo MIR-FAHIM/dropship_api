@@ -36,4 +36,8 @@ class Vendor extends Model
     {
         return $this->belongsTo(District::class, 'district');
     }
+    public function carryBeeInfo()
+    {
+        return $this->hasOne(VendorCarryBeeCredintial::class, 'vendor_id');
+    }
 }
