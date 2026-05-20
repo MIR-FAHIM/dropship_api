@@ -48,6 +48,6 @@ class CartItem extends Model
     public function shop()
     {
         // Your shop model is named "Shops" (plural)
-        return $this->belongsTo(Shops::class, 'shop_id');
+        return $this->belongsTo(Vendor::class, 'shop_id');
     }
 }
