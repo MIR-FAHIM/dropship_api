@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AssignDeliveryMan;
+use App\Models\District;
 use App\Models\Order;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -208,6 +209,84 @@ class DeliveryController extends Controller
         }
     }
 
+    /**
+     * GET /deliveries/delivery-charge?vendor_district_id=1&customer_district_id=5
+     *
+     * Zone rules:
+     *   Vendor in Dhaka district  AND  customer in Dhaka district  => Inside Dhaka  (100)
+     *   Customer in Dhaka division but NOT Dhaka district           => Outside Dhaka (150)
+     *   Customer in Chittagong / Mymensingh division                => 120
+     *   Customer in Sylhet / Rajshahi / Khulna / Barishal division  => 130
+     *   Customer in Rangpur division                                => 140
+     */
+    public function calculateDeliveryCharge(Request $request)
+    {
+        $request->validate([
+            'vendor_district_id'   => ['required', 'integer', 'exists:districts,id'],
+            'customer_district_id' => ['required', 'integer', 'exists:districts,id'],
+        ]);
 
-    
+        try {
+            $vendorDistrict   = District::with('division')->find($request->vendor_district_id);
+            $customerDistrict = District::with('division')->find($request->customer_district_id);
+
+            $vendorDivision   = strtolower($vendorDistrict->division?->name ?? '');
+            $vendorDistName   = strtolower($vendorDistrict->name ?? '');
+
+            $customerDivision = strtolower($customerDistrict->division?->name ?? '');
+            $customerDistName = strtolower($customerDistrict->name ?? '');
+
+            $zoneCharges = [
+                'inside dhaka'  => 100,
+                'outside dhaka' => 150,
+                'chittagong'    => 120,
+                'mymensingh'    => 120,
+                'sylhet'        => 130,
+                'rajshahi'      => 130,
+                'khulna'        => 130,
+                'barishal'      => 130,
+                'rangpur'       => 140,
+            ];
+
+            if (str_contains($customerDivision, 'dhaka')) {
+                // Inside Dhaka: both vendor and customer are in Dhaka district
+                if (
+                    str_contains($vendorDivision, 'dhaka') &&
+                    str_contains($vendorDistName, 'dhaka') &&
+                    str_contains($customerDistName, 'dhaka')
+                ) {
+                    $zone   = 'Inside Dhaka';
+                    $charge = $zoneCharges['inside dhaka'];
+                } else {
+                    $zone   = 'Outside Dhaka';
+                    $charge = $zoneCharges['outside dhaka'];
+                }
+            } else {
+                $matchedCharge = null;
+                $matchedZone   = null;
+                foreach ($zoneCharges as $key => $value) {
+                    if (str_contains($customerDivision, $key)) {
+                        $matchedCharge = $value;
+                        $matchedZone   = ucfirst($key);
+                        break;
+                    }
+                }
+                $charge = $matchedCharge ?? 150;
+                $zone   = $matchedZone ?? 'Outside Dhaka';
+            }
+
+            return $this->success('Delivery charge calculated', [
+                'vendor_district_id'     => $vendorDistrict->id,
+                'vendor_district_name'   => $vendorDistrict->name,
+                'vendor_division_name'   => $vendorDistrict->division?->name,
+                'customer_district_id'   => $customerDistrict->id,
+                'customer_district_name' => $customerDistrict->name,
+                'customer_division_name' => $customerDistrict->division?->name,
+                'zone'                   => $zone,
+                'charge'                 => $charge,
+            ]);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 }

@@ -262,6 +262,7 @@ Route::prefix('deliveries')->group(function () {
     Route::get('/all/{deliveryManId}', [DeliveryController::class, 'getAllOrderByDeliveryMan']);
     Route::get('/assigned/{deliveryManId}', [DeliveryController::class, 'getAssignedDelivery']);
     Route::get('/completed/{deliveryManId}', [DeliveryController::class, 'getCompletedDelivery']);
+    Route::get('/delivery-charge', [DeliveryController::class, 'calculateDeliveryCharge'])->withoutMiddleware('token');
 });
 
 Route::prefix('transactions')->group(function () {

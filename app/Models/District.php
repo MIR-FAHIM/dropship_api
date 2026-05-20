@@ -17,4 +17,9 @@ class District extends Model
         'lon',
         'url',
     ];
+
+    public function division()
+    {
+        return $this->belongsTo(Division::class);
+    }
 }
