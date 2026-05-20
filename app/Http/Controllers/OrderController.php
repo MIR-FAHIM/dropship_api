@@ -340,6 +340,7 @@ class OrderController extends Controller
         try {
             $order = Order::with([
                 'user',
+                'vendor',
                 'items.shop',
                 'deliveryMan.deliveryMan',
                 'deliveryInformation',
