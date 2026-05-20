@@ -95,7 +95,7 @@ class OrderController extends Controller
 
 
             // For now: shipping_fee & discount are kept null (or 0) until you add those modules
-            $shippingFee = 0;
+            $shippingFee = request()->input('delivery_charge', 0);
             $discount = 0;
             $total = round(($subtotal + $shippingFee) - $discount, 2);
 
