@@ -144,7 +144,7 @@ return $this->failed($firstError ?? 'Validation failed', null, 422);
     public function getVendorProfile($id)
     {
         try {
-            $vendor = Vendor::with('user')->find($id);
+            $vendor = Vendor::with('user', 'division', 'district')->find($id);
 
             if (!$vendor) {
                 return $this->failed('Vendor not found', null, 404);
