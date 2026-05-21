@@ -336,17 +336,17 @@ Route::prefix('delivery-companies')->group(function () {
 
     // Carrybee third-party API proxy
     Route::get('/carrybee/cities', [DeliveryCompanyController::class, 'carrybeeCities'])->withoutMiddleware('token');
-    Route::get('/carrybee/{companyId}/cities/{cityId}/zones', [DeliveryCompanyController::class, 'carrybeeZones']);
-    Route::get('/carrybee/{companyId}/cities/{cityId}/zones/{zoneId}/areas', [DeliveryCompanyController::class, 'carrybeeAreas']);
-    Route::get('/carrybee/{companyId}/area-suggestion', [DeliveryCompanyController::class, 'carrybeeAreaSuggestion']);
-    Route::get('/carrybee/{companyId}/stores', [DeliveryCompanyController::class, 'carrybeeGetStores']);
-    Route::post('/carrybee/{companyId}/stores', [DeliveryCompanyController::class, 'carrybeeCreateStore']);
-    Route::get('/carrybee/{companyId}/orders', [DeliveryCompanyController::class, 'carrybeeGetOrders']);
-    Route::get('/assigned-orders/{companyId}', [DeliveryCompanyController::class, 'getAssinedDeliveryOrderList']);
-    Route::post('/carrybee/{companyId}/orders', [DeliveryCompanyController::class, 'carrybeeCreateOrder']);
-    Route::post('/carrybee/{companyId}/orders/{consignmentId}/cancel', [DeliveryCompanyController::class, 'carrybeeCancelOrder']);
-    Route::get('/carrybee/{companyId}/orders/{consignmentId}/details', [DeliveryCompanyController::class, 'carrybeeOrderDetails']);
-    Route::post('/carrybee/{companyId}/address-details', [DeliveryCompanyController::class, 'carrybeeAddressDetails']);
+    Route::get('/carrybee/{vendorId}/cities/{cityId}/zones', [DeliveryCompanyController::class, 'carrybeeZones']);
+    Route::get('/carrybee/{vendorId}/cities/{cityId}/zones/{zoneId}/areas', [DeliveryCompanyController::class, 'carrybeeAreas']);
+    Route::get('/carrybee/{vendorId}/area-suggestion', [DeliveryCompanyController::class, 'carrybeeAreaSuggestion']);
+    Route::get('/carrybee/{vendorId}/stores', [DeliveryCompanyController::class, 'carrybeeGetStores']);
+    Route::post('/carrybee/{vendorId}/stores', [DeliveryCompanyController::class, 'carrybeeCreateStore']);
+    Route::get('/carrybee/{vendorId}/orders', [DeliveryCompanyController::class, 'carrybeeGetOrders']);
+    Route::get('/assigned-orders/{vendorId}', [DeliveryCompanyController::class, 'getAssinedDeliveryOrderList']);
+    Route::post('/carrybee/{vendorId}/orders', [DeliveryCompanyController::class, 'carrybeeCreateOrder']);
+    Route::post('/carrybee/{vendorId}/orders/{consignmentId}/cancel', [DeliveryCompanyController::class, 'carrybeeCancelOrder']);
+    Route::get('/carrybee/{vendorId}/orders/{consignmentId}/details', [DeliveryCompanyController::class, 'carrybeeOrderDetails']);
+    Route::post('/carrybee/{vendorId}/address-details', [DeliveryCompanyController::class, 'carrybeeAddressDetails']);
     // Order Drafts
     Route::post('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftSave']);
     Route::get('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftList']);

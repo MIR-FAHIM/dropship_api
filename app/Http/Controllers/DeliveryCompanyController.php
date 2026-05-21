@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\DeliveryAssignedInfo;
 use App\Models\DeliveryCompany;
 use App\Models\CarryBeeOrderCreateForm;
+use App\Models\VendorCarryBeeCredintial;
 use App\Service\CarrybeeService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -124,22 +125,25 @@ class DeliveryCompanyController extends Controller
     // -------------------------------------------------------------------------
 
     /**
-     * Resolve a DeliveryCompany and build a CarrybeeService instance.
+     * Resolve a VendorCarryBeeCredintial and build a CarrybeeService instance.
      * Returns the service or a failed JSON response.
      */
-    private function carrybeeService($companyId)
+    private function carrybeeService($vendorId)
     {
-        $company = DeliveryCompany::find($companyId);
+        $credential = VendorCarryBeeCredintial::where('vendor_id', $vendorId)
+            ->where('is_active', true)
+            ->latest()
+            ->first();
 
-        if (!$company) {
-            return $this->failed('Delivery company not found', null, 404);
+        if (!$credential) {
+            return $this->failed('No active Carrybee credentials found for this vendor', null, 404);
         }
 
-        if (!$company->api_key || !$company->secret_key || !$company->client_context) {
-            return $this->failed('Carrybee credentials are incomplete for this company', null, 422);
+        if (!$credential->client_id || !$credential->client_secret || !$credential->client_context) {
+            return $this->failed('Carrybee credentials are incomplete for this vendor', null, 422);
         }
 
-        return new CarrybeeService($company->api_key, $company->secret_key, $company->client_context);
+        return new CarrybeeService($credential->client_id, $credential->client_secret, $credential->client_context);
     }
 
     /**
@@ -162,12 +166,12 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
-     * GET /delivery-companies/carrybee/{companyId}/cities/{cityId}/zones
+     * GET /delivery-companies/carrybee/{vendorId}/cities/{cityId}/zones
      */
-    public function carrybeeZones($companyId, int $cityId)
+    public function carrybeeZones($vendorId, int $cityId)
     {
         try {
-            $service = $this->carrybeeService($companyId);
+            $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service; // error response
@@ -186,12 +190,12 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
-     * GET /delivery-companies/carrybee/{companyId}/cities/{cityId}/zones/{zoneId}/areas
+     * GET /delivery-companies/carrybee/{vendorId}/cities/{cityId}/zones/{zoneId}/areas
      */
-    public function carrybeeAreas($companyId, int $cityId, int $zoneId)
+    public function carrybeeAreas($vendorId, int $cityId, int $zoneId)
     {
         try {
-            $service = $this->carrybeeService($companyId);
+            $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service;
@@ -210,16 +214,16 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
-     * GET /delivery-companies/carrybee/{companyId}/area-suggestion?search=
+     * GET /delivery-companies/carrybee/{vendorId}/area-suggestion?search=
      */
-    public function carrybeeAreaSuggestion(Request $request, $companyId)
+    public function carrybeeAreaSuggestion(Request $request, $vendorId)
     {
         try {
             $request->validate([
                 'search' => ['required', 'string', 'max:255'],
             ]);
 
-            $service = $this->carrybeeService($companyId);
+            $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service;
@@ -240,12 +244,12 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
-     * GET /delivery-companies/carrybee/{companyId}/stores
+     * GET /delivery-companies/carrybee/{vendorId}/stores
      */
-    public function carrybeeGetStores($companyId)
+    public function carrybeeGetStores($vendorId)
     {
         try {
-            $service = $this->carrybeeService($companyId);
+            $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service;
@@ -264,9 +268,9 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
-     * POST /delivery-companies/carrybee/{companyId}/stores
+     * POST /delivery-companies/carrybee/{vendorId}/stores
      */
-    public function carrybeeCreateStore(Request $request, $companyId)
+    public function carrybeeCreateStore(Request $request, $vendorId)
     {
         try {
             $validated = $request->validate([
@@ -280,7 +284,7 @@ class DeliveryCompanyController extends Controller
                 'area_id'                         => ['required', 'integer'],
             ]);
 
-            $service = $this->carrybeeService($companyId);
+            $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service;
@@ -301,13 +305,13 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
-     * GET /delivery-companies/carrybee/{companyId}/orders
+     * GET /delivery-companies/carrybee/{vendorId}/orders
      */
 
-    public function carrybeeGetOrders($companyId)
+    public function carrybeeGetOrders($vendorId)
     {
         try {
-            $service = $this->carrybeeService($companyId);
+            $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service;
@@ -326,9 +330,9 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
-     * POST /delivery-companies/carrybee/{companyId}/orders
+     * POST /delivery-companies/carrybee/{vendorId}/orders
      */
-    public function carrybeeCreateOrder(Request $request, $companyId)
+    public function carrybeeCreateOrder(Request $request, $vendorId)
     {
         try {
             $validated = $request->validate([
@@ -359,7 +363,7 @@ class DeliveryCompanyController extends Controller
                 'own_note'                    => ['nullable', 'string'],
             ]);
 
-            $service = $this->carrybeeService($companyId);
+            $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service;
@@ -399,7 +403,7 @@ class DeliveryCompanyController extends Controller
                     [
                         'consignment_id'     => $order['consignment_id'],
                         'merchant_order_id'  => $order['merchant_order_id'] ?? null,
-                        'delivery_company_id'  => $companyId,
+                        'delivery_company_id'  => $vendorId,
                         'recipient_name'     => $order['recipient_name'],
                         'recipient_phone'    => $order['recipient_phone'],
                         'recipient_address'  => $order['recipient_address'],
@@ -420,16 +424,16 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
-     * POST /delivery-companies/carrybee/{companyId}/orders/{consignmentId}/cancel
+     * POST /delivery-companies/carrybee/{vendorId}/orders/{consignmentId}/cancel
      */
-    public function carrybeeCancelOrder(Request $request, $companyId, string $consignmentId)
+    public function carrybeeCancelOrder(Request $request, $vendorId, string $consignmentId)
     {
         try {
             $validated = $request->validate([
                 'cancellation_reason' => ['required', 'string', 'max:500'],
             ]);
 
-            $service = $this->carrybeeService($companyId);
+            $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service;
@@ -450,12 +454,12 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
-     * GET /delivery-companies/carrybee/{companyId}/orders/{consignmentId}/details
+     * GET /delivery-companies/carrybee/{vendorId}/orders/{consignmentId}/details
      */
-    public function carrybeeOrderDetails($companyId, string $consignmentId)
+    public function carrybeeOrderDetails($vendorId, string $consignmentId)
     {
         try {
-            $service = $this->carrybeeService($companyId);
+            $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service;
@@ -474,18 +478,18 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
-     * POST /delivery-companies/carrybee/{companyId}/address-details
+     * POST /delivery-companies/carrybee/{vendorId}/address-details
      * Body: { "query": "Baridhara Jame Masjid, baridhara, Dhaka" }
      * Returns city_id and zone_id.
      */
-    public function carrybeeAddressDetails(Request $request, $companyId)
+    public function carrybeeAddressDetails(Request $request, $vendorId)
     {
         try {
             $request->validate([
                 'query' => ['required', 'string', 'max:500'],
             ]);
 
-            $service = $this->carrybeeService($companyId);
+            $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service;
