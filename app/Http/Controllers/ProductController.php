@@ -342,7 +342,7 @@ class ProductController extends Controller
                 });
             }
 
-            $perPage = (int) $request->get('per_page', 20);
+            $perPage = (int) $request->get('per_page', 24);
             $products = $query->latest()->paginate($perPage);
 
             return $this->success('Products fetched successfully', $products, 200,);
@@ -412,7 +412,7 @@ class ProductController extends Controller
                 });
             }
 
-            $perPage = (int) $request->get('per_page', 20);
+            $perPage = (int) $request->get('per_page', 24);
             $products = $query->latest()->paginate($perPage);
 
             return $this->success('Products fetched successfully', $products, 200,);
@@ -459,7 +459,7 @@ class ProductController extends Controller
                 });
             }
 
-            $perPage = (int) $request->get('per_page', 20);
+            $perPage = (int) $request->get('per_page', 24);
             $products = $query->latest()->paginate($perPage);
 
             return $this->success('Products fetched successfully', $products, 200,);
@@ -506,7 +506,7 @@ class ProductController extends Controller
                 });
             }
 
-            $perPage = (int) $request->get('per_page', 20);
+            $perPage = (int) $request->get('per_page', 24);
             $products = $query->latest()->paginate($perPage);
 
             return $this->success('Products fetched successfully', $products, 200,);
@@ -825,7 +825,7 @@ class ProductController extends Controller
                 });
             }
 
-            $perPage = (int) $request->get('per_page', 20);
+            $perPage = (int) $request->get('per_page', 24);
             $products = $query->latest()->paginate($perPage);
 
             return $this->success('Products fetched successfully', $products, 200,);
