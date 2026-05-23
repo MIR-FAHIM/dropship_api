@@ -292,7 +292,11 @@ class ProductController extends Controller
     public function listProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category',  'subCategory', 'vendor.division', 'vendor.district', 'brand', 'productDiscount']);
+            $query = Product::query()->with(['primaryImage', 'images', 'category',
+              'subCategory', 'vendor.division', 
+              'vendor.district', 'brand', 'productDiscount']) ->whereHas('vendor', function ($q) {
+                  $q->where('is_active', 1);
+              });
 
             if ($request->filled('shop_id')) {
                 $query->where('shop_id', $request->shop_id);
