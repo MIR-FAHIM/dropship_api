@@ -294,9 +294,7 @@ class ProductController extends Controller
         try {
             $query = Product::query()->with(['primaryImage', 'images', 'category',
               'subCategory', 'vendor.division', 
-              'vendor.district', 'brand', 'productDiscount']) ->whereHas('vendor', function ($q) {
-                  $q->where('is_active', 1);
-              });
+              'vendor.district', 'brand', 'productDiscount']);
 
             if ($request->filled('shop_id')) {
                 $query->where('shop_id', $request->shop_id);
@@ -786,7 +784,9 @@ class ProductController extends Controller
                 'brand',
                 'productDiscount',
                 'averageReview'
-            ])->where('approved', 1);
+            ])->where('approved', 1)->whereHas('vendor', function ($q) {
+                $q->where('is_active', 1);
+            });
 
             if ($request->filled('category_id')) {
                 $categoryId = (int) $request->category_id;
