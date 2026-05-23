@@ -362,7 +362,10 @@ class ProductController extends Controller
                 'vendor.district',
                 'brand',
                 'productDiscount'
-            ])->where('approved', 1);
+            ])->where('approved', 1)
+              ->whereHas('vendor', function ($q) {
+                  $q->where('is_active', 1);
+              });
 
             if ($request->filled('shop_id')) {
                 $query->where('shop_id', $request->shop_id);
