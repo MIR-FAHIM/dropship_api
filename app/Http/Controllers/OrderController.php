@@ -343,6 +343,7 @@ class OrderController extends Controller
                 'user',
                 'vendor',
                 'items.shop',
+                'items.productAttribute',
                 'deliveryMan.deliveryMan',
                 'deliveryInformation',
                 'statusHistory.status',

@@ -58,4 +58,10 @@ class OrderItem extends Model
     {
         return $this->belongsTo(Vendor::class, 'shop_id');
     }
+
+
+       public function productAttribute()
+    {
+        return $this->belongsTo(ProductAttribute::class, 'attribute_id');
+    }
 }
