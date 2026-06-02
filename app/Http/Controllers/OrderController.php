@@ -143,6 +143,7 @@ class OrderController extends Controller
                     'order_id' => $order->id,
                     'product_id' => $ci->product_id,
                     'shop_id' => $ci->shop_id,
+                    'attribute_id' => $ci->attribute_id,
 
                     // Snapshot important product fields
                     'product_name' => $product ? ($product->name ?? null) : null,

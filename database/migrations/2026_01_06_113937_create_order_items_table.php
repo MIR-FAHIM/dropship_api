@@ -27,6 +27,8 @@ return new class extends Migration
             // Multivendor tracking (who will fulfill this item)
             $table->foreignId('shop_id')
                 ->nullable();
+            $table->integer('attribute_id')
+                ->nullable();
 
             // Product snapshot (so history survives product edits/deletes)
             $table->string('product_name')->nullable();

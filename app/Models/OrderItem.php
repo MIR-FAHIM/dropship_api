@@ -16,6 +16,7 @@ class OrderItem extends Model
 
         'product_name',
         'sku',
+        'attribute_id',
 
         'unit_price',
         'reseller_price',

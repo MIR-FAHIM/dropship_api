@@ -92,7 +92,6 @@ Route::prefix('brands')->group(function () {
 
     Route::delete('/delete/{id}', [BrandController::class, 'deleteBrand']);
 });
-
 Route::prefix('products')->group(function () {
     Route::post('/create', [ProductController::class, 'createProduct']);
     Route::patch('/approval/{id}', [ProductController::class, 'productApproval']);
