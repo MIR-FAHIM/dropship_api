@@ -13,7 +13,8 @@ return new class extends Migration
     {
         Schema::create('support_tickets', function (Blueprint $table) {
             $table->id();
-            $table->string('user_id')->nullable();
+            $table->unsignedBigInteger('user_id')->nullable();
+            $table->unsignedBigInteger('order_id')->nullable();
             $table->string('support_type')->nullable();
             $table->string('title');
             $table->text('description')->nullable();

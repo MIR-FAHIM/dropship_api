@@ -11,6 +11,7 @@ class SupportTicket extends Model
 
     protected $fillable = [
         'user_id',
+        'order_id',
         'support_type',
         'title',
         'description',
