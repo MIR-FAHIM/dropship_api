@@ -34,6 +34,7 @@ use App\Http\Controllers\TaskPriorityController;
 use App\Http\Controllers\TaskTypeController;
 use App\Http\Controllers\UserBankAccountController;
 use App\Http\Controllers\WithdrawController;
+use App\Http\Controllers\SupportTicketController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -42,6 +43,14 @@ Route::post('/auth/login-as-vendor', [AuthController::class, 'loginAsVendor']);
 Route::post('/auth/logout', [AuthController::class, 'logout']);
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
+// Support Tickets
+Route::prefix('support-tickets')->group(function () {
+    Route::post('/add', [SupportTicketController::class, 'addSupportTicket']);
+    Route::get('/all', [SupportTicketController::class, 'getAllSupportTicket']);
+    Route::get('/user/{userId}', [SupportTicketController::class, 'getUserSupportTicket']);
+    Route::put('/edit/{id}', [SupportTicketController::class, 'editTicket']);
+    Route::post('/status-change/{id}', [SupportTicketController::class, 'changeTicketStatus']);
+});
 // Withdraw Requests
 Route::prefix('withdraws')->group(function () {
     Route::post('/add', [WithdrawController::class, 'addWithdrawRequest']);
