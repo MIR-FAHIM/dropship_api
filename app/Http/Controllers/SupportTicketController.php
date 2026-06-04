@@ -85,7 +85,7 @@ class SupportTicketController extends Controller
     {
         try {
             $validated = $request->validate([
-                'status'     => 'required|in:open,in_progress,resolved,closed',
+                'status'     => 'required|string',
                 'admin_note' => 'nullable|string',
             ]);
 
