@@ -113,7 +113,7 @@ return $this->failed($firstError ?? 'Validation failed', null, 422);
     public function getVendorList()
     {
         try {
-            $vendors = Vendor::with('user', 'carryBeeInfo')->get();
+            $vendors = Vendor::with('user', 'carryBeeInfo')->orderBy('id', 'desc')->get();
 
             return $this->success('Vendor list fetched', $vendors);
         } catch (\Throwable $e) {
