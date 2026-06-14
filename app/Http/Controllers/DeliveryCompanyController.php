@@ -125,14 +125,13 @@ class DeliveryCompanyController extends Controller
     // -------------------------------------------------------------------------
 
     /**
-     * Resolve a VendorCarryBeeCredintial and build a CarrybeeService instance.
+     * Resolve a DeliveryCompany and build a CarrybeeService instance.
      * Returns the service or a failed JSON response.
      */
     private function carrybeeService($vendorId)
     {
-        $credential = VendorCarryBeeCredintial::where('vendor_id', $vendorId)
-            ->where('is_active', true)
-            ->latest()
+        $credential = DeliveryCompany::
+        latest()
             ->first();
 
         if (!$credential) {
