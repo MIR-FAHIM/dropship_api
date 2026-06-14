@@ -130,19 +130,17 @@ class DeliveryCompanyController extends Controller
      */
     private function carrybeeService($vendorId)
     {
-        $credential = DeliveryCompany::
-        latest()
-            ->first();
+        $credential = DeliveryCompany::where('is_active', true)->latest()->first();
 
         if (!$credential) {
-            return $this->failed('No active Carrybee credentials found for this vendor', null, 404);
+            return $this->failed('No active Carrybee credentials found', null, 404);
         }
 
-        if (!$credential->client_id || !$credential->client_secret || !$credential->client_context) {
-            return $this->failed('Carrybee credentials are incomplete for this vendor', null, 422);
+        if (!$credential->api_key || !$credential->secret_key || !$credential->client_context) {
+            return $this->failed('Carrybee credentials are incomplete', null, 422);
         }
 
-        return new CarrybeeService($credential->client_id, $credential->client_secret, $credential->client_context);
+        return new CarrybeeService($credential->api_key, $credential->secret_key, $credential->client_context);
     }
 
     /**
