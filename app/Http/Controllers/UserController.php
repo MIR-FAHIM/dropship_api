@@ -111,7 +111,7 @@ class UserController extends Controller
                 'lat' => $validated['lat'] ?? null,
                 'lon' => $validated['lon'] ?? null,
 
-                'is_banned' => array_key_exists('is_banned', $validated) ? (bool) $validated['is_banned'] : null,
+                'is_banned' => 0,
             ]);
 
             return $this->success('User created successfully', $user, 201);
