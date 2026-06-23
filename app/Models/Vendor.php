@@ -40,4 +40,11 @@ class Vendor extends Model
     {
         return $this->hasOne(VendorCarryBeeCredintial::class, 'vendor_id');
     }
+
+    public function products()
+    {
+        return $this->hasMany(Product::class, 'vendor_id');
+    }
+
+    
 }
