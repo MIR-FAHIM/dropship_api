@@ -82,7 +82,7 @@ class ProductController extends Controller
                 'thumbnail_img' => ['nullable', 'integer', 'exists:uploads,id'],
 
                 'video_provider' => ['nullable', 'string', 'max:100'],
-                'video_link' => ['required', 'string', 'max:255'],
+                'video_link' => ['nullable', 'string', 'max:255'],
                 'tags' => ['nullable', 'string', 'max:255'],
                 'description' => ['nullable', 'string'],
                 'sku' => ['nullable', 'string'],
