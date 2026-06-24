@@ -13,10 +13,10 @@ return new class extends Migration
     {
         Schema::create('price_update_logs', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('product_id')->constrained('products')->cascadeOnDelete();
+            $table->foreignId('product_id');
             $table->decimal('before_price', 12, 2);
             $table->decimal('new_price', 12, 2);
-            $table->foreignId('updated_by')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('updated_by');
             $table->string('status', 50)->default('pending');
             $table->text('note')->nullable();
             $table->timestamps();
