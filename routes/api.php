@@ -31,6 +31,7 @@ use App\Http\Controllers\VendorController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskPriorityController;
 use App\Http\Controllers\TaskTypeController;
+use App\Http\Controllers\PriceUpdateLogController;
 use App\Http\Controllers\UserBankAccountController;
 use App\Http\Controllers\WithdrawController;
 use App\Http\Controllers\SupportTicketController;
@@ -240,6 +241,10 @@ Route::prefix('product-discounts')->group(function () {
     Route::get('/details/{id}', [ProductDiscountController::class, 'details']);
     Route::put('/update/{id}', [ProductDiscountController::class, 'update']);
     Route::delete('/delete/{id}', [ProductDiscountController::class, 'delete']);
+});
+
+Route::prefix('price-update-logs')->group(function () {
+    Route::get('/list', [PriceUpdateLogController::class, 'list']);
 });
 
 // Uploads
