@@ -252,6 +252,7 @@ Route::prefix('error-logs')->group(function () {
     Route::get('/product-create', [ErrorLogController::class, 'productCreateLogs']);
     Route::get('/login', [ErrorLogController::class, 'loginLogs']);
     Route::get('/registration', [ErrorLogController::class, 'registrationLogs']);
+    Route::get('/order', [ErrorLogController::class, 'orderLogs']);
 });
 
 // Uploads

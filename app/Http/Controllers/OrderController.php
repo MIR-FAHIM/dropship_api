@@ -9,6 +9,7 @@ use App\Models\OrderStatus;
 use App\Models\OrderStatusHistory;
 use App\Models\Transaction;
 use App\Models\OrderItem;
+use App\Models\OrderErrorLog;
 use App\Models\ResellerTransaction;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -18,6 +19,45 @@ use App\Service\NotificationService;
 
 class OrderController extends Controller
 {
+    private function maskSensitive(array $payload): array
+    {
+        unset($payload['password'], $payload['password_confirmation']);
+        return $payload;
+    }
+
+    private function resolveCheckoutUser(Request $request): ?User
+    {
+        $userId = $request->input('user_id');
+
+        if (!empty($userId)) {
+            return User::find($userId);
+        }
+
+        return null;
+    }
+
+    private function storeOrderError(Request $request, string $message, ?User $user = null, string $level = 'error', ?\Throwable $exception = null): void
+    {
+        try {
+            OrderErrorLog::create([
+                'user_id' => $user?->id,
+                'level' => $level,
+                'message' => $message,
+                'file' => $exception?->getFile(),
+                'line' => $exception?->getLine(),
+                'url' => $request->fullUrl(),
+                'method' => $request->method(),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'request_data' => json_encode($this->maskSensitive($request->all()), JSON_UNESCAPED_UNICODE),
+                'stack_trace' => $exception?->getTraceAsString(),
+                'created_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            // Do not interrupt checkout response if logging fails.
+        }
+    }
+
     private function success($message, $data = null, int $code = 200)
     {
         return response()->json([
@@ -72,6 +112,7 @@ class OrderController extends Controller
                 ->first();
 
             if (!$cart) {
+                $this->storeOrderError($request, 'Checkout failed: active cart not found', User::find($validated['user_id']));
                 return $this->failed('Active cart not found', null, 404);
             }
 
@@ -80,6 +121,7 @@ class OrderController extends Controller
                 ->get();
 
             if ($cartItems->count() === 0) {
+                $this->storeOrderError($request, 'Checkout failed: cart is empty', User::find($validated['user_id']), 'warning');
                 return $this->failed('Cart is empty', null, 409);
             }
 
@@ -183,10 +225,16 @@ class OrderController extends Controller
             ]);
             return $this->success('Checkout successful. Order created.', $order, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            DB::rollBack();
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            $this->storeOrderError($request, 'Checkout validation failed', $this->resolveCheckoutUser($request), 'warning', $e);
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
-            DB::rollBack();
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            $this->storeOrderError($request, 'Checkout failed with server error', $this->resolveCheckoutUser($request), 'error', $e);
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
