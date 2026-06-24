@@ -6,10 +6,39 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use App\Models\ApiToken;
+use App\Models\LoginError;
 use App\Service\ApiTokenService;
 
 class AuthController extends Controller
 {
+    private function maskSensitive(array $payload): array
+    {
+        unset($payload['password'], $payload['password_confirmation']);
+        return $payload;
+    }
+
+    private function storeLoginError(Request $request, string $message, ?User $user = null, string $level = 'error', ?\Throwable $exception = null): void
+    {
+        try {
+            LoginError::create([
+                'user_id' => $user?->id,
+                'level' => $level,
+                'message' => $message,
+                'file' => $exception?->getFile(),
+                'line' => $exception?->getLine(),
+                'url' => $request->fullUrl(),
+                'method' => $request->method(),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'request_data' => json_encode($this->maskSensitive($request->all()), JSON_UNESCAPED_UNICODE),
+                'stack_trace' => $exception?->getTraceAsString(),
+                'created_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            // Avoid breaking authentication flow if logging fails.
+        }
+    }
+
     private function success($message, $data = null, int $code = 200)
     {
         return response()->json([
@@ -68,11 +97,13 @@ class AuthController extends Controller
             }
 
             if (!$user || !Hash::check($validated['password'], $user->password)) {
+                $this->storeLoginError($request, 'Invalid credentials', $user, 'warning');
                 return $this->failed('Invalid credentials', null, 401);
             }
 
             // Check if user is banned (not activated)
             if (isset($user->banned) && $user->banned == 1) {
+                $this->storeLoginError($request, 'Login blocked for banned user', $user, 'warning');
                 return $this->failed('You need to activate your account', null, 403);
             }
 
@@ -94,8 +125,10 @@ class AuthController extends Controller
                 'user' => $user,
             ], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->storeLoginError($request, 'Login validation failed', null, 'warning', $e);
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
+            $this->storeLoginError($request, 'Login failed with server error', null, 'error', $e);
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
