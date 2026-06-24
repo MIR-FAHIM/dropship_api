@@ -32,6 +32,7 @@ use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskPriorityController;
 use App\Http\Controllers\TaskTypeController;
 use App\Http\Controllers\PriceUpdateLogController;
+use App\Http\Controllers\ErrorLogController;
 use App\Http\Controllers\UserBankAccountController;
 use App\Http\Controllers\WithdrawController;
 use App\Http\Controllers\SupportTicketController;
@@ -245,6 +246,10 @@ Route::prefix('product-discounts')->group(function () {
 
 Route::prefix('price-update-logs')->group(function () {
     Route::get('/list', [PriceUpdateLogController::class, 'list']);
+});
+
+Route::prefix('error-logs')->group(function () {
+    Route::get('/product-create', [ErrorLogController::class, 'productCreateLogs']);
 });
 
 // Uploads
