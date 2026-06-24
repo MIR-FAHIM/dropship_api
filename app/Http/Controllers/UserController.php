@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Models\RegistrationErrorLog;
 use App\Models\ResellerTransaction;
 use App\Service\ApiTokenService;
 use Illuminate\Http\Request;
@@ -11,6 +12,45 @@ use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
+    private function maskSensitive(array $payload): array
+    {
+        unset($payload['password'], $payload['password_confirmation']);
+        return $payload;
+    }
+
+    private function resolveUserForRegistrationLog(Request $request): ?User
+    {
+        $email = $request->input('email');
+
+        if (!empty($email)) {
+            return User::where('email', $email)->first();
+        }
+
+        return null;
+    }
+
+    private function storeRegistrationError(Request $request, string $message, ?User $user = null, string $level = 'error', ?\Throwable $exception = null): void
+    {
+        try {
+            RegistrationErrorLog::create([
+                'user_id' => $user?->id,
+                'level' => $level,
+                'message' => $message,
+                'file' => $exception?->getFile(),
+                'line' => $exception?->getLine(),
+                'url' => $request->fullUrl(),
+                'method' => $request->method(),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'request_data' => json_encode($this->maskSensitive($request->all()), JSON_UNESCAPED_UNICODE),
+                'stack_trace' => $exception?->getTraceAsString(),
+                'created_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            // Avoid breaking registration flow if logging fails.
+        }
+    }
+
     private function success($message, $data = null, int $code = 200)
     {
         return response()->json([
@@ -61,8 +101,10 @@ class UserController extends Controller
                 'user' => $user,
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->storeRegistrationError($request, 'Dropshipper registration validation failed', $this->resolveUserForRegistrationLog($request), 'warning', $e);
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
+            $this->storeRegistrationError($request, 'Dropshipper registration failed with server error', $this->resolveUserForRegistrationLog($request), 'error', $e);
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
@@ -116,10 +158,12 @@ class UserController extends Controller
 
             return $this->success('User created successfully', $user, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->storeRegistrationError($request, 'User create validation failed', $this->resolveUserForRegistrationLog($request), 'warning', $e);
             $errors = $e->errors();
             $firstError = collect($errors)->flatten()->first();
             return $this->failed($firstError ?? 'Validation failed', null, 422);
         } catch (\Throwable $e) {
+            $this->storeRegistrationError($request, 'User create failed with server error', $this->resolveUserForRegistrationLog($request), 'error', $e);
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
