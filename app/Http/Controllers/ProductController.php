@@ -35,6 +35,28 @@ class ProductController extends Controller
         ], $code);
     }
 
+    private function logProductCreateError(Request $request, \Throwable $e, string $level = 'error', ?array $requestData = null): void
+    {
+        try {
+            ProductCreateErrorLog::create([
+                'user_id' => $request->user()?->id ?? $request->input('user_id'),
+                'level' => $level,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'url' => $request->fullUrl(),
+                'method' => $request->method(),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'request_data' => json_encode($requestData ?? $request->all()),
+                'stack_trace' => $e->getTraceAsString(),
+                'created_at' => now(),
+            ]);
+        } catch (\Throwable $ignored) {
+            // Intentionally ignore logging failures to avoid breaking API responses.
+        }
+    }
+
     /**
      * POST /products/create
      * Creates product (optionally with images array)
@@ -205,26 +227,18 @@ class ProductController extends Controller
                 $product->sku = 'p' . $product->id . 'v' . ($product->vendor_id ?? '0');
                 $product->save();
             } catch (\Throwable $e) {
-                ProductCreateErrorLog::create([
-                    'user_id' => $request->user()?->id,
-                    'level' => 'error',
-                    'message' => $e->getMessage(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                    'url' => $request->fullUrl(),
-                    'method' => $request->method(),
-                    'ip_address' => $request->ip(),
-                    'user_agent' => $request->userAgent(),
-                    'request_data' => json_encode($request->all()),
-                    'stack_trace' => $e->getTraceAsString(),
-                    'created_at' => now(),
-                ]);
+                $this->logProductCreateError($request, $e, 'error', $productData);
 
                 return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
             }
 
             return $this->success('Product created successfully', $product, 201);
         } catch (ValidationException $e) {
+            $this->logProductCreateError($request, $e, 'validation_error', [
+                'validation_errors' => $e->errors(),
+                'payload' => $request->all(),
+            ]);
+
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
