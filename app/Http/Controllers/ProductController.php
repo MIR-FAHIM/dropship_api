@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 use App\Models\Product;
 use App\Models\ProductClicks;
 use App\Models\ProductImage;
+use App\Models\ProductCreateErrorLog;
 use App\Models\PriceUpdateLog;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -197,11 +198,30 @@ class ProductController extends Controller
                 'frequently_brought_selection_type' => $validated['frequently_brought_selection_type'] ?? null,
             ];
 
-            $product = Product::create($productData);
+            try {
+                $product = Product::create($productData);
 
-            // Auto-generate SKU: p{id}v{vendor_id}
-            $product->sku = 'p' . $product->id . 'v' . ($product->vendor_id ?? '0');
-            $product->save();
+                // Auto-generate SKU: p{id}v{vendor_id}
+                $product->sku = 'p' . $product->id . 'v' . ($product->vendor_id ?? '0');
+                $product->save();
+            } catch (\Throwable $e) {
+                ProductCreateErrorLog::create([
+                    'user_id' => $request->user()?->id,
+                    'level' => 'error',
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'url' => $request->fullUrl(),
+                    'method' => $request->method(),
+                    'ip_address' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                    'request_data' => json_encode($request->all()),
+                    'stack_trace' => $e->getTraceAsString(),
+                    'created_at' => now(),
+                ]);
+
+                return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+            }
 
             return $this->success('Product created successfully', $product, 201);
         } catch (ValidationException $e) {

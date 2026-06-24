@@ -8,7 +8,7 @@ DESCRIBE content_images;
 php artisan make:model PriceUpdateLog -m  
 php artisan make:model District -m  
  
-php artisan make:migration FacebookContentSuggestion
+php artisan make:migration ProductCreateErrorLog
 php artisan route:list
 php artisan route:clear
 php artisan make:controller PriceUpdateLog
