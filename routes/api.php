@@ -249,6 +249,7 @@ Route::prefix('price-update-logs')->group(function () {
 });
 
 Route::prefix('error-logs')->group(function () {
+    Route::get('/report/overall', [ErrorLogController::class, 'overallReport']);
     Route::get('/product-create', [ErrorLogController::class, 'productCreateLogs']);
     Route::get('/login', [ErrorLogController::class, 'loginLogs']);
     Route::get('/registration', [ErrorLogController::class, 'registrationLogs']);

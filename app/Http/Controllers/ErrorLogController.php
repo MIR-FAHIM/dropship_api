@@ -28,6 +28,65 @@ class ErrorLogController extends Controller
         ], $code);
     }
 
+    public function overallReport()
+    {
+        try {
+            $now = now();
+            $todayStart = $now->copy()->startOfDay();
+            $lastHourStart = $now->copy()->subHour();
+
+            $sources = [
+                'product_create' => ProductCreateErrorLog::query(),
+                'login' => LoginError::query(),
+                'registration' => RegistrationErrorLog::query(),
+                'order' => OrderErrorLog::query(),
+            ];
+
+            $todaySeparated = [];
+            $lastHourSeparated = [];
+
+            foreach ($sources as $key => $baseQuery) {
+                $todaySeparated[$key] = (clone $baseQuery)
+                    ->whereBetween('created_at', [$todayStart, $now])
+                    ->count();
+
+                $lastHourSeparated[$key] = (clone $baseQuery)
+                    ->whereBetween('created_at', [$lastHourStart, $now])
+                    ->count();
+            }
+
+            $todayTotal = array_sum($todaySeparated);
+            $lastHourTotal = array_sum($lastHourSeparated);
+
+            $otherTodaySeparated = [];
+            foreach ($todaySeparated as $key => $count) {
+                $otherTodaySeparated[$key] = max(0, $count - ($lastHourSeparated[$key] ?? 0));
+            }
+
+            $data = [
+                'time_window' => [
+                    'now' => $now,
+                    'today_start' => $todayStart,
+                    'last_hour_start' => $lastHourStart,
+                ],
+                'today_total_errors' => $todayTotal,
+                'today_separated_error_count' => $todaySeparated,
+                'last_hour_errors' => [
+                    'total' => $lastHourTotal,
+                    'separated' => $lastHourSeparated,
+                ],
+                'others_errors_today' => [
+                    'total' => max(0, $todayTotal - $lastHourTotal),
+                    'separated' => $otherTodaySeparated,
+                ],
+            ];
+
+            return $this->success('Overall error report fetched successfully', $data);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
     public function productCreateLogs(Request $request)
     {
         try {
