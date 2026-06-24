@@ -683,9 +683,8 @@ class ProductController extends Controller
                 $newPrice = is_null($product->unit_price) ? null : (float) $product->unit_price;
 
                 if ($beforePrice !== $newPrice) {
-                    $updatedBy = $validated['user_id']
-                        ?? $request->user()?->id
-                        ?? $product->user_id
+                    $updatedBy = $request->input('updated_by')
+                     
                         ?? null;
 
                     if (!is_null($updatedBy)) {
