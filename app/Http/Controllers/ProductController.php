@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 use App\Models\Product;
 use App\Models\ProductClicks;
 use App\Models\ProductImage;
+use App\Models\PriceUpdateLog;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
@@ -673,8 +674,32 @@ class ProductController extends Controller
                 }
             }
 
+            $oldUnitPrice = $product->unit_price;
             $product->fill($validated);
             $product->save();
+
+            if (array_key_exists('unit_price', $validated)) {
+                $beforePrice = is_null($oldUnitPrice) ? null : (float) $oldUnitPrice;
+                $newPrice = is_null($product->unit_price) ? null : (float) $product->unit_price;
+
+                if ($beforePrice !== $newPrice) {
+                    $updatedBy = $validated['user_id']
+                        ?? $request->user()?->id
+                        ?? $product->user_id
+                        ?? null;
+
+                    if (!is_null($updatedBy)) {
+                        PriceUpdateLog::create([
+                            'product_id' => $product->id,
+                            'before_price' => $beforePrice ?? 0,
+                            'new_price' => $newPrice ?? 0,
+                            'updated_by' => $updatedBy,
+                            'status' => 'updated',
+                            'note' => 'Unit price updated from product update endpoint',
+                        ]);
+                    }
+                }
+            }
 
 
 
