@@ -10,7 +10,7 @@ class ProductCreateErrorLog extends Model
 {
     use HasFactory;
 
-    protected $table = 'product_create_error_log';
+    protected $table = 'product_create_error_logs';
 
     public $timestamps = false;
 

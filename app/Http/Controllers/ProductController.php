@@ -11,6 +11,7 @@ use App\Models\PriceUpdateLog;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class ProductController extends Controller
@@ -53,7 +54,11 @@ class ProductController extends Controller
                 'created_at' => now(),
             ]);
         } catch (\Throwable $ignored) {
-            // Intentionally ignore logging failures to avoid breaking API responses.
+            Log::error('Failed to write product create error log', [
+                'logging_error' => $ignored->getMessage(),
+                'url' => $request->fullUrl(),
+                'method' => $request->method(),
+            ]);
         }
     }
 
