@@ -15,12 +15,20 @@ class CarrybeeWebhookController extends Controller
     public function handle(Request $request): JsonResponse
     {
         $payload = $request->json()->all();
+        if (!is_array($payload) || empty($payload)) {
+            $payload = $request->all();
+        }
+
+        if (!is_array($payload)) {
+            $payload = [];
+        }
+
         $rawBody = $request->getContent();
         $signatureHeader = (string) config('carrybee.webhook.signature_header', 'X-Carrybee-Webhook-Signature');
         $signature = (string) $request->header($signatureHeader, '');
 
         $result = $this->webhookService->process(
-            payload: is_array($payload) ? $payload : [],
+            payload: $payload,
             rawBody: $rawBody,
             signature: $signature,
             headers: $request->headers->all(),
