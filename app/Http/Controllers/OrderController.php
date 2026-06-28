@@ -390,6 +390,7 @@ class OrderController extends Controller
             $order = Order::with([
                 'user',
                 'vendor',
+                'status',
                 'items.shop',
                 'items.productAttribute.attribute', 
                 'items.productAttribute.value',
