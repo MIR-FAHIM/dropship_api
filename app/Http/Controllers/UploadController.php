@@ -54,6 +54,11 @@ class UploadController extends Controller
         $uploads = Upload::orderBy('id', 'desc')->paginate(20);
         return response()->json(['success' => true, 'data' => $uploads]);
     }
+    public function listUploadsByUserId($userId)
+    {
+        $uploads = Upload::where('user_id', $userId)->orderBy('id', 'desc')->paginate(20);
+        return response()->json(['success' => true, 'data' => $uploads]);
+    }
 
     /**
      * Get a single upload by id.

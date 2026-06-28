@@ -260,6 +260,7 @@ Route::prefix('error-logs')->group(function () {
 Route::prefix('uploads')->group(function () {
     Route::post('/image', [UploadController::class, 'uploadImage']);
     Route::get('/list', [UploadController::class, 'listUploads']);
+    Route::get('/list/{userId}', [UploadController::class, 'listUploadsByUserId']);
     Route::get('/{id}', [UploadController::class, 'getUpload']);
     Route::delete('/{id}', [UploadController::class, 'deleteUpload']);
 });
