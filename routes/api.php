@@ -1,4 +1,5 @@
 <?php
+
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\VendorCarryBeeCredintialController;
@@ -36,6 +37,7 @@ use App\Http\Controllers\ErrorLogController;
 use App\Http\Controllers\UserBankAccountController;
 use App\Http\Controllers\WithdrawController;
 use App\Http\Controllers\SupportTicketController;
+use App\Http\Controllers\CarrybeeWebhookController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -356,6 +358,7 @@ Route::prefix('delivery-companies')->group(function () {
     Route::post('/carrybee/{vendorId}/orders/{consignmentId}/cancel', [DeliveryCompanyController::class, 'carrybeeCancelOrder']);
     Route::get('/carrybee/{vendorId}/orders/{consignmentId}/details', [DeliveryCompanyController::class, 'carrybeeOrderDetails']);
     Route::post('/carrybee/{vendorId}/address-details', [DeliveryCompanyController::class, 'carrybeeAddressDetails']);
+    Route::post('/carrybee/webhook', [CarrybeeWebhookController::class, 'handle'])->withoutMiddleware('token');
     // Order Drafts
     Route::post('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftSave']);
     Route::get('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftList']);
