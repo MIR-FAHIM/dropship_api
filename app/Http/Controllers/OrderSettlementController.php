@@ -80,6 +80,12 @@ class OrderSettlementController extends Controller
         });
     }
 
+    private function appendSettlementStatusToPaginator($paginator): void
+    {
+        $rows = collect($paginator->items());
+        $this->appendSettlementStatusToRows($rows);
+    }
+
     public function list(Request $request)
     {
         try {
@@ -119,7 +125,7 @@ class OrderSettlementController extends Controller
 
             $perPage = (int) $request->get('per_page', 20);
             $settlements = $query->paginate($perPage);
-            $settlements->setCollection($this->appendSettlementStatusToRows($settlements->getCollection()));
+            $this->appendSettlementStatusToPaginator($settlements);
 
             return $this->success('Order settlements fetched successfully', $settlements);
         } catch (\Throwable $e) {
