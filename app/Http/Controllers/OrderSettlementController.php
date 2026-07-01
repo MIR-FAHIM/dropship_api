@@ -60,74 +60,109 @@ class OrderSettlementController extends Controller
         return $statusObject;
     }
 
-    private function appendSettlementStatusToRows($rows)
+    private function applyFilters($query, Request $request)
     {
-        $orderIds = $rows->pluck('order_id')->filter()->unique()->values();
+        if ($request->filled('order_id')) {
+            $query->where('order_id', $request->order_id);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->filled('user_type')) {
+            $query->where('user_type', $request->user_type);
+        }
+
+        if ($request->filled('settlement_type')) {
+            $query->where('settlement_type', $request->settlement_type);
+        }
+
+        if ($request->filled('payable_user_id')) {
+            $query->where('payable_user_id', $request->payable_user_id);
+        }
+
+        if ($request->filled('vendor_id')) {
+            $query->where('vendor_id', $request->vendor_id);
+        }
+
+        return $query;
+    }
+
+    private function buildOrderSettlementListItems($orderRows)
+    {
+        $orderIds = $orderRows->pluck('order_id')->filter()->unique()->values();
 
         if ($orderIds->isEmpty()) {
-            return $rows;
+            return collect();
         }
+
+        $ordersById = Order::whereIn('id', $orderIds)
+            ->get(['id', 'order_number', 'status', 'payment_status', 'total'])
+            ->keyBy('id');
 
         $settlementsByOrder = OrderSettlement::whereIn('order_id', $orderIds)
             ->get()
             ->groupBy('order_id');
 
-        return $rows->transform(function ($row) use ($settlementsByOrder) {
+        return $orderRows->map(function ($row) use ($ordersById, $settlementsByOrder) {
             $orderSettlements = $settlementsByOrder->get($row->order_id, collect());
-            $row->setAttribute('settlement_status', $this->buildSettlementStatusObject($orderSettlements));
+            $order = $ordersById->get($row->order_id);
 
-            return $row;
-        });
-    }
-
-    private function appendSettlementStatusToPaginator($paginator): void
-    {
-        $rows = collect($paginator->items());
-        $this->appendSettlementStatusToRows($rows);
+            return [
+                'order_id' => (int) $row->order_id,
+                'order_number' => $order?->order_number,
+                'order_status' => $order?->status,
+                'payment_status' => $order?->payment_status,
+                'order_total' => (float) ($order?->total ?? 0),
+                'latest_settlement_id' => (int) $row->latest_settlement_id,
+                'total_settleable_amount' => (float) $orderSettlements->sum('settleable_amount'),
+                'total_pending_amount' => (float) $orderSettlements
+                    ->where('status', OrderSettlement::STATUS_PENDING)
+                    ->sum('settleable_amount'),
+                'total_settled_amount' => (float) $orderSettlements
+                    ->where('status', OrderSettlement::STATUS_SETTLED)
+                    ->sum('settleable_amount'),
+                'settlement_status' => $this->buildSettlementStatusObject($orderSettlements),
+            ];
+        })->values();
     }
 
     public function list(Request $request)
     {
         try {
-            $query = OrderSettlement::with(['order', 'payableUser', 'vendor', 'createdBy']);
-
-            if ($request->filled('order_id')) {
-                $query->where('order_id', $request->order_id);
-            }
-
-            if ($request->filled('status')) {
-                $query->where('status', $request->status);
-            }
-
-            if ($request->filled('user_type')) {
-                $query->where('user_type', $request->user_type);
-            }
-
-            if ($request->filled('settlement_type')) {
-                $query->where('settlement_type', $request->settlement_type);
-            }
-
-            if ($request->filled('payable_user_id')) {
-                $query->where('payable_user_id', $request->payable_user_id);
-            }
-
-            if ($request->filled('vendor_id')) {
-                $query->where('vendor_id', $request->vendor_id);
-            }
-
-            $query->latest();
+            $query = $this->applyFilters(OrderSettlement::query(), $request)
+                ->select('order_id')
+                ->selectRaw('MAX(id) as latest_settlement_id')
+                ->groupBy('order_id')
+                ->orderByDesc('latest_settlement_id');
 
             if ($request->filled('all') && (int) $request->get('all') === 1) {
-                $settlements = $this->appendSettlementStatusToRows($query->get());
+                $items = $this->buildOrderSettlementListItems($query->get());
 
-                return $this->success('Order settlements fetched successfully', $settlements);
+                return $this->success('Order settlements fetched successfully', $items);
             }
 
             $perPage = (int) $request->get('per_page', 20);
-            $settlements = $query->paginate($perPage);
-            $this->appendSettlementStatusToPaginator($settlements);
+            $paginatedOrders = $query->paginate($perPage);
+            $items = $this->buildOrderSettlementListItems(collect($paginatedOrders->items()));
 
-            return $this->success('Order settlements fetched successfully', $settlements);
+            $data = [
+                'current_page' => $paginatedOrders->currentPage(),
+                'data' => $items,
+                'first_page_url' => $paginatedOrders->url(1),
+                'from' => $paginatedOrders->firstItem(),
+                'last_page' => $paginatedOrders->lastPage(),
+                'last_page_url' => $paginatedOrders->url($paginatedOrders->lastPage()),
+                'next_page_url' => $paginatedOrders->nextPageUrl(),
+                'path' => $paginatedOrders->path(),
+                'per_page' => $paginatedOrders->perPage(),
+                'prev_page_url' => $paginatedOrders->previousPageUrl(),
+                'to' => $paginatedOrders->lastItem(),
+                'total' => $paginatedOrders->total(),
+            ];
+
+            return $this->success('Order settlements fetched successfully', $data);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
