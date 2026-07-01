@@ -9,6 +9,7 @@ use App\Http\Controllers\DeliveryCompanyController;
 use App\Http\Controllers\ShopController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\OrderController;
+use App\Http\Controllers\OrderSettlementController;
 use App\Http\Controllers\DeliveryAddressController;
 use App\Http\Controllers\WishListController;
 use App\Http\Controllers\BannerController;
@@ -160,6 +161,15 @@ Route::prefix('orders')->group(function () {
     Route::post('settle/reseller-profit/{id}', [OrderController::class, 'settleResellerProfit']);
     // Item status update (for vendor/admin workflows)
     Route::patch('/item/status/{id}', [OrderController::class, 'updateOrderItemStatus']);
+});
+
+Route::prefix('order-settlements')->group(function () {
+    Route::get('/list', [OrderSettlementController::class, 'list']);
+    Route::get('/order/{orderId}', [OrderSettlementController::class, 'getSettlementRequestByOrder']);
+    Route::get('/get-settlement-request-by-order/{orderId}', [OrderSettlementController::class, 'getSettlementRequestByOrder']);
+    Route::get('/get-settlment-request-by-order/{orderId}', [OrderSettlementController::class, 'getSettlementRequestByOrder']);
+    Route::post('/settle-nowe/{id}', [OrderSettlementController::class, 'settleNowe']);
+    Route::post('/settle-now/{id}', [OrderSettlementController::class, 'settleNowe']);
 });
 
 Route::prefix('addresses')->group(function () {

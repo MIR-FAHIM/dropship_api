@@ -31,6 +31,7 @@ class OrderSettlement extends Model
         'status',
         'admin_note',
         'trx_id',
+        'settled_trx_id',
         'created_by',
         'settled_at',
     ];

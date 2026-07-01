@@ -23,6 +23,7 @@ return new class extends Migration
             $table->string('status', 30)->default('pending');
             $table->text('admin_note')->nullable();
             $table->string('trx_id')->nullable()->unique();
+            $table->string('settled_trx_id')->nullable()->unique();
             $table->unsignedBigInteger('created_by')->nullable();
             $table->timestamp('settled_at')->nullable();
             $table->timestamps();
