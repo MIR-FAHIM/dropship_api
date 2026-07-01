@@ -214,7 +214,7 @@ class OrderController extends Controller
 
         $logisticData = $this->getCarrybeeLogisticData($order);
         $collectableAmount = round((float) $logisticData['collectable_amount'], 2);
-        $shippingCharge = round((float) ($order->shipping_fee ?? 0), 2);
+        $chargedShippingFee = round((float) ($order->shipping_fee ?? 0), 2);
         $deliveryFee = round((float) $logisticData['delivery_fee'], 2);
         $codFee = round((float) $logisticData['cod_fee'], 2);
         $totalDeliveryCost = round($deliveryFee + $codFee, 2);
@@ -230,11 +230,11 @@ class OrderController extends Controller
             [
                 'vendor_id' => null,
                 'user_type' => 'shipping',
-                'settleable_amount' => $shippingCharge,
+                'settleable_amount' => $hasConsignment ? $totalDeliveryCost : 0,
                 'currency' => 'BDT',
                 'status' => $hasConsignment ? OrderSettlement::STATUS_SETTLED : OrderSettlement::STATUS_PENDING,
                 'admin_note' => $hasConsignment
-                    ? 'Shipping charge already settled for order #' . $order->order_number . " ({$logisticSource})"
+                    ? 'Shipping charge already settled for order #' . $order->order_number . " (delivery_fee {$deliveryFee} + cod_fee {$codFee} = {$totalDeliveryCost}, {$logisticSource})"
                     : 'Shipping charge not settled: no delivery assignment consignment for order #' . $order->order_number,
                 'trx_id' => 'SET-' . $order->id . '-SHP',
                 'created_by' => $createdBy,
@@ -242,7 +242,7 @@ class OrderController extends Controller
             ]
         );
 
-        $logisticEarning = $hasConsignment ? round($shippingCharge - $totalDeliveryCost, 2) : 0;
+        $logisticEarning = $hasConsignment ? round($chargedShippingFee - $totalDeliveryCost, 2) : 0;
         OrderSettlement::updateOrCreate(
             [
                 'order_id' => $order->id,
@@ -256,7 +256,7 @@ class OrderController extends Controller
                 'currency' => 'BDT',
                 'status' => OrderSettlement::STATUS_PENDING,
                 'admin_note' => $hasConsignment
-                    ? 'Company logistic earning for order #' . $order->order_number . " (shipping_fee {$shippingCharge} - total_delivery_cost {$totalDeliveryCost}; delivery_fee {$deliveryFee}, cod_fee {$codFee}, {$logisticSource}, collectable {$collectableAmount})"
+                    ? 'Company logistic earning for order #' . $order->order_number . " (shipping_fee {$chargedShippingFee} - total_delivery_cost {$totalDeliveryCost}; delivery_fee {$deliveryFee}, cod_fee {$codFee}, {$logisticSource}, collectable {$collectableAmount})"
                     : 'Company logistic earning not calculated: no delivery assignment consignment for order #' . $order->order_number,
                 'trx_id' => 'SET-' . $order->id . '-COM-LOG',
                 'created_by' => $createdBy,
