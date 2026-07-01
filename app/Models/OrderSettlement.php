@@ -13,6 +13,8 @@ class OrderSettlement extends Model
     public const TYPE_RESELLER_PROFIT = 'reseller_profit';
     public const TYPE_SHIPPING_CHARGE = 'shipping_charge';
     public const TYPE_COMPANY_EARNING = 'company_earning';
+    public const TYPE_COMPANY_LOGISTIC_EARNING = 'company_logistic_earning';
+    public const TYPE_COMPANY_PRODUCT_COMMISSION = 'company_product_commission';
 
     public const STATUS_PENDING = 'pending';
     public const STATUS_SETTLED = 'settled';

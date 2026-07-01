@@ -13,10 +13,12 @@ use App\Models\OrderErrorLog;
 use App\Models\OrderSettlement;
 use App\Models\ResellerTransaction;
 use App\Models\User;
+use App\Models\DeliveryCompany;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use App\Service\NotificationService;
+use App\Service\CarrybeeService;
 
 class OrderController extends Controller
 {
@@ -77,11 +79,77 @@ class OrderController extends Controller
         ], $code);
     }
 
+    private function getCarrybeeLogisticData(Order $order): array
+    {
+        $order->loadMissing('deliveryInformation');
+
+        $deliveryInfo = $order->deliveryInformation;
+        $fallbackCollectable = (float) ($deliveryInfo?->collectable_amount ?? $order->total ?? 0);
+        $fallbackDeliveryFee = (float) ($deliveryInfo?->delivery_fee ?? $order->shipping_fee ?? 0);
+
+        if (!$deliveryInfo?->consignment_id) {
+            return [
+                'collectable_amount' => $fallbackCollectable,
+                'delivery_fee' => $fallbackDeliveryFee,
+                'source' => 'local',
+            ];
+        }
+
+        try {
+            $deliveryCompany = null;
+            if ($deliveryInfo->delivery_company_id) {
+                $deliveryCompany = DeliveryCompany::where('id', $deliveryInfo->delivery_company_id)
+                    ->where('is_active', true)
+                    ->first();
+            }
+
+            if (!$deliveryCompany) {
+                $deliveryCompany = DeliveryCompany::where('is_active', true)->latest()->first();
+            }
+
+            if (!$deliveryCompany || !$deliveryCompany->api_key || !$deliveryCompany->secret_key || !$deliveryCompany->client_context) {
+                return [
+                    'collectable_amount' => $fallbackCollectable,
+                    'delivery_fee' => $fallbackDeliveryFee,
+                    'source' => 'local',
+                ];
+            }
+
+            $service = new CarrybeeService(
+                $deliveryCompany->api_key,
+                $deliveryCompany->secret_key,
+                $deliveryCompany->client_context
+            );
+
+            $result = $service->getOrderDetails($deliveryInfo->consignment_id);
+            $body = $result['body'] ?? [];
+            $details = $body['data']['data'] ?? $body['data'] ?? [];
+
+            if (($result['status'] ?? 500) >= 400 || !is_array($details)) {
+                return [
+                    'collectable_amount' => $fallbackCollectable,
+                    'delivery_fee' => $fallbackDeliveryFee,
+                    'source' => 'local',
+                ];
+            }
+
+            return [
+                'collectable_amount' => (float) ($details['collectable_amount'] ?? $fallbackCollectable),
+                'delivery_fee' => (float) ($details['delivery_fee'] ?? $fallbackDeliveryFee),
+                'source' => 'carrybee',
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'collectable_amount' => $fallbackCollectable,
+                'delivery_fee' => $fallbackDeliveryFee,
+                'source' => 'local',
+            ];
+        }
+    }
+
     private function createOrderSettlements(Order $order, ?int $createdBy = null): void
     {
         $order->loadMissing(['items.shop']);
-
-        $supplierTotal = 0;
 
         $itemsByVendor = $order->items->groupBy('shop_id');
         foreach ($itemsByVendor as $vendorId => $items) {
@@ -93,7 +161,6 @@ class OrderController extends Controller
                 return (float) ($item->unit_price ?? 0) * (int) ($item->qty ?? 0);
             }), 2);
 
-            $supplierTotal += $vendorAmount;
             $vendor = $items->first()?->shop;
 
             OrderSettlement::updateOrCreate(
@@ -134,7 +201,11 @@ class OrderController extends Controller
             ]
         );
 
-        $shippingCharge = round((float) ($order->shipping_fee ?? 0), 2);
+        $logisticData = $this->getCarrybeeLogisticData($order);
+        $collectableAmount = round((float) $logisticData['collectable_amount'], 2);
+        $shippingCharge = round((float) $logisticData['delivery_fee'], 2);
+        $logisticSource = $logisticData['source'];
+
         OrderSettlement::updateOrCreate(
             [
                 'order_id' => $order->id,
@@ -147,28 +218,46 @@ class OrderController extends Controller
                 'settleable_amount' => $shippingCharge,
                 'currency' => 'BDT',
                 'status' => OrderSettlement::STATUS_SETTLED,
-                'admin_note' => 'Shipping charge already settled for order #' . $order->order_number,
+                'admin_note' => 'Shipping charge already settled for order #' . $order->order_number . " ({$logisticSource})",
                 'trx_id' => 'SET-' . $order->id . '-SHP',
                 'created_by' => $createdBy,
                 'settled_at' => now(),
             ]
         );
 
-        $companyEarning = round((float) ($order->total ?? 0) - $supplierTotal - $resellerProfit - $shippingCharge, 2);
+        $logisticEarning = round($collectableAmount - $shippingCharge, 2);
         OrderSettlement::updateOrCreate(
             [
                 'order_id' => $order->id,
-                'settlement_type' => OrderSettlement::TYPE_COMPANY_EARNING,
+                'settlement_type' => OrderSettlement::TYPE_COMPANY_LOGISTIC_EARNING,
                 'payable_user_id' => null,
             ],
             [
                 'vendor_id' => null,
                 'user_type' => 'company',
-                'settleable_amount' => max(0, $companyEarning),
+                'settleable_amount' => $logisticEarning,
                 'currency' => 'BDT',
                 'status' => OrderSettlement::STATUS_PENDING,
-                'admin_note' => 'Company earning settlement for order #' . $order->order_number,
-                'trx_id' => 'SET-' . $order->id . '-COM',
+                'admin_note' => 'Company logistic earning for order #' . $order->order_number . " ({$collectableAmount} - {$shippingCharge}, {$logisticSource})",
+                'trx_id' => 'SET-' . $order->id . '-COM-LOG',
+                'created_by' => $createdBy,
+            ]
+        );
+
+        OrderSettlement::updateOrCreate(
+            [
+                'order_id' => $order->id,
+                'settlement_type' => OrderSettlement::TYPE_COMPANY_PRODUCT_COMMISSION,
+                'payable_user_id' => null,
+            ],
+            [
+                'vendor_id' => null,
+                'user_type' => 'company',
+                'settleable_amount' => 0,
+                'currency' => 'BDT',
+                'status' => OrderSettlement::STATUS_PENDING,
+                'admin_note' => 'Company product commission earning for order #' . $order->order_number . ' (commission structure not configured)',
+                'trx_id' => 'SET-' . $order->id . '-COM-COM',
                 'created_by' => $createdBy,
             ]
         );
