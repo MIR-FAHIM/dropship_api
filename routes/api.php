@@ -168,6 +168,8 @@ Route::prefix('order-settlements')->group(function () {
     Route::get('/order/{orderId}', [OrderSettlementController::class, 'getSettlementRequestByOrder']);
     Route::get('/get-settlement-request-by-order/{orderId}', [OrderSettlementController::class, 'getSettlementRequestByOrder']);
     Route::get('/get-settlment-request-by-order/{orderId}', [OrderSettlementController::class, 'getSettlementRequestByOrder']);
+    Route::post('/add-settled-trx-id/{id}', [OrderSettlementController::class, 'addSettledTrxId']);
+    Route::post('/settled-trx-id/{id}', [OrderSettlementController::class, 'addSettledTrxId']);
     Route::post('/settle-nowe/{id}', [OrderSettlementController::class, 'settleNowe']);
     Route::post('/settle-now/{id}', [OrderSettlementController::class, 'settleNowe']);
 });

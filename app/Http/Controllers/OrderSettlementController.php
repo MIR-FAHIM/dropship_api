@@ -261,4 +261,43 @@ class OrderSettlementController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+    public function addSettledTrxId(Request $request, $id)
+    {
+        try {
+            $settlement = OrderSettlement::find($id);
+            if (!$settlement) {
+                return $this->failed('Order settlement not found', null, 404);
+            }
+
+            $validated = $request->validate([
+                'settled_trx_id' => [
+                    'required',
+                    'string',
+                    'max:255',
+                    Rule::unique('order_settlements', 'settled_trx_id')->ignore($settlement->id),
+                ],
+                'admin_note' => ['nullable', 'string'],
+                'created_by' => ['nullable', 'integer', 'exists:users,id'],
+            ]);
+
+            $settlement->settled_trx_id = $validated['settled_trx_id'];
+
+            if (array_key_exists('admin_note', $validated)) {
+                $settlement->admin_note = $validated['admin_note'];
+            }
+
+            if (array_key_exists('created_by', $validated)) {
+                $settlement->created_by = $validated['created_by'];
+            }
+
+            $settlement->save();
+
+            return $this->success('Settled transaction id added successfully', $settlement->load(['order', 'payableUser', 'vendor', 'createdBy']));
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 }
