@@ -93,4 +93,9 @@ class Order extends Model
         return $this->hasOne(CarryBeeOrderCreateForm::class, 'order_id');
         
     }
+
+    public function settlements()
+    {
+        return $this->hasMany(OrderSettlement::class, 'order_id');
+    }
 }

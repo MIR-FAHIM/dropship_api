@@ -10,6 +10,7 @@ use App\Models\OrderStatusHistory;
 use App\Models\Transaction;
 use App\Models\OrderItem;
 use App\Models\OrderErrorLog;
+use App\Models\OrderSettlement;
 use App\Models\ResellerTransaction;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -74,6 +75,83 @@ class OrderController extends Controller
             'message' => $message,
             'errors' => $errors
         ], $code);
+    }
+
+    private function createOrderSettlements(Order $order, ?int $createdBy = null): void
+    {
+        $order->loadMissing(['items.shop']);
+
+        $supplierTotal = 0;
+
+        $itemsByVendor = $order->items->groupBy('shop_id');
+        foreach ($itemsByVendor as $vendorId => $items) {
+            if (empty($vendorId)) {
+                continue;
+            }
+
+            $vendorAmount = round($items->sum(function ($item) {
+                return (float) ($item->unit_price ?? 0) * (int) ($item->qty ?? 0);
+            }), 2);
+
+            $supplierTotal += $vendorAmount;
+            $vendor = $items->first()?->shop;
+
+            OrderSettlement::updateOrCreate(
+                [
+                    'order_id' => $order->id,
+                    'settlement_type' => OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE,
+                    'vendor_id' => $vendorId,
+                ],
+                [
+                    'payable_user_id' => $vendor?->user_id,
+                    'user_type' => 'vendor',
+                    'settleable_amount' => $vendorAmount,
+                    'currency' => 'BDT',
+                    'status' => OrderSettlement::STATUS_PENDING,
+                    'admin_note' => 'Supplier product price settlement for order #' . $order->order_number,
+                    'trx_id' => 'SET-' . $order->id . '-SUP-' . $vendorId,
+                    'created_by' => $createdBy,
+                ]
+            );
+        }
+
+        $resellerProfit = round((float) ($order->reseller_profit ?? 0), 2);
+        OrderSettlement::updateOrCreate(
+            [
+                'order_id' => $order->id,
+                'settlement_type' => OrderSettlement::TYPE_RESELLER_PROFIT,
+                'payable_user_id' => $order->user_id,
+            ],
+            [
+                'vendor_id' => null,
+                'user_type' => 'dropshipper',
+                'settleable_amount' => $resellerProfit,
+                'currency' => 'BDT',
+                'status' => OrderSettlement::STATUS_PENDING,
+                'admin_note' => 'Dropshipper profit settlement for order #' . $order->order_number,
+                'trx_id' => 'SET-' . $order->id . '-RES-' . $order->user_id,
+                'created_by' => $createdBy,
+            ]
+        );
+
+        $companyEarning = round((float) ($order->total ?? 0) - $supplierTotal - $resellerProfit, 2);
+        OrderSettlement::updateOrCreate(
+            [
+                'order_id' => $order->id,
+                'settlement_type' => OrderSettlement::TYPE_COMPANY_EARNING,
+                'payable_user_id' => null,
+            ],
+            [
+                'vendor_id' => null,
+                'user_type' => 'company',
+                'settleable_amount' => max(0, $companyEarning),
+                'currency' => 'BDT',
+                'status' => OrderSettlement::STATUS_PENDING,
+                'admin_note' => 'Company earning settlement for order #' . $order->order_number,
+                'trx_id' => 'SET-' . $order->id . '-COM',
+                'created_by' => $createdBy,
+            ]
+        );
     }
     protected $notificationService;
 
@@ -398,6 +476,8 @@ class OrderController extends Controller
                 'deliveryInformation',
                 'statusHistory.status',
                 'carryBeeDraft', 
+                'settlements.payableUser',
+                'settlements.vendor',
             ])->find($id);
 
             if (!$order) {
@@ -444,52 +524,23 @@ class OrderController extends Controller
                 $hasCredit = Transaction::where('order_id', $order->id)
                     ->where('trx_type', 'credit')
                     ->exists();
-                if ($hasCredit) {
-                    return $this->failed('Credit transaction already exists for this order', null, 409);
+
+                if (!$hasCredit) {
+                    Transaction::create([
+                        'amount' => $order->total,
+                        'trx_type' => 'credit',
+                        'status' => 'completed',
+                        'source' => 'cod',
+                        'order_id' => $order->id,
+                        'type' => 'order_status',
+                        'note' => 'Credit transaction for order #' . $order->order_number,
+                    ]);
                 }
 
-                Transaction::create([
-                    'amount' => $order->total,
-                    'trx_type' => 'credit',
-                    'status' => 'completed',
-                    'source' => 'cod',
-                    'order_id' => $order->id,
-                    'type' => 'order_status',
-                    'note' => 'Credit transaction for order #' . $order->order_number,
-                ]);
+                $this->createOrderSettlements($order, $request->input('changed_by'));
             }
 
-            if ($statusId === 10) {
-                $hasDebit = Transaction::where('order_id', $order->id)
-                    ->where('trx_type', 'debit')
-                    ->exists();
-                if ($hasDebit) {
-                    return $this->failed('Debit transaction already exists for this order', null, 409);
-                }
 
-                $profitAmount = (float) ($order->reseller_profit ?? 0);
-
-                Transaction::create([
-                    'amount' => $profitAmount,
-                    'trx_type' => 'debit',
-                    'status' => 'completed',
-                    'source' => 'Reseller settlement',
-                    'order_id' => $order->id,
-                    'type' => 'order_status',
-                    'note' => 'Debit transaction (reseller profit) for order #' . $order->order_number,
-                ]);
-
-                ResellerTransaction::create([
-                    'amount' => $profitAmount,
-                    'trx_type' => 'credit',
-                    'status' => 'completed',
-                    'source' => 'Admin Action',
-                    'order_id' => $order->id,
-                    'type' => 'order_status',
-                    'note' => 'Credit transaction (reseller profit) for order #' . $order->order_number,
-                    'reseller_id' => $order->user_id,
-                ]);
-            }
 
             return $this->success('Order status updated successfully', $order);
         } catch (\Illuminate\Validation\ValidationException $e) {
