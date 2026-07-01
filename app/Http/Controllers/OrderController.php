@@ -86,11 +86,13 @@ class OrderController extends Controller
         $deliveryInfo = $order->deliveryInformation;
         $fallbackCollectable = (float) ($deliveryInfo?->collectable_amount ?? $order->total ?? 0);
         $fallbackDeliveryFee = (float) ($deliveryInfo?->delivery_fee ?? $order->shipping_fee ?? 0);
+        $fallbackCodFee = 0;
 
         if (!$deliveryInfo?->consignment_id) {
             return [
                 'collectable_amount' => 0,
                 'delivery_fee' => 0,
+                'cod_fee' => 0,
                 'has_consignment' => false,
                 'source' => 'no_delivery_assignment',
             ];
@@ -112,6 +114,7 @@ class OrderController extends Controller
                 return [
                     'collectable_amount' => $fallbackCollectable,
                     'delivery_fee' => $fallbackDeliveryFee,
+                    'cod_fee' => $fallbackCodFee,
                     'has_consignment' => true,
                     'source' => 'local',
                 ];
@@ -131,6 +134,7 @@ class OrderController extends Controller
                 return [
                     'collectable_amount' => $fallbackCollectable,
                     'delivery_fee' => $fallbackDeliveryFee,
+                    'cod_fee' => $fallbackCodFee,
                     'has_consignment' => true,
                     'source' => 'local',
                 ];
@@ -139,6 +143,7 @@ class OrderController extends Controller
             return [
                 'collectable_amount' => (float) ($details['collectable_amount'] ?? $fallbackCollectable),
                 'delivery_fee' => (float) ($details['delivery_fee'] ?? $fallbackDeliveryFee),
+                'cod_fee' => (float) ($details['cod_fee'] ?? $fallbackCodFee),
                 'has_consignment' => true,
                 'source' => 'carrybee',
             ];
@@ -146,6 +151,7 @@ class OrderController extends Controller
             return [
                 'collectable_amount' => $fallbackCollectable,
                 'delivery_fee' => $fallbackDeliveryFee,
+                'cod_fee' => $fallbackCodFee,
                 'has_consignment' => true,
                 'source' => 'local',
             ];
@@ -208,7 +214,10 @@ class OrderController extends Controller
 
         $logisticData = $this->getCarrybeeLogisticData($order);
         $collectableAmount = round((float) $logisticData['collectable_amount'], 2);
-        $shippingCharge = round((float) $logisticData['delivery_fee'], 2);
+        $shippingCharge = round((float) ($order->shipping_fee ?? 0), 2);
+        $deliveryFee = round((float) $logisticData['delivery_fee'], 2);
+        $codFee = round((float) $logisticData['cod_fee'], 2);
+        $totalDeliveryCost = round($deliveryFee + $codFee, 2);
         $hasConsignment = (bool) $logisticData['has_consignment'];
         $logisticSource = $logisticData['source'];
 
@@ -233,7 +242,7 @@ class OrderController extends Controller
             ]
         );
 
-        $logisticEarning = $hasConsignment ? round($collectableAmount - $shippingCharge, 2) : 0;
+        $logisticEarning = $hasConsignment ? round($shippingCharge - $totalDeliveryCost, 2) : 0;
         OrderSettlement::updateOrCreate(
             [
                 'order_id' => $order->id,
@@ -247,7 +256,7 @@ class OrderController extends Controller
                 'currency' => 'BDT',
                 'status' => OrderSettlement::STATUS_PENDING,
                 'admin_note' => $hasConsignment
-                    ? 'Company logistic earning for order #' . $order->order_number . " ({$collectableAmount} - {$shippingCharge}, {$logisticSource})"
+                    ? 'Company logistic earning for order #' . $order->order_number . " (shipping_fee {$shippingCharge} - total_delivery_cost {$totalDeliveryCost}; delivery_fee {$deliveryFee}, cod_fee {$codFee}, {$logisticSource}, collectable {$collectableAmount})"
                     : 'Company logistic earning not calculated: no delivery assignment consignment for order #' . $order->order_number,
                 'trx_id' => 'SET-' . $order->id . '-COM-LOG',
                 'created_by' => $createdBy,
