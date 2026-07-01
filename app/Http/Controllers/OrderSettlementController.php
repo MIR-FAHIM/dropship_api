@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Order;
 use App\Models\OrderSettlement;
+use App\Models\ResellerTransaction;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class OrderSettlementController extends Controller
@@ -128,6 +130,45 @@ class OrderSettlementController extends Controller
         })->values();
     }
 
+    private function shouldCreateResellerCredit(OrderSettlement $settlement): bool
+    {
+        return $settlement->status === OrderSettlement::STATUS_SETTLED
+            && $settlement->settlement_type === OrderSettlement::TYPE_RESELLER_PROFIT
+            && $settlement->user_type === 'dropshipper'
+            && (float) $settlement->settleable_amount > 0;
+    }
+
+    private function createResellerCreditForSettlement(OrderSettlement $settlement): void
+    {
+        if (!$this->shouldCreateResellerCredit($settlement)) {
+            return;
+        }
+
+        $exists = ResellerTransaction::where('ref_id', $settlement->id)
+            ->where('type', 'order_settlement')
+            ->where('trx_type', 'credit')
+            ->exists();
+
+        if ($exists) {
+            return;
+        }
+
+        $resellerId = $settlement->payable_user_id ?: Order::where('id', $settlement->order_id)->value('user_id');
+
+        ResellerTransaction::create([
+            'amount' => $settlement->settleable_amount,
+            'reseller_id' => $resellerId,
+            'ref_id' => $settlement->id,
+            'trx_id' => $settlement->settled_trx_id ?: $settlement->trx_id,
+            'trx_type' => 'credit',
+            'note' => 'Credit transaction from reseller profit settlement #' . $settlement->id,
+            'status' => 'completed',
+            'source' => 'wallet',
+            'order_id' => $settlement->order_id,
+            'type' => 'order_settlement',
+        ]);
+    }
+
     public function list(Request $request)
     {
         try {
@@ -237,22 +278,26 @@ class OrderSettlementController extends Controller
                 return $this->failed('settled_trx_id is required to settle vendor or dropshipper settlement', null, 422);
             }
 
-            $settlement->status = $status;
+            DB::transaction(function () use ($settlement, $validated, $status) {
+                $settlement->status = $status;
 
-            if (array_key_exists('settled_trx_id', $validated)) {
-                $settlement->settled_trx_id = $validated['settled_trx_id'];
-            }
+                if (array_key_exists('settled_trx_id', $validated)) {
+                    $settlement->settled_trx_id = $validated['settled_trx_id'];
+                }
 
-            if (array_key_exists('admin_note', $validated)) {
-                $settlement->admin_note = $validated['admin_note'];
-            }
+                if (array_key_exists('admin_note', $validated)) {
+                    $settlement->admin_note = $validated['admin_note'];
+                }
 
-            if (array_key_exists('created_by', $validated)) {
-                $settlement->created_by = $validated['created_by'];
-            }
+                if (array_key_exists('created_by', $validated)) {
+                    $settlement->created_by = $validated['created_by'];
+                }
 
-            $settlement->settled_at = $status === OrderSettlement::STATUS_SETTLED ? now() : null;
-            $settlement->save();
+                $settlement->settled_at = $status === OrderSettlement::STATUS_SETTLED ? now() : null;
+                $settlement->save();
+
+                $this->createResellerCreditForSettlement($settlement);
+            });
 
             return $this->success('Order settlement status updated successfully', $settlement->load(['order', 'payableUser', 'vendor', 'createdBy']));
         } catch (\Illuminate\Validation\ValidationException $e) {
