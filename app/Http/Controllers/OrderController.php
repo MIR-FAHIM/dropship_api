@@ -134,7 +134,27 @@ class OrderController extends Controller
             ]
         );
 
-        $companyEarning = round((float) ($order->total ?? 0) - $supplierTotal - $resellerProfit, 2);
+        $shippingCharge = round((float) ($order->shipping_fee ?? 0), 2);
+        OrderSettlement::updateOrCreate(
+            [
+                'order_id' => $order->id,
+                'settlement_type' => OrderSettlement::TYPE_SHIPPING_CHARGE,
+                'payable_user_id' => null,
+            ],
+            [
+                'vendor_id' => null,
+                'user_type' => 'shipping',
+                'settleable_amount' => $shippingCharge,
+                'currency' => 'BDT',
+                'status' => OrderSettlement::STATUS_SETTLED,
+                'admin_note' => 'Shipping charge already settled for order #' . $order->order_number,
+                'trx_id' => 'SET-' . $order->id . '-SHP',
+                'created_by' => $createdBy,
+                'settled_at' => now(),
+            ]
+        );
+
+        $companyEarning = round((float) ($order->total ?? 0) - $supplierTotal - $resellerProfit - $shippingCharge, 2);
         OrderSettlement::updateOrCreate(
             [
                 'order_id' => $order->id,
