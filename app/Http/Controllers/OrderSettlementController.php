@@ -272,7 +272,11 @@ class OrderSettlementController extends Controller
             $settledTrxId = array_key_exists('settled_trx_id', $validated)
                 ? $validated['settled_trx_id']
                 : $settlement->settled_trx_id;
-            $requiresSettledTrxId = in_array($settlement->user_type, ['vendor', 'dropshipper'], true);
+            $requiresSettledTrxId = $settlement->user_type === 'vendor'
+                || (
+                    $settlement->user_type === 'dropshipper'
+                    && $settlement->settlement_type !== OrderSettlement::TYPE_RESELLER_PROFIT
+                );
 
             if ($status === OrderSettlement::STATUS_SETTLED && $requiresSettledTrxId && empty($settledTrxId)) {
                 return $this->failed('settled_trx_id is required to settle vendor or dropshipper settlement', null, 422);
