@@ -12,6 +12,7 @@ class MuthobartaSmsService
         $apiKey = config('services.muthobarta.api_key');
         $baseUrl = rtrim((string) config('services.muthobarta.base_url'), '/');
         $senderId = config('services.muthobarta.sender_id');
+        $endpoint = str_ends_with($baseUrl, '/send-sms') ? $baseUrl : $baseUrl . '/send-sms';
 
         if (!$apiKey || !$baseUrl || !$senderId || !$receiver || !$message) {
             Log::warning('Muthobarta SMS skipped because configuration or payload is missing', [
@@ -46,12 +47,13 @@ class MuthobartaSmsService
                     'Authorization' => $apiKey,
                     'Accept' => 'application/json',
                 ])
-                ->post($baseUrl . '/send-sms', $payload);
+                ->post($endpoint, $payload);
 
             if ($response->failed()) {
                 Log::warning('Muthobarta SMS provider request failed', [
                     'receiver' => $receiver,
                     'type' => $type,
+                    'endpoint' => $endpoint,
                     'status' => $response->status(),
                     'body' => $response->json() ?? $response->body(),
                 ]);
@@ -66,6 +68,7 @@ class MuthobartaSmsService
             Log::warning('Muthobarta SMS send failed', [
                 'receiver' => $receiver,
                 'type' => $type,
+                'endpoint' => $endpoint,
                 'error' => $e->getMessage(),
             ]);
 
