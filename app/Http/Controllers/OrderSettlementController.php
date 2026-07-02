@@ -5,12 +5,20 @@ namespace App\Http\Controllers;
 use App\Models\Order;
 use App\Models\OrderSettlement;
 use App\Models\ResellerTransaction;
+use App\Service\MuthobartaSmsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class OrderSettlementController extends Controller
 {
+    protected $smsService;
+
+    public function __construct(MuthobartaSmsService $smsService)
+    {
+        $this->smsService = $smsService;
+    }
+
     private function success($message, $data = null, int $code = 200)
     {
         return response()->json([
@@ -169,6 +177,60 @@ class OrderSettlementController extends Controller
         ]);
     }
 
+    private function shouldSendSettlementSms(OrderSettlement $settlement): bool
+    {
+        return $settlement->status === OrderSettlement::STATUS_SETTLED
+            && (
+                $settlement->user_type === 'vendor'
+                || (
+                    $settlement->user_type === 'dropshipper'
+                    && $settlement->settlement_type === OrderSettlement::TYPE_RESELLER_PROFIT
+                )
+            );
+    }
+
+    private function settlementSmsReceiver(OrderSettlement $settlement): ?string
+    {
+        if ($settlement->payableUser?->phone) {
+            return $settlement->payableUser->phone;
+        }
+
+        if ($settlement->user_type === 'vendor' && $settlement->vendor?->user?->phone) {
+            return $settlement->vendor->user->phone;
+        }
+
+        if ($settlement->user_type === 'dropshipper' && $settlement->order?->user?->phone) {
+            return $settlement->order->user->phone;
+        }
+
+        return null;
+    }
+
+    private function sendSettlementSms(OrderSettlement $settlement): void
+    {
+        $settlement->loadMissing(['order.user', 'payableUser', 'vendor.user']);
+
+        if (!$this->shouldSendSettlementSms($settlement)) {
+            return;
+        }
+
+        $receiver = $this->settlementSmsReceiver($settlement);
+        if (!$receiver) {
+            return;
+        }
+
+        $orderNumber = $settlement->order?->order_number ?: $settlement->order_id;
+        $amount = number_format((float) $settlement->settleable_amount, 2, '.', '');
+        $currency = $settlement->currency ?: 'BDT';
+        $trxText = $settlement->settled_trx_id ? " Trx ID: {$settlement->settled_trx_id}." : '';
+
+        $message = $settlement->user_type === 'vendor'
+            ? "Your vendor settlement for order {$orderNumber} is settled. Amount {$amount} {$currency}.{$trxText}"
+            : "Your reseller profit for order {$orderNumber} is settled. Amount {$amount} {$currency}.{$trxText}";
+
+        $this->smsService->send($receiver, $message, 'order_settlement');
+    }
+
     public function list(Request $request)
     {
         try {
@@ -269,6 +331,7 @@ class OrderSettlementController extends Controller
             ]);
 
             $status = $validated['status'] ?? OrderSettlement::STATUS_SETTLED;
+            $wasSettled = $settlement->status === OrderSettlement::STATUS_SETTLED;
             $settledTrxId = array_key_exists('settled_trx_id', $validated)
                 ? $validated['settled_trx_id']
                 : $settlement->settled_trx_id;
@@ -302,6 +365,11 @@ class OrderSettlementController extends Controller
 
                 $this->createResellerCreditForSettlement($settlement);
             });
+
+            $settlement->refresh();
+            if (!$wasSettled && $settlement->status === OrderSettlement::STATUS_SETTLED) {
+                $this->sendSettlementSms($settlement);
+            }
 
             return $this->success('Order settlement status updated successfully', $settlement->load(['order', 'payableUser', 'vendor', 'createdBy']));
         } catch (\Illuminate\Validation\ValidationException $e) {

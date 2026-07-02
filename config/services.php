@@ -28,6 +28,13 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'muthobarta' => [
+        'api_key' => env('MUTHOBARTA_API_KEY'),
+        'base_url' => env('MUTHOBARTA_BASE_URL'),
+        'sender_id' => env('MUTHOBARTA_SENDER_ID', 'Dropship'),
+        'admin_number' => env('MUTHOBARTA_ADMIN_NUMBER', '01941606310'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

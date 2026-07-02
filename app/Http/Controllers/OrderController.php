@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use App\Service\NotificationService;
 use App\Service\CarrybeeService;
+use App\Service\MuthobartaSmsService;
 
 class OrderController extends Controller
 {
@@ -282,10 +283,12 @@ class OrderController extends Controller
         );
     }
     protected $notificationService;
+    protected $smsService;
 
-    public function __construct(NotificationService $notificationService)
+    public function __construct(NotificationService $notificationService, MuthobartaSmsService $smsService)
     {
         $this->notificationService = $notificationService;
+        $this->smsService = $smsService;
     }
     /**
      * POST /orders/checkout
@@ -429,6 +432,16 @@ class OrderController extends Controller
                 'image'      => null, // Set image path if needed
                 'module'     => 'order',
             ]);
+
+            $adminNumber = config('services.muthobarta.admin_number', '01941606310');
+            if ($adminNumber) {
+                $this->smsService->send(
+                    $adminNumber,
+                    "New order {$order->order_number} placed. Total {$order->total} BDT.",
+                    'order_checkout'
+                );
+            }
+
             return $this->success('Checkout successful. Order created.', $order, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             if (DB::transactionLevel() > 0) {
