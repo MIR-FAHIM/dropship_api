@@ -229,7 +229,7 @@ class OrderSettlementController extends Controller
 
         $message = $settlement->user_type === 'vendor'
             ? "Your vendor settlement for order {$orderNumber} is settled. Amount {$amount} {$currency}.{$trxText}"
-            : "Your reseller profit for order {$orderNumber} is settled. Amount {$amount} {$currency}.{$trxText}";
+            : "Your profit added to Balance for order {$orderNumber}. Amount {$amount} {$currency}.{$trxText}";
 
         $this->smsService->send($receiver, $message, 'order_settlement');
     }
