@@ -39,6 +39,7 @@ use App\Http\Controllers\UserBankAccountController;
 use App\Http\Controllers\WithdrawController;
 use App\Http\Controllers\SupportTicketController;
 use App\Http\Controllers\CarrybeeWebhookController;
+use App\Http\Controllers\MuthobartaSmsController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -352,6 +353,11 @@ Route::prefix('notifications')->group(function () {
 
     Route::get('/all-list', [NotificationController::class, 'getAllNotification']);
 });
+
+Route::prefix('sms')->group(function () {
+    Route::post('/send-message', [MuthobartaSmsController::class, 'sendMessage']);
+});
+
 Route::prefix('delivery-companies')->group(function () {
     Route::post('/add', [DeliveryCompanyController::class, 'addDeliveryCompany']);
     Route::get('/list', [DeliveryCompanyController::class, 'getDeliveryCompany']);
