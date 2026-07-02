@@ -51,6 +51,7 @@ class ReportController extends Controller
             // Sales sums (only consider completed credit transactions)
             $totalSell = (float) Transaction::where('trx_type', 'credit')
                 ->where('status', 'completed')
+                ->where('type', 'order_status')
                 ->sum('amount');
 
             $today = Carbon::today()->toDateString();
@@ -58,17 +59,20 @@ class ReportController extends Controller
 
             $todaySell = (float) Transaction::where('trx_type', 'credit')
                 ->where('status', 'completed')
+                ->where('type', 'order_status')
                 ->whereDate('created_at', $today)
                 ->sum('amount');
 
             $yesterdaySell = (float) Transaction::where('trx_type', 'credit')
                 ->where('status', 'completed')
+                ->where('type', 'order_status')
                 ->whereDate('created_at', $yesterday)
                 ->sum('amount');
 
             $last7Start = Carbon::today()->subDays(6)->toDateString(); // include today = 7 days
             $last7Sell = (float) Transaction::where('trx_type', 'credit')
                 ->where('status', 'completed')
+                ->where('type', 'order_status')
                 ->whereDate('created_at', '>=', $last7Start)
                 ->sum('amount');
 
@@ -78,6 +82,7 @@ class ReportController extends Controller
                 $d = Carbon::today()->subDays($i)->toDateString();
                 $sum = (float) Transaction::where('trx_type', 'credit')
                     ->where('status', 'completed')
+                    ->where('type', 'order_status')
                     ->whereDate('created_at', $d)
                     ->sum('amount');
                 $days[] = [

@@ -231,6 +231,7 @@ class CarrybeeWebhookService
     {
         $hasCredit = Transaction::where('order_id', $order->id)
             ->where('trx_type', 'credit')
+            ->where('type', 'order_status')
             ->exists();
 
         if ($hasCredit) {

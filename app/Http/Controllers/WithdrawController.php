@@ -5,13 +5,20 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 
 use App\Models\WithdrawRequest;
-use App\Models\Transaction;
 use App\Models\ResellerTransaction;
 use App\Models\UserBankAccount;
-use Illuminate\Support\Facades\Auth;
+use App\Service\CompanyTransactionService;
+use Illuminate\Support\Facades\DB;
 
 class WithdrawController extends Controller
 {
+	protected $companyTransactions;
+
+	public function __construct(CompanyTransactionService $companyTransactions)
+	{
+		$this->companyTransactions = $companyTransactions;
+	}
+
 	/**
 	 * Add a new withdraw request.
 	 */
@@ -90,24 +97,36 @@ class WithdrawController extends Controller
 				'status' => 'required|in:pending,approved,rejected',
 			]);
 			$withdraw = WithdrawRequest::findOrFail($id);
-			$withdraw->status = $validated['status'];
-			$withdraw->save();
-            if ($validated['status'] === 'approved') {
-             
-                // Record ResellerTransaction as debit
-               ResellerTransaction::create([
-                    'amount' => $withdraw->amount,
-                    'reseller_id' => $withdraw->user_id,
-                    'ref_id' => $withdraw->id,
-                    'trx_id' => 'WD-' . $withdraw->id . '-' . time(),
-                    'trx_type' => 'debit',
-                    'note' => 'Withdraw approved',
-                    'status' => 'completed',
-                    'source' => 'withdraw',
-                    'order_id' => null,
-                    'type' => 'withdraw',
-                ]);
-            }
+			$wasApproved = $withdraw->status === 'approved';
+
+			DB::transaction(function () use ($withdraw, $validated, $wasApproved) {
+				$withdraw->status = $validated['status'];
+				$withdraw->save();
+
+				if ($validated['status'] === 'approved' && !$wasApproved) {
+					$trxId = 'WD-' . $withdraw->id . '-' . time();
+
+					ResellerTransaction::updateOrCreate(
+						[
+							'reseller_id' => $withdraw->user_id,
+							'ref_id' => $withdraw->id,
+							'type' => 'withdraw',
+							'trx_type' => 'debit',
+						],
+						[
+							'amount' => $withdraw->amount,
+							'trx_id' => $trxId,
+							'note' => 'Withdraw approved',
+							'status' => 'completed',
+							'source' => 'withdraw',
+							'order_id' => null,
+						]
+					);
+
+					$this->companyTransactions->recordWithdrawApproval($withdraw, $trxId);
+				}
+			});
+
 			return response()->json(['success' => true, 'data' => $withdraw]);
 		} catch (\Exception $e) {
 			return response()->json([

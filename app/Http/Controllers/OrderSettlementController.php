@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Order;
 use App\Models\OrderSettlement;
 use App\Models\ResellerTransaction;
+use App\Service\CompanyTransactionService;
 use App\Service\MuthobartaSmsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,10 +14,12 @@ use Illuminate\Validation\Rule;
 class OrderSettlementController extends Controller
 {
     protected $smsService;
+    protected $companyTransactions;
 
-    public function __construct(MuthobartaSmsService $smsService)
+    public function __construct(MuthobartaSmsService $smsService, CompanyTransactionService $companyTransactions)
     {
         $this->smsService = $smsService;
+        $this->companyTransactions = $companyTransactions;
     }
 
     private function success($message, $data = null, int $code = 200)
@@ -364,6 +367,7 @@ class OrderSettlementController extends Controller
                 $settlement->save();
 
                 $this->createResellerCreditForSettlement($settlement);
+                $this->companyTransactions->recordSettlement($settlement);
             });
 
             $settlement->refresh();

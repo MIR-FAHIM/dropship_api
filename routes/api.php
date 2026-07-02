@@ -290,6 +290,7 @@ Route::prefix('deliveries')->group(function () {
 });
 
 Route::prefix('transactions')->group(function () {
+    Route::get('/all', [TransactionController::class, 'allTransactions']);
     Route::get('/credit', [TransactionController::class, 'creditTransaction']);
     Route::get('/debit', [TransactionController::class, 'debitTransaction']);
     Route::get('/report', [TransactionController::class, 'transactionReport']);

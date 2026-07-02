@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use App\Service\NotificationService;
 use App\Service\CarrybeeService;
+use App\Service\CompanyTransactionService;
 use App\Service\MuthobartaSmsService;
 
 class OrderController extends Controller
@@ -222,7 +223,7 @@ class OrderController extends Controller
         $hasConsignment = (bool) $logisticData['has_consignment'];
         $logisticSource = $logisticData['source'];
 
-        OrderSettlement::updateOrCreate(
+        $shippingSettlement = OrderSettlement::updateOrCreate(
             [
                 'order_id' => $order->id,
                 'settlement_type' => OrderSettlement::TYPE_SHIPPING_CHARGE,
@@ -242,6 +243,8 @@ class OrderController extends Controller
                 'settled_at' => $hasConsignment ? now() : null,
             ]
         );
+
+        $this->companyTransactions->recordSettlement($shippingSettlement);
 
         $logisticEarning = $hasConsignment ? round($chargedShippingFee - $totalDeliveryCost, 2) : 0;
         OrderSettlement::updateOrCreate(
@@ -284,11 +287,17 @@ class OrderController extends Controller
     }
     protected $notificationService;
     protected $smsService;
+    protected $companyTransactions;
 
-    public function __construct(NotificationService $notificationService, MuthobartaSmsService $smsService)
+    public function __construct(
+        NotificationService $notificationService,
+        MuthobartaSmsService $smsService,
+        CompanyTransactionService $companyTransactions
+    )
     {
         $this->notificationService = $notificationService;
         $this->smsService = $smsService;
+        $this->companyTransactions = $companyTransactions;
     }
     /**
      * POST /orders/checkout
@@ -664,6 +673,7 @@ class OrderController extends Controller
                 $order->save();
                 $hasCredit = Transaction::where('order_id', $order->id)
                     ->where('trx_type', 'credit')
+                    ->where('type', 'order_status')
                     ->exists();
 
                 if (!$hasCredit) {
