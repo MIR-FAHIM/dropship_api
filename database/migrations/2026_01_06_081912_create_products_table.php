@@ -66,6 +66,7 @@ return new class extends Migration
             $table->double('earn_point', 8, 2)->default(0.00);
             $table->double('rating', 8, 2)->default(0.00);
             $table->string('barcode', 255)->nullable();
+            $table->string('show_home', 255)->default(0);
             $table->tinyInteger('digital')->default(0);
             $table->tinyInteger('auction_product')->default(0);
             $table->string('file_name', 255)->nullable();

@@ -404,7 +404,7 @@ class ProductController extends Controller
                 'vendor.district',
                 'brand',
                 'productDiscount'
-            ])->where('approved', 1)
+            ])->where('approved', 1)->where('show_home', 1)
               ->whereHas('vendor', function ($q) {
                   $q->where('is_active', 1);
               });

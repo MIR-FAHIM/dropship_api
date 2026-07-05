@@ -66,6 +66,7 @@ class Product extends Model
         'earn_point',
         'rating',
         'barcode',
+        'show_home',
         'digital',
         'auction_product',
         'file_name',
