@@ -165,6 +165,17 @@ class TransactionController extends Controller
             $totalDebit = (float) $debitQuery->sum('amount');
             $profit = $totalCredit - $totalDebit;
             $margin = $totalCredit > 0 ? round(($profit / $totalCredit) * 100, 2) : 0;
+            $resellerTransactionQuery = ResellerTransaction::where('status', 'completed');
+            $this->applyDateFilters($resellerTransactionQuery, $request);
+
+            $resellerCredit = (float) (clone $resellerTransactionQuery)
+                ->where('trx_type', 'credit')
+                ->sum('amount');
+            $resellerDebit = (float) (clone $resellerTransactionQuery)
+                ->where('trx_type', 'debit')
+                ->sum('amount');
+            $resellerLiabilityBalance = $resellerCredit - $resellerDebit;
+
             $byType = (clone $baseQuery)
                 ->select('type')
                 ->selectRaw("SUM(CASE WHEN trx_type = 'credit' THEN amount ELSE 0 END) as total_credit")
@@ -189,6 +200,7 @@ class TransactionController extends Controller
                 'total_debit' => $totalDebit,
                 'profit' => $profit,
                 'margin_percent' => $margin,
+                'reseller_liablity_balance' => $resellerLiabilityBalance,
                 'by_type' => $byType,
             ]);
         } catch (\Throwable $e) {
