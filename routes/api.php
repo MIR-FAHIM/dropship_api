@@ -389,6 +389,7 @@ Route::prefix('address')->group(function () {
 
     Route::get('/divisions', [AddressController::class, 'divisionsList'])->withoutMiddleware('token');
     Route::get('/districts/{id}', [AddressController::class, 'getDistrictList'])->withoutMiddleware('token');
+    Route::get('/upazilas/{districtId}', [AddressController::class, 'getUpazilasByDistrict'])->withoutMiddleware('token');
 });
 Route::prefix('paymentmethods')->group(function () {
 

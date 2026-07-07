@@ -22,4 +22,9 @@ class District extends Model
     {
         return $this->belongsTo(Division::class);
     }
+
+    public function upazilas()
+    {
+        return $this->hasMany(Upazila::class);
+    }
 }

@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Division;
 use App\Models\District;
+use App\Models\Upazila;
 
 class AddressController extends Controller
 {
@@ -47,6 +48,33 @@ class AddressController extends Controller
 				'status' => 'success',
 				'message' => 'Districts fetched successfully',
 				'data' => $districts
+			]);
+		} catch (\Throwable $e) {
+			return response()->json([
+				'status' => 'failed',
+				'message' => 'Something went wrong',
+				'errors' => ['error' => $e->getMessage()]
+			], 500);
+		}
+	}
+
+	/**
+	 * GET /upazilas/{districtId}
+	 * Returns all upazilas for a specific district
+	 */
+	public function getUpazilasByDistrict($districtId)
+	{
+		try {
+			$query = Upazila::query();
+			if ($districtId) {
+				$query->where('district_id', $districtId);
+			}
+			$upazilas = $query->get();
+
+			return response()->json([
+				'status' => 'success',
+				'message' => 'Upazilas fetched successfully',
+				'data' => $upazilas
 			]);
 		} catch (\Throwable $e) {
 			return response()->json([
