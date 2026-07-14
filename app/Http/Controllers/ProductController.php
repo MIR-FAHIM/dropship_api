@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class ProductController extends Controller
@@ -59,6 +60,109 @@ class ProductController extends Controller
                 'url' => $request->fullUrl(),
                 'method' => $request->method(),
             ]);
+        }
+    }
+
+    private function uniqueProductSlug(string $base, ?int $ignoreId = null): string
+    {
+        $slug = Str::slug($base) ?: 'product';
+        $candidate = $slug;
+        $counter = 1;
+
+        while (
+            Product::where('slug', $candidate)
+                ->when($ignoreId, fn ($query) => $query->where('id', '!=', $ignoreId))
+                ->exists()
+        ) {
+            $candidate = $slug . '-copy-' . $counter;
+            $counter++;
+        }
+
+        return $candidate;
+    }
+
+    private function uniqueProductSku(Product $product): string
+    {
+        $base = $product->sku
+            ? Str::slug($product->sku, '-')
+            : 'p' . $product->id . 'v' . ($product->vendor_id ?? '0');
+        $base = $base ?: 'product-' . $product->id;
+        $candidate = $base;
+        $counter = 1;
+
+        while (Product::where('sku', $candidate)->where('id', '!=', $product->id)->exists()) {
+            $candidate = $base . '-copy-' . $counter;
+            $counter++;
+        }
+
+        return $candidate;
+    }
+
+    /**
+     * POST /products/duplicate/{id}
+     */
+    public function duplicateProductAndCreate($id)
+    {
+        try {
+            $original = Product::with(['images', 'productAttributes', 'productDiscount'])->find($id);
+
+            if (!$original) {
+                return $this->failed('Product not found', null, 404);
+            }
+
+            $duplicate = DB::transaction(function () use ($original) {
+                $copy = $original->replicate();
+                $copy->slug = $this->uniqueProductSlug($original->slug ?: $original->name);
+                $copy->sku = null;
+                $copy->num_of_sale = 0;
+                $copy->rating = 0;
+                $copy->created_at = now();
+                $copy->updated_at = now();
+                $copy->save();
+
+                $copy->sku = $this->uniqueProductSku($copy);
+                $copy->save();
+
+                foreach ($original->images as $image) {
+                    $imageCopy = $image->replicate();
+                    $imageCopy->product_id = $copy->id;
+                    $imageCopy->created_at = now();
+                    $imageCopy->updated_at = now();
+                    $imageCopy->save();
+                }
+
+                foreach ($original->productAttributes as $attribute) {
+                    $attributeCopy = $attribute->replicate();
+                    $attributeCopy->product_id = $copy->id;
+                    $attributeCopy->created_at = now();
+                    $attributeCopy->updated_at = now();
+                    $attributeCopy->save();
+                }
+
+                if ($original->productDiscount) {
+                    $discountCopy = $original->productDiscount->replicate();
+                    $discountCopy->product_id = $copy->id;
+                    $discountCopy->created_at = now();
+                    $discountCopy->updated_at = now();
+                    $discountCopy->save();
+                }
+
+                return $copy->load([
+                    'images',
+                    'primaryImage',
+                    'category',
+                    'subCategory',
+                    'vendor',
+                    'brand',
+                    'productAttributes.attribute',
+                    'productAttributes.value',
+                    'productDiscount',
+                ]);
+            });
+
+            return $this->success('Product duplicated successfully', $duplicate, 201);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
 

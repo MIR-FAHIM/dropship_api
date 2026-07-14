@@ -21,7 +21,7 @@ class Vendor extends Model
         'owner_name',
         'shop_type',
         'description',
-        'carryb_business_id',
+        'carryb_store_id',
         'is_active',
     ];
 

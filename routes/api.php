@@ -103,6 +103,7 @@ Route::prefix('brands')->group(function () {
 
 Route::prefix('products')->group(function () {
     Route::post('/create', [ProductController::class, 'createProduct']);
+    Route::post('/duplicate/{id}', [ProductController::class, 'duplicateProductAndCreate']);
     Route::patch('/approval/{id}', [ProductController::class, 'productApproval']);
     Route::post('/images/upload/{productId}', [ProductController::class, 'productImageUpload']);
     Route::get('/category/wise', [ProductController::class, 'listCategoryProducts']);

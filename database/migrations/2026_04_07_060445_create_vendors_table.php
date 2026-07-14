@@ -26,7 +26,7 @@ return new class extends Migration
             $table->string('shop_type')->nullable();
             $table->text('description')->nullable();
             $table->boolean('is_active')->default(false);
-            $table->integer('carryb_business_id')->nullable();
+            $table->integer('carryb_store_id')->nullable();
             $table->timestamps();
         });
     }

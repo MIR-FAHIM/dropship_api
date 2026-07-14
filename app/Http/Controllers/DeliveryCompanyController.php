@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\DeliveryAssignedInfo;
 use App\Models\DeliveryCompany;
 use App\Models\CarryBeeOrderCreateForm;
+use App\Models\Vendor;
 use App\Models\VendorCarryBeeCredintial;
 use App\Service\CarrybeeService;
 use Illuminate\Http\Request;
@@ -291,6 +292,16 @@ class DeliveryCompanyController extends Controller
 
             if ($result['status'] >= 400) {
                 return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            $carrybeeStoreId = data_get($result['body'], 'data.id')
+                ?? data_get($result['body'], 'data.data.id')
+                ?? data_get($result['body'], 'id');
+
+            if ($carrybeeStoreId) {
+                Vendor::where('id', $vendorId)->update([
+                    'carryb_store_id' => $carrybeeStoreId,
+                ]);
             }
 
             return $this->success('Store created successfully', $result['body'], 201);
