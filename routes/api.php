@@ -39,6 +39,7 @@ use App\Http\Controllers\UserBankAccountController;
 use App\Http\Controllers\WithdrawController;
 use App\Http\Controllers\SupportTicketController;
 use App\Http\Controllers\CarrybeeWebhookController;
+use App\Http\Controllers\LandingPageOrderController;
 use App\Http\Controllers\MuthobartaSmsController;
 use App\Http\Controllers\ResellerProductPageController;
 use App\Http\Controllers\ResellerStoreProfileController;
@@ -83,6 +84,17 @@ Route::prefix('reseller-product-pages')->group(function () {
     Route::delete('/remove/{id}', [ResellerProductPageController::class, 'remove']);
     Route::get('/slug/{slug}', [ResellerProductPageController::class, 'getBySlug']);
     Route::get('/{id}', [ResellerProductPageController::class, 'details']);
+});
+
+Route::prefix('landing-page-orders')->group(function () {
+    Route::get('/list', [LandingPageOrderController::class, 'list']);
+    Route::post('/add', [LandingPageOrderController::class, 'add']);
+    Route::post('/create', [LandingPageOrderController::class, 'add']);
+    Route::get('/details/{id}', [LandingPageOrderController::class, 'details']);
+    Route::put('/update/{id}', [LandingPageOrderController::class, 'update']);
+    Route::delete('/delete/{id}', [LandingPageOrderController::class, 'delete']);
+    Route::delete('/remove/{id}', [LandingPageOrderController::class, 'delete']);
+    Route::post('/pass-order-to-reseller-brain/{id}', [LandingPageOrderController::class, 'passOrderToResellerBrain']);
 });
 
 Route::prefix('users')->group(function () {
