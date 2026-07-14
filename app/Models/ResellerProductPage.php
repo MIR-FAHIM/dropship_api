@@ -31,7 +31,7 @@ class ResellerProductPage extends Model
 
     public function reseller()
     {
-        return $this->belongsTo(ResellerStoreProfile::class, 'reseller_id');
+        return $this->belongsTo(ResellerStoreProfile::class, 'reseller_id', 'reseller_id');
     }
 
     public function product()
