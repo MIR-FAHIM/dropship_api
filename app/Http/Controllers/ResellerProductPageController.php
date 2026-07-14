@@ -49,7 +49,7 @@ class ResellerProductPageController extends Controller
     public function list(Request $request)
     {
         try {
-            $query = ResellerProductPage::with(['reseller', 'product.images', 'product.primaryImage']);
+            $query = ResellerProductPage::with(['reseller', 'product.images.image', 'product.primaryImage']);
 
             if ($request->filled('reseller_id')) {
                 $query->where('reseller_id', $request->reseller_id);
