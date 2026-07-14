@@ -778,6 +778,7 @@ class ProductController extends Controller
 
                 'slug' => ['sometimes', 'nullable', 'string', 'max:255', Rule::unique('products', 'slug')->ignore($product->id)],
                 'refundable' => ['sometimes', 'nullable', 'boolean'],
+                'show_home' => ['sometimes', 'nullable', 'boolean'],
                 'earn_point' => ['sometimes', 'nullable', 'integer'],
                 'rating' => ['sometimes', 'nullable', 'numeric'],
                 'barcode' => ['sometimes', 'nullable', 'string', 'max:255'],
