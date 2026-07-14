@@ -40,6 +40,7 @@ use App\Http\Controllers\WithdrawController;
 use App\Http\Controllers\SupportTicketController;
 use App\Http\Controllers\CarrybeeWebhookController;
 use App\Http\Controllers\MuthobartaSmsController;
+use App\Http\Controllers\ResellerProductPageController;
 use App\Http\Controllers\ResellerStoreProfileController;
 use App\Models\TaskType;
 
@@ -72,6 +73,16 @@ Route::prefix('reseller-store-profiles')->group(function () {
     Route::put('/update/{id}', [ResellerStoreProfileController::class, 'update']);
     Route::get('/reseller/{resellerId}', [ResellerStoreProfileController::class, 'getByReseller']);
     Route::get('/{id}', [ResellerStoreProfileController::class, 'details']);
+});
+
+Route::prefix('reseller-product-pages')->group(function () {
+    Route::get('/list', [ResellerProductPageController::class, 'list']);
+    Route::post('/add', [ResellerProductPageController::class, 'add']);
+    Route::post('/create', [ResellerProductPageController::class, 'add']);
+    Route::put('/update/{id}', [ResellerProductPageController::class, 'update']);
+    Route::delete('/remove/{id}', [ResellerProductPageController::class, 'remove']);
+    Route::get('/slug/{slug}', [ResellerProductPageController::class, 'getBySlug']);
+    Route::get('/{id}', [ResellerProductPageController::class, 'details']);
 });
 
 Route::prefix('users')->group(function () {
