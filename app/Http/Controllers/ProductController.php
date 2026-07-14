@@ -747,7 +747,7 @@ class ProductController extends Controller
                 'todays_deal' => ['sometimes', 'nullable', 'boolean'],
                 'published' => ['sometimes', 'nullable', 'boolean'],
                 'approved' => ['sometimes', 'nullable', 'boolean'],
-                'stock_visibility_state' => ['sometimes', 'nullable', 'string', 'max:50'],
+                'stock_visibility_state' => ['sometimes', 'nullable', 'boolean'],
                 'cash_on_delivery' => ['sometimes', 'nullable', 'boolean'],
                 'featured' => ['sometimes', 'nullable', 'boolean'],
                 'seller_featured' => ['sometimes', 'nullable', 'boolean'],
