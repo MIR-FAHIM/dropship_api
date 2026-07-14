@@ -104,7 +104,11 @@ class ResellerProductPageController extends Controller
 
             $page = ResellerProductPage::create($validated);
 
-            return $this->success('Reseller product page created successfully', $page->load(['reseller', 'product']), 201);
+            return $this->success('Reseller product page created successfully', $page->load([
+                'reseller',
+                'product.images.image',
+                'product.primaryImage',
+            ]), 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
@@ -115,7 +119,7 @@ class ResellerProductPageController extends Controller
     public function details($id)
     {
         try {
-            $page = ResellerProductPage::with(['reseller', 'product.images', 'product.primaryImage'])->find($id);
+            $page = ResellerProductPage::with(['reseller', 'product.images.image', 'product.primaryImage'])->find($id);
 
             if (!$page) {
                 return $this->failed('Reseller product page not found', null, 404);
@@ -130,7 +134,7 @@ class ResellerProductPageController extends Controller
     public function getBySlug($slug)
     {
         try {
-            $page = ResellerProductPage::with(['reseller', 'product.images', 'product.primaryImage'])
+            $page = ResellerProductPage::with(['reseller', 'product.images.image', 'product.primaryImage'])
                 ->where('slug', $slug)
                 ->first();
 
@@ -190,7 +194,11 @@ class ResellerProductPageController extends Controller
 
             $page->update($validated);
 
-            return $this->success('Reseller product page updated successfully', $page->load(['reseller', 'product']));
+            return $this->success('Reseller product page updated successfully', $page->load([
+                'reseller',
+                'product.images.image',
+                'product.primaryImage',
+            ]));
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
