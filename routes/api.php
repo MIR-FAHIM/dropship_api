@@ -40,6 +40,7 @@ use App\Http\Controllers\WithdrawController;
 use App\Http\Controllers\SupportTicketController;
 use App\Http\Controllers\CarrybeeWebhookController;
 use App\Http\Controllers\MuthobartaSmsController;
+use App\Http\Controllers\ResellerStoreProfileController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -64,6 +65,13 @@ Route::prefix('withdraws')->group(function () {
     Route::get('/all', [WithdrawController::class, 'getAllWithdrawRequest']);
     Route::get('/user/{id}', [WithdrawController::class, 'getUserWithdrawRequest']);
     Route::post('/status-change/{id}', [WithdrawController::class, 'withdrawStatusChange']);
+});
+
+Route::prefix('reseller-store-profiles')->group(function () {
+    Route::post('/add', [ResellerStoreProfileController::class, 'add']);
+    Route::put('/update/{id}', [ResellerStoreProfileController::class, 'update']);
+    Route::get('/reseller/{resellerId}', [ResellerStoreProfileController::class, 'getByReseller']);
+    Route::get('/{id}', [ResellerStoreProfileController::class, 'details']);
 });
 
 Route::prefix('users')->group(function () {
