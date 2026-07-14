@@ -440,8 +440,8 @@ class ProductController extends Controller
               'subCategory', 'vendor.division', 
               'vendor.district', 'brand', 'productDiscount']);
 
-            if ($request->filled('shop_id')) {
-                $query->where('shop_id', $request->shop_id);
+            if ($request->filled('vendor_id')) {
+                $query->where('vendor_id', $request->vendor_id);
             }
 
             if ($request->filled('category_id')) {
@@ -513,8 +513,8 @@ class ProductController extends Controller
                   $q->where('is_active', 1);
               });
 
-            if ($request->filled('shop_id')) {
-                $query->where('shop_id', $request->shop_id);
+            if ($request->filled('vendor_id')) {
+                $query->where('vendor_id', $request->vendor_id);
             }
 
             if ($request->filled('category_id')) {
