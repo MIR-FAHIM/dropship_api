@@ -71,6 +71,7 @@ Route::prefix('withdraws')->group(function () {
 
 Route::prefix('reseller-store-profiles')->group(function () {
     Route::post('/add', [ResellerStoreProfileController::class, 'add']);
+    Route::post('/update/{id}', [ResellerStoreProfileController::class, 'update']);
     Route::put('/update/{id}', [ResellerStoreProfileController::class, 'update']);
     Route::get('/reseller/{resellerId}', [ResellerStoreProfileController::class, 'getByReseller']);
     Route::get('/{id}', [ResellerStoreProfileController::class, 'details']);

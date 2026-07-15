@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ResellerStoreProfile;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class ResellerStoreProfileController extends Controller
@@ -26,13 +27,44 @@ class ResellerStoreProfileController extends Controller
         ], $code);
     }
 
+    private function logoRules(Request $request, bool $isUpdate = false): array
+    {
+        $presence = $isUpdate ? 'sometimes' : 'nullable';
+
+        if ($request->hasFile('logo')) {
+            return [$presence, 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'];
+        }
+
+        return [$presence, 'nullable', 'string', 'max:255'];
+    }
+
+    private function storeLogo(Request $request, int $resellerId): ?string
+    {
+        if (!$request->hasFile('logo')) {
+            return null;
+        }
+
+        return $request->file('logo')->store("reseller-store-profiles/{$resellerId}", 'public');
+    }
+
+    private function deleteOldLogo(?string $path): void
+    {
+        if (!$path || str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return;
+        }
+
+        if (Storage::disk('public')->exists($path)) {
+            Storage::disk('public')->delete($path);
+        }
+    }
+
     public function add(Request $request)
     {
         try {
             $validated = $request->validate([
                 'reseller_id' => ['required', 'integer', 'exists:users,id', 'unique:reseller_store_profiles,reseller_id'],
                 'shop_name' => ['nullable', 'string', 'max:255'],
-                'logo' => ['nullable', 'string', 'max:255'],
+                'logo' => $this->logoRules($request),
                 'phone' => ['nullable', 'string', 'max:50'],
                 'whatsapp' => ['nullable', 'string', 'max:50'],
                 'address' => ['nullable', 'string'],
@@ -42,6 +74,11 @@ class ResellerStoreProfileController extends Controller
                 'theme' => ['nullable', 'string', 'max:255'],
                 'status' => ['nullable', 'string', 'max:50'],
             ]);
+
+            $logoPath = $this->storeLogo($request, (int) $validated['reseller_id']);
+            if ($logoPath) {
+                $validated['logo'] = $logoPath;
+            }
 
             $profile = ResellerStoreProfile::create($validated);
 
@@ -70,7 +107,7 @@ class ResellerStoreProfileController extends Controller
                     Rule::unique('reseller_store_profiles', 'reseller_id')->ignore($profile->id),
                 ],
                 'shop_name' => ['sometimes', 'nullable', 'string', 'max:255'],
-                'logo' => ['sometimes', 'nullable', 'string', 'max:255'],
+                'logo' => $this->logoRules($request, true),
                 'phone' => ['sometimes', 'nullable', 'string', 'max:50'],
                 'whatsapp' => ['sometimes', 'nullable', 'string', 'max:50'],
                 'address' => ['sometimes', 'nullable', 'string'],
@@ -80,6 +117,12 @@ class ResellerStoreProfileController extends Controller
                 'theme' => ['sometimes', 'nullable', 'string', 'max:255'],
                 'status' => ['sometimes', 'nullable', 'string', 'max:50'],
             ]);
+
+            $logoPath = $this->storeLogo($request, (int) ($validated['reseller_id'] ?? $profile->reseller_id));
+            if ($logoPath) {
+                $this->deleteOldLogo($profile->logo);
+                $validated['logo'] = $logoPath;
+            }
 
             $profile->update($validated);
 
