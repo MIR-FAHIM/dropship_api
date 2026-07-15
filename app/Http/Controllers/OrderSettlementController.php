@@ -7,6 +7,7 @@ use App\Models\OrderSettlement;
 use App\Models\ResellerTransaction;
 use App\Service\CompanyTransactionService;
 use App\Service\MuthobartaSmsService;
+use App\Service\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -15,11 +16,17 @@ class OrderSettlementController extends Controller
 {
     protected $smsService;
     protected $companyTransactions;
+    protected $notificationService;
 
-    public function __construct(MuthobartaSmsService $smsService, CompanyTransactionService $companyTransactions)
+    public function __construct(
+        MuthobartaSmsService $smsService,
+        CompanyTransactionService $companyTransactions,
+        NotificationService $notificationService
+    )
     {
         $this->smsService = $smsService;
         $this->companyTransactions = $companyTransactions;
+        $this->notificationService = $notificationService;
     }
 
     private function success($message, $data = null, int $code = 200)
@@ -234,6 +241,66 @@ class OrderSettlementController extends Controller
         $this->smsService->send($receiver, $message, 'order_settlement');
     }
 
+    private function settlementNotificationReceiver(OrderSettlement $settlement): ?int
+    {
+        if ($settlement->payable_user_id) {
+            return (int) $settlement->payable_user_id;
+        }
+
+        if ($settlement->user_type === 'vendor' && $settlement->vendor?->user_id) {
+            return (int) $settlement->vendor->user_id;
+        }
+
+        if ($settlement->user_type === 'dropshipper' && $settlement->order?->user_id) {
+            return (int) $settlement->order->user_id;
+        }
+
+        return null;
+    }
+
+    private function sendSettlementNotification(OrderSettlement $settlement): void
+    {
+        $settlement->loadMissing(['order.user', 'payableUser', 'vendor.user']);
+
+        $orderNumber = $settlement->order?->order_number ?: $settlement->order_id;
+        $amount = number_format((float) $settlement->settleable_amount, 2, '.', '');
+        $currency = $settlement->currency ?: 'BDT';
+        $receiverId = $this->settlementNotificationReceiver($settlement);
+
+        if ($this->shouldSendSettlementSms($settlement) && $receiverId) {
+            $title = $settlement->user_type === 'vendor'
+                ? 'Vendor Settlement Paid'
+                : 'Reseller Profit Added';
+
+            $subtitle = $settlement->user_type === 'vendor'
+                ? "Settlement for order {$orderNumber} paid. Amount {$amount} {$currency}."
+                : "Profit for order {$orderNumber} added to your balance. Amount {$amount} {$currency}.";
+
+            $this->notificationService->createNotificationSafely([
+                'title'      => $title,
+                'subtitle'   => $subtitle,
+                'created_by' => $settlement->created_by,
+                'send_to'    => $receiverId,
+                'is_seen'    => false,
+                'type'       => 'payment',
+                'is_active'  => true,
+                'image'      => null,
+                'module'     => 'settlement',
+            ]);
+        }
+
+        $this->notificationService->createAdminNotifications([
+            'title'      => 'Order Settlement Updated',
+            'subtitle'   => "{$settlement->settlement_type} for order {$orderNumber} is {$settlement->status}. Amount {$amount} {$currency}.",
+            'created_by' => $settlement->created_by,
+            'is_seen'    => false,
+            'type'       => 'payment',
+            'is_active'  => true,
+            'image'      => null,
+            'module'     => 'settlement',
+        ]);
+    }
+
     public function list(Request $request)
     {
         try {
@@ -373,6 +440,7 @@ class OrderSettlementController extends Controller
             $settlement->refresh();
             if (!$wasSettled && $settlement->status === OrderSettlement::STATUS_SETTLED) {
                 $this->sendSettlementSms($settlement);
+                $this->sendSettlementNotification($settlement);
             }
 
             return $this->success('Order settlement status updated successfully', $settlement->load(['order', 'payableUser', 'vendor', 'createdBy']));
@@ -413,6 +481,17 @@ class OrderSettlementController extends Controller
             }
 
             $settlement->save();
+
+            $this->notificationService->createAdminNotifications([
+                'title'      => 'Settlement Transaction ID Added',
+                'subtitle'   => "Settlement #{$settlement->id} transaction ID added.",
+                'created_by' => $settlement->created_by,
+                'is_seen'    => false,
+                'type'       => 'payment',
+                'is_active'  => true,
+                'image'      => null,
+                'module'     => 'settlement',
+            ]);
 
             return $this->success('Settled transaction id added successfully', $settlement->load(['order', 'payableUser', 'vendor', 'createdBy']));
         } catch (\Illuminate\Validation\ValidationException $e) {

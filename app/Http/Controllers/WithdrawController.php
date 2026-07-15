@@ -8,15 +8,75 @@ use App\Models\WithdrawRequest;
 use App\Models\ResellerTransaction;
 use App\Models\UserBankAccount;
 use App\Service\CompanyTransactionService;
+use App\Service\NotificationService;
 use Illuminate\Support\Facades\DB;
 
 class WithdrawController extends Controller
 {
 	protected $companyTransactions;
+	protected $notificationService;
 
-	public function __construct(CompanyTransactionService $companyTransactions)
+	public function __construct(CompanyTransactionService $companyTransactions, NotificationService $notificationService)
 	{
 		$this->companyTransactions = $companyTransactions;
+		$this->notificationService = $notificationService;
+	}
+
+	private function notifyWithdrawCreated(WithdrawRequest $withdraw): void
+	{
+		$amount = number_format((float) $withdraw->amount, 2, '.', '');
+
+		$this->notificationService->createNotificationSafely([
+			'title'      => 'Withdraw Request Submitted',
+			'subtitle'   => "Your withdraw request #{$withdraw->id} for {$amount} BDT is pending.",
+			'created_by' => $withdraw->user_id,
+			'send_to'    => $withdraw->user_id,
+			'is_seen'    => false,
+			'type'       => 'payment',
+			'is_active'  => true,
+			'image'      => null,
+			'module'     => 'withdraw',
+		]);
+
+		$this->notificationService->createAdminNotifications([
+			'title'      => 'New Withdraw Request',
+			'subtitle'   => "Withdraw request #{$withdraw->id} submitted. Amount {$amount} BDT.",
+			'created_by' => $withdraw->user_id,
+			'is_seen'    => false,
+			'type'       => 'payment',
+			'is_active'  => true,
+			'image'      => null,
+			'module'     => 'withdraw',
+		]);
+	}
+
+	private function notifyWithdrawStatusChanged(WithdrawRequest $withdraw, string $previousStatus): void
+	{
+		$amount = number_format((float) $withdraw->amount, 2, '.', '');
+		$status = ucfirst($withdraw->status);
+
+		$this->notificationService->createNotificationSafely([
+			'title'      => "Withdraw Request {$status}",
+			'subtitle'   => "Your withdraw request #{$withdraw->id} changed from {$previousStatus} to {$withdraw->status}. Amount {$amount} BDT.",
+			'created_by' => null,
+			'send_to'    => $withdraw->user_id,
+			'is_seen'    => false,
+			'type'       => 'payment',
+			'is_active'  => true,
+			'image'      => null,
+			'module'     => 'withdraw',
+		]);
+
+		$this->notificationService->createAdminNotifications([
+			'title'      => 'Withdraw Status Changed',
+			'subtitle'   => "Withdraw request #{$withdraw->id} changed from {$previousStatus} to {$withdraw->status}. Amount {$amount} BDT.",
+			'created_by' => null,
+			'is_seen'    => false,
+			'type'       => 'payment',
+			'is_active'  => true,
+			'image'      => null,
+			'module'     => 'withdraw',
+		]);
 	}
 
 	/**
@@ -45,6 +105,7 @@ class WithdrawController extends Controller
 				'note' => $validated['note'] ?? null,
 				'type' => $validated['type'] ?? null,
 			]);
+			$this->notifyWithdrawCreated($withdraw);
 			return response()->json(['success' => true, 'data' => $withdraw], 201);
 		} catch (\Exception $e) {
 			return response()->json([
@@ -98,6 +159,7 @@ class WithdrawController extends Controller
 			]);
 			$withdraw = WithdrawRequest::findOrFail($id);
 			$wasApproved = $withdraw->status === 'approved';
+			$previousStatus = $withdraw->status;
 
 			DB::transaction(function () use ($withdraw, $validated, $wasApproved) {
 				$withdraw->status = $validated['status'];
@@ -126,6 +188,11 @@ class WithdrawController extends Controller
 					$this->companyTransactions->recordWithdrawApproval($withdraw, $trxId);
 				}
 			});
+
+			$withdraw->refresh();
+			if ($previousStatus !== $withdraw->status) {
+				$this->notifyWithdrawStatusChanged($withdraw, $previousStatus);
+			}
 
 			return response()->json(['success' => true, 'data' => $withdraw]);
 		} catch (\Exception $e) {

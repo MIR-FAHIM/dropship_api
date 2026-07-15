@@ -429,16 +429,43 @@ class OrderController extends Controller
 
             DB::commit();
 
-            $order->load(['items']);
-            $this->notificationService->createNotification([
+            $order->load(['items', 'vendor.user']);
+            $formattedTotal = number_format((float) $order->total, 2, '.', '');
+
+            $this->notificationService->createNotificationSafely([
                 'title'      => 'New Order Created',
-                'subtitle'   => "Order ID: {$order->id}",
+                'subtitle'   => "Order {$order->order_number} created. Total {$formattedTotal} BDT.",
                 'created_by' => $order->user_id,
                 'send_to'    => $order->user_id,
                 'is_seen'    => false,
                 'type'       => 'order',
                 'is_active'  => true,
-                'image'      => null, // Set image path if needed
+                'image'      => null,
+                'module'     => 'order',
+            ]);
+
+            if ($order->vendor?->user_id) {
+                $this->notificationService->createNotificationSafely([
+                    'title'      => 'New Vendor Order',
+                    'subtitle'   => "Order {$order->order_number} includes product(s) from your shop.",
+                    'created_by' => $order->user_id,
+                    'send_to'    => $order->vendor->user_id,
+                    'is_seen'    => false,
+                    'type'       => 'order',
+                    'is_active'  => true,
+                    'image'      => null,
+                    'module'     => 'order',
+                ]);
+            }
+
+            $this->notificationService->createAdminNotifications([
+                'title'      => 'New Checkout Order',
+                'subtitle'   => "Order {$order->order_number} placed. Total {$formattedTotal} BDT.",
+                'created_by' => $order->user_id,
+                'is_seen'    => false,
+                'type'       => 'order',
+                'is_active'  => true,
+                'image'      => null,
                 'module'     => 'order',
             ]);
 
@@ -657,17 +684,62 @@ class OrderController extends Controller
                 'note' => ['nullable', 'string'],
             ]);
 
-            $order->status = $validated['status_id'];
+            $previousStatusId = (int) $order->status;
+            $previousPaymentStatus = $order->payment_status;
+            $statusId = (int) $validated['status_id'];
+            $statusName = OrderStatus::where('id', $statusId)->value('name') ?: 'Status ' . $statusId;
+
+            $order->status = $statusId;
             $order->save();
 
             OrderStatusHistory::create([
                 'order_id' => $order->id,
-                'status_id' => $validated['status_id'],
+                'status_id' => $statusId,
                 'note' => $validated['note'] ?? null,
                 'changed_by' => null,
             ]);
 
-            $statusId = (int) $validated['status_id'];
+            if ($previousStatusId !== $statusId) {
+                $order->loadMissing('vendor.user');
+
+                $this->notificationService->createNotificationSafely([
+                    'title'      => 'Order Status Updated',
+                    'subtitle'   => "Order {$order->order_number} status changed to {$statusName}.",
+                    'created_by' => $request->input('changed_by'),
+                    'send_to'    => $order->user_id,
+                    'is_seen'    => false,
+                    'type'       => 'order',
+                    'is_active'  => true,
+                    'image'      => null,
+                    'module'     => 'order',
+                ]);
+
+                if ($order->vendor?->user_id) {
+                    $this->notificationService->createNotificationSafely([
+                        'title'      => 'Vendor Order Status Updated',
+                        'subtitle'   => "Order {$order->order_number} status changed to {$statusName}.",
+                        'created_by' => $request->input('changed_by'),
+                        'send_to'    => $order->vendor->user_id,
+                        'is_seen'    => false,
+                        'type'       => 'order',
+                        'is_active'  => true,
+                        'image'      => null,
+                        'module'     => 'order',
+                    ]);
+                }
+
+                $this->notificationService->createAdminNotifications([
+                    'title'      => 'Order Status Updated',
+                    'subtitle'   => "Order {$order->order_number} status changed to {$statusName}.",
+                    'created_by' => $request->input('changed_by'),
+                    'is_seen'    => false,
+                    'type'       => 'order',
+                    'is_active'  => true,
+                    'image'      => null,
+                    'module'     => 'order',
+                ]);
+            }
+
             if ($statusId === 9) {
                 $order->payment_status = 'paid';
                 $order->save();
@@ -689,6 +761,33 @@ class OrderController extends Controller
                 }
 
                 $this->createOrderSettlements($order, $request->input('changed_by'));
+
+                if ($previousPaymentStatus !== 'paid') {
+                    $formattedTotal = number_format((float) $order->total, 2, '.', '');
+
+                    $this->notificationService->createNotificationSafely([
+                        'title'      => 'Order Payment Completed',
+                        'subtitle'   => "Payment collected for order {$order->order_number}. Amount {$formattedTotal} BDT.",
+                        'created_by' => $request->input('changed_by'),
+                        'send_to'    => $order->user_id,
+                        'is_seen'    => false,
+                        'type'       => 'payment',
+                        'is_active'  => true,
+                        'image'      => null,
+                        'module'     => 'order',
+                    ]);
+
+                    $this->notificationService->createAdminNotifications([
+                        'title'      => 'Order Payment Completed',
+                        'subtitle'   => "Payment collected for order {$order->order_number}. Amount {$formattedTotal} BDT.",
+                        'created_by' => $request->input('changed_by'),
+                        'is_seen'    => false,
+                        'type'       => 'payment',
+                        'is_active'  => true,
+                        'image'      => null,
+                        'module'     => 'order',
+                    ]);
+                }
             }
 
 
@@ -758,6 +857,30 @@ class OrderController extends Controller
                         'type' => 'order_status',
                         'note' => 'Credit transaction (reseller profit) for order #' . $order->order_number,
                         'reseller_id' => $order->user_id,
+                    ]);
+
+                    $formattedProfit = number_format($profitAmount, 2, '.', '');
+                    $this->notificationService->createNotificationSafely([
+                        'title'      => 'Reseller Profit Settled',
+                        'subtitle'   => "Profit for order {$order->order_number} settled. Amount {$formattedProfit} BDT.",
+                        'created_by' => $request->changed_by,
+                        'send_to'    => $order->user_id,
+                        'is_seen'    => false,
+                        'type'       => 'payment',
+                        'is_active'  => true,
+                        'image'      => null,
+                        'module'     => 'order',
+                    ]);
+
+                    $this->notificationService->createAdminNotifications([
+                        'title'      => 'Reseller Profit Settled',
+                        'subtitle'   => "Profit for order {$order->order_number} settled. Amount {$formattedProfit} BDT.",
+                        'created_by' => $request->changed_by,
+                        'is_seen'    => false,
+                        'type'       => 'payment',
+                        'is_active'  => true,
+                        'image'      => null,
+                        'module'     => 'order',
                     ]);
 
                     // Update user balance

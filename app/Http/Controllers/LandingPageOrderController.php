@@ -11,12 +11,20 @@ use App\Models\OrderStatusHistory;
 use App\Models\Product;
 use App\Models\ResellerProductPage;
 use App\Models\Upazila;
+use App\Service\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class LandingPageOrderController extends Controller
 {
+    protected $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
+
     private function success($message, $data = null, int $code = 200)
     {
         return response()->json([
@@ -95,6 +103,81 @@ class LandingPageOrderController extends Controller
         return round(($sellingPrice * $quantity) + $deliveryCharge, 2);
     }
 
+    private function notifyLandingOrderCreated(LandingPageOrder $landingOrder): void
+    {
+        $amount = number_format((float) $landingOrder->total_amount, 2, '.', '');
+
+        if ($landingOrder->reseller_id) {
+            $this->notificationService->createNotificationSafely([
+                'title'      => 'New Landing Page Order',
+                'subtitle'   => "Order {$landingOrder->tracking_code} received. Amount {$amount} BDT.",
+                'created_by' => null,
+                'send_to'    => $landingOrder->reseller_id,
+                'is_seen'    => false,
+                'type'       => 'order',
+                'is_active'  => true,
+                'image'      => null,
+                'module'     => 'landing_page_order',
+            ]);
+        }
+
+        $this->notificationService->createAdminNotifications([
+            'title'      => 'New Landing Page Order',
+            'subtitle'   => "Order {$landingOrder->tracking_code} received. Amount {$amount} BDT.",
+            'created_by' => $landingOrder->reseller_id,
+            'is_seen'    => false,
+            'type'       => 'order',
+            'is_active'  => true,
+            'image'      => null,
+            'module'     => 'landing_page_order',
+        ]);
+    }
+
+    private function notifyLandingOrderPassed(LandingPageOrder $landingOrder, Order $order): void
+    {
+        $order->loadMissing('vendor.user');
+        $amount = number_format((float) $order->total, 2, '.', '');
+
+        if ($landingOrder->reseller_id) {
+            $this->notificationService->createNotificationSafely([
+                'title'      => 'Landing Order Passed',
+                'subtitle'   => "Landing order {$landingOrder->tracking_code} passed as {$order->order_number}. Amount {$amount} BDT.",
+                'created_by' => null,
+                'send_to'    => $landingOrder->reseller_id,
+                'is_seen'    => false,
+                'type'       => 'order',
+                'is_active'  => true,
+                'image'      => null,
+                'module'     => 'landing_page_order',
+            ]);
+        }
+
+        if ($order->vendor?->user_id) {
+            $this->notificationService->createNotificationSafely([
+                'title'      => 'New Vendor Order',
+                'subtitle'   => "Landing order {$landingOrder->tracking_code} passed as {$order->order_number}.",
+                'created_by' => $landingOrder->reseller_id,
+                'send_to'    => $order->vendor->user_id,
+                'is_seen'    => false,
+                'type'       => 'order',
+                'is_active'  => true,
+                'image'      => null,
+                'module'     => 'landing_page_order',
+            ]);
+        }
+
+        $this->notificationService->createAdminNotifications([
+            'title'      => 'Landing Order Passed',
+            'subtitle'   => "Landing order {$landingOrder->tracking_code} passed as {$order->order_number}. Amount {$amount} BDT.",
+            'created_by' => $landingOrder->reseller_id,
+            'is_seen'    => false,
+            'type'       => 'order',
+            'is_active'  => true,
+            'image'      => null,
+            'module'     => 'landing_page_order',
+        ]);
+    }
+
     public function list(Request $request)
     {
         try {
@@ -164,6 +247,7 @@ class LandingPageOrderController extends Controller
             $validated['total_amount'] = $validated['total_amount'] ?? $this->calculateTotal($validated);
 
             $landingOrder = LandingPageOrder::create($validated);
+            $this->notifyLandingOrderCreated($landingOrder);
 
             return $this->success('Landing page order created successfully', $landingOrder->load($this->relations()), 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -351,6 +435,8 @@ class LandingPageOrderController extends Controller
 
                 return $order->load(['items', 'user', 'vendor']);
             });
+
+            $this->notifyLandingOrderPassed($landingOrder->fresh(), $order);
 
             return $this->success('Landing page order passed to ResellerBrain successfully', [
                 'landing_page_order' => $landingOrder->fresh()->load($this->relations()),

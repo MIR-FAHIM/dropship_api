@@ -388,6 +388,9 @@ Route::prefix('tasks')->group(function () {
 Route::prefix('notifications')->group(function () {
 
     Route::get('/all-list', [NotificationController::class, 'getAllNotification']);
+    Route::get('/user/{userId}', [NotificationController::class, 'getNotificationByUser']);
+    Route::patch('/read-unread/{id}', [NotificationController::class, 'readUnread']);
+    Route::patch('/mark-all-read/{userId}', [NotificationController::class, 'markAllAsReadByUser']);
 });
 
 Route::prefix('sms')->group(function () {

@@ -6,12 +6,17 @@ use App\Models\CarryBeeOrderCreateForm;
 use App\Models\CarrybeeWebhookEvent;
 use App\Models\DeliveryAssignedInfo;
 use App\Models\Order;
+use App\Models\OrderStatus;
 use App\Models\OrderStatusHistory;
 use App\Models\Transaction;
 use Illuminate\Support\Arr;
 
 class CarrybeeWebhookService
 {
+    public function __construct(private readonly NotificationService $notificationService)
+    {
+    }
+
     public function process(array $payload, string $rawBody, string $signature, array $headers = []): array
     {
         $event = (string) ($payload['event'] ?? '');
@@ -194,6 +199,7 @@ class CarrybeeWebhookService
     private function applyStatusTransition(Order $order, int $targetStatusId, array $payload): string
     {
         $currentStatusId = (int) $order->status;
+        $previousPaymentStatus = $order->payment_status;
         $rankMap = (array) config('carrybee.status_rank_map', []);
         $currentRank = (int) ($rankMap[$currentStatusId] ?? $currentStatusId);
         $targetRank = (int) ($rankMap[$targetStatusId] ?? $targetStatusId);
@@ -221,10 +227,89 @@ class CarrybeeWebhookService
                 'changed_by' => null,
             ]);
 
+            $this->notifyWebhookOrderStatusUpdated($order, $targetStatusId);
+        }
+
+        if ($targetStatusId === 9 && $previousPaymentStatus !== 'paid') {
+            $this->notifyWebhookPaymentCompleted($order);
+        }
+
+        if ($targetStatusId !== $currentStatusId) {
             return 'Order status updated';
         }
 
         return 'Order status unchanged';
+    }
+
+    private function notifyWebhookOrderStatusUpdated(Order $order, int $statusId): void
+    {
+        $order->loadMissing('vendor.user');
+        $statusName = OrderStatus::where('id', $statusId)->value('name') ?: 'Status ' . $statusId;
+
+        $this->notificationService->createNotificationSafely([
+            'title'      => 'Order Status Updated',
+            'subtitle'   => "CarryBee updated order {$order->order_number} to {$statusName}.",
+            'created_by' => null,
+            'send_to'    => $order->user_id,
+            'is_seen'    => false,
+            'type'       => 'order',
+            'is_active'  => true,
+            'image'      => null,
+            'module'     => 'order',
+        ]);
+
+        if ($order->vendor?->user_id) {
+            $this->notificationService->createNotificationSafely([
+                'title'      => 'Vendor Order Status Updated',
+                'subtitle'   => "CarryBee updated order {$order->order_number} to {$statusName}.",
+                'created_by' => null,
+                'send_to'    => $order->vendor->user_id,
+                'is_seen'    => false,
+                'type'       => 'order',
+                'is_active'  => true,
+                'image'      => null,
+                'module'     => 'order',
+            ]);
+        }
+
+        $this->notificationService->createAdminNotifications([
+            'title'      => 'CarryBee Order Status Updated',
+            'subtitle'   => "Order {$order->order_number} updated to {$statusName}.",
+            'created_by' => null,
+            'is_seen'    => false,
+            'type'       => 'order',
+            'is_active'  => true,
+            'image'      => null,
+            'module'     => 'order',
+        ]);
+    }
+
+    private function notifyWebhookPaymentCompleted(Order $order): void
+    {
+        $amount = number_format((float) $order->total, 2, '.', '');
+
+        $this->notificationService->createNotificationSafely([
+            'title'      => 'Order Payment Completed',
+            'subtitle'   => "CarryBee marked payment collected for order {$order->order_number}. Amount {$amount} BDT.",
+            'created_by' => null,
+            'send_to'    => $order->user_id,
+            'is_seen'    => false,
+            'type'       => 'payment',
+            'is_active'  => true,
+            'image'      => null,
+            'module'     => 'order',
+        ]);
+
+        $this->notificationService->createAdminNotifications([
+            'title'      => 'Order Payment Completed',
+            'subtitle'   => "CarryBee marked payment collected for order {$order->order_number}. Amount {$amount} BDT.",
+            'created_by' => null,
+            'is_seen'    => false,
+            'type'       => 'payment',
+            'is_active'  => true,
+            'image'      => null,
+            'module'     => 'order',
+        ]);
     }
 
     private function ensureCreditTransactionForCompletedOrder(Order $order): void
