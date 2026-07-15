@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use App\Models\ApiToken;
 use App\Models\LoginError;
+use App\Models\LoginSuccessLog;
 use App\Service\ApiTokenService;
 
 class AuthController extends Controller
@@ -36,6 +37,30 @@ class AuthController extends Controller
             ]);
         } catch (\Throwable $e) {
             // Avoid breaking authentication flow if logging fails.
+        }
+    }
+
+    private function storeLoginSuccess(Request $request, User $user, ?ApiToken $token = null, string $loginType = 'login'): void
+    {
+        try {
+            LoginSuccessLog::create([
+                'user_id' => $user->id,
+                'user_type' => $user->user_type,
+                'role' => $user->role,
+                'login_type' => $loginType,
+                'token_id' => $token?->id,
+                'token_name' => $token?->name,
+                'token_expires_at' => $token?->expires_at,
+                'url' => $request->fullUrl(),
+                'method' => $request->method(),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'request_data' => json_encode($this->maskSensitive($request->all()), JSON_UNESCAPED_UNICODE),
+                'logged_in_at' => now(),
+                'created_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            // Avoid breaking authentication flow if success logging fails.
         }
     }
 
@@ -116,6 +141,7 @@ class AuthController extends Controller
             $name = $validated['name'] ?? 'login-token';
 
             $created = ApiTokenService::create($user, $scopes, $days, $name);
+            $this->storeLoginSuccess($request, $user, $created['token'], 'login');
 
             return $this->success('Login successful', [
                 'token' => $created['plain'],
@@ -189,6 +215,7 @@ class AuthController extends Controller
             $name = $validated['name'] ?? 'login-vendor-token';
 
             $created = ApiTokenService::create($user, $scopes, $days, $name);
+            $this->storeLoginSuccess($request, $user, $created['token'], 'login_as_vendor');
 
             return $this->success('Login successful', [
                 'token' => $created['plain'],

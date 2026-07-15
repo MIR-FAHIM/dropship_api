@@ -300,6 +300,8 @@ Route::prefix('error-logs')->group(function () {
     Route::get('/report/overall', [ErrorLogController::class, 'overallReport']);
     Route::get('/product-create', [ErrorLogController::class, 'productCreateLogs']);
     Route::get('/login', [ErrorLogController::class, 'loginLogs']);
+    Route::get('/login-success', [ErrorLogController::class, 'loginSuccessLogs']);
+    Route::get('/login-success/report', [ErrorLogController::class, 'loginSuccessReport']);
     Route::get('/registration', [ErrorLogController::class, 'registrationLogs']);
     Route::get('/order', [ErrorLogController::class, 'orderLogs']);
 });
