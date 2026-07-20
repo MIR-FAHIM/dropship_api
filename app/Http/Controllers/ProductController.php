@@ -853,12 +853,8 @@ class ProductController extends Controller
             $oldUnitPrice = $product->unit_price;
             $oldAdminPrice = $product->admin_price;
 
-            if (
-                array_key_exists('unit_price', $validated)
-                && !array_key_exists('admin_price', $validated)
-                && is_null($product->admin_price)
-                && !is_null($validated['unit_price'])
-            ) {
+            if (array_key_exists('unit_price', $validated) && !is_null($validated['unit_price'])) {
+                $validated['unit_price'] = round((float) $validated['unit_price'], 2);
                 $validated['admin_price'] = $this->defaultAdminPrice($validated['unit_price']);
             }
 
