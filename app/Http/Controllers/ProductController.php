@@ -103,18 +103,6 @@ class ProductController extends Controller
         return is_null($unitPrice) ? null : round((float) $unitPrice * 1.05, 2);
     }
 
-    private function validateAdminPriceCoversUnit(?float $unitPrice, ?float $adminPrice): ?array
-    {
-        if (!is_null($unitPrice) && !is_null($adminPrice) && $adminPrice < $unitPrice) {
-            return [
-                'unit_price' => $unitPrice,
-                'admin_price' => $adminPrice,
-            ];
-        }
-
-        return null;
-    }
-
     /**
      * POST /products/duplicate/{id}
      */
@@ -289,11 +277,6 @@ class ProductController extends Controller
             $adminPrice = array_key_exists('admin_price', $validated) && !is_null($validated['admin_price'])
                 ? round((float) $validated['admin_price'], 2)
                 : $this->defaultAdminPrice($unitPrice);
-
-            $priceError = $this->validateAdminPriceCoversUnit($unitPrice, $adminPrice);
-            if ($priceError) {
-                return $this->failed('Admin price can not be less than unit price', $priceError, 422);
-            }
 
             $productData = [
                 'name' => $validated['name'] ?? null,
@@ -856,22 +839,6 @@ class ProductController extends Controller
             if (array_key_exists('unit_price', $validated) && !is_null($validated['unit_price'])) {
                 $validated['unit_price'] = round((float) $validated['unit_price'], 2);
                 $validated['admin_price'] = $this->defaultAdminPrice($validated['unit_price']);
-            }
-
-            $effectiveUnitPrice = array_key_exists('unit_price', $validated)
-                ? (is_null($validated['unit_price']) ? null : round((float) $validated['unit_price'], 2))
-                : (is_null($product->unit_price) ? null : round((float) $product->unit_price, 2));
-            $effectiveAdminPrice = array_key_exists('admin_price', $validated)
-                ? (is_null($validated['admin_price']) ? null : round((float) $validated['admin_price'], 2))
-                : (is_null($product->admin_price) ? null : round((float) $product->admin_price, 2));
-            $shouldValidatePrice = array_key_exists('unit_price', $validated)
-                || array_key_exists('admin_price', $validated);
-
-            if ($shouldValidatePrice) {
-                $priceError = $this->validateAdminPriceCoversUnit($effectiveUnitPrice, $effectiveAdminPrice);
-                if ($priceError) {
-                    return $this->failed('Admin price can not be less than unit price', $priceError, 422);
-                }
             }
 
             $product->fill($validated);
