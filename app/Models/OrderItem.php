@@ -19,6 +19,7 @@ class OrderItem extends Model
         'attribute_id',
 
         'unit_price',
+        'admin_price',
         'reseller_price',
         'qty',
         'line_total',
@@ -30,8 +31,11 @@ class OrderItem extends Model
 
     protected $casts = [
         'unit_price' => 'float',
+        'admin_price' => 'float',
+        'reseller_price' => 'float',
         'qty' => 'integer',
         'line_total' => 'float',
+        'line_total_reseller_profit' => 'float',
     ];
 
     /**

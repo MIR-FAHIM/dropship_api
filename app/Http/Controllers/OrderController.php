@@ -160,6 +160,48 @@ class OrderController extends Controller
         }
     }
 
+    private function normalizePrice($value): ?float
+    {
+        return is_null($value) ? null : round((float) $value, 2);
+    }
+
+    private function resolveAdminPrice($item, ?float $unitPrice): ?float
+    {
+        $adminPrice = $item->admin_price ?? $item->product?->admin_price ?? null;
+
+        if (!is_null($adminPrice)) {
+            return $this->normalizePrice($adminPrice);
+        }
+
+        return !is_null($unitPrice) ? round($unitPrice * 1.05, 2) : null;
+    }
+
+    private function calculateItemResellerProfit($item): float
+    {
+        $qty = (int) ($item->qty ?? 0);
+        $adminPrice = $this->normalizePrice($item->admin_price ?? $item->unit_price);
+        $resellerPrice = $this->normalizePrice($item->reseller_price);
+
+        if (is_null($adminPrice) || is_null($resellerPrice)) {
+            return 0;
+        }
+
+        return round($qty * ($resellerPrice - $adminPrice), 2);
+    }
+
+    private function calculateItemCompanyProductCommission($item): float
+    {
+        $qty = (int) ($item->qty ?? 0);
+        $unitPrice = $this->normalizePrice($item->unit_price);
+        $adminPrice = $this->normalizePrice($item->admin_price ?? $item->unit_price);
+
+        if (is_null($unitPrice) || is_null($adminPrice)) {
+            return 0;
+        }
+
+        return round($qty * ($adminPrice - $unitPrice), 2);
+    }
+
     private function createOrderSettlements(Order $order, ?int $createdBy = null): void
     {
         $order->loadMissing(['items.shop']);
@@ -195,7 +237,10 @@ class OrderController extends Controller
             );
         }
 
-        $resellerProfit = round((float) ($order->reseller_profit ?? 0), 2);
+        $resellerProfit = round($order->items->sum(function ($item) {
+            return $this->calculateItemResellerProfit($item);
+        }), 2);
+
         OrderSettlement::updateOrCreate(
             [
                 'order_id' => $order->id,
@@ -267,6 +312,10 @@ class OrderController extends Controller
             ]
         );
 
+        $companyProductCommission = round($order->items->sum(function ($item) {
+            return $this->calculateItemCompanyProductCommission($item);
+        }), 2);
+
         OrderSettlement::updateOrCreate(
             [
                 'order_id' => $order->id,
@@ -276,10 +325,10 @@ class OrderController extends Controller
             [
                 'vendor_id' => null,
                 'user_type' => 'company',
-                'settleable_amount' => 0,
+                'settleable_amount' => $companyProductCommission,
                 'currency' => 'BDT',
                 'status' => OrderSettlement::STATUS_PENDING,
-                'admin_note' => 'Company product commission earning for order #' . $order->order_number . ' (commission structure not configured)',
+                'admin_note' => 'Company product commission earning for order #' . $order->order_number . ' (admin_price - unit_price)',
                 'trx_id' => 'SET-' . $order->id . '-COM-COM',
                 'created_by' => $createdBy,
             ]
@@ -343,19 +392,45 @@ class OrderController extends Controller
                 return $this->failed('Cart is empty', null, 409);
             }
 
-            DB::beginTransaction();
-
-            // Recalculate subtotal from cart_items (server truth)
             $subtotal = 0;
             $resellerProfit = 0;
+            $cartItemPricing = [];
+
             foreach ($cartItems as $ci) {
-                $subtotal += (float) ($ci->line_total ?? 0);
-                $resellerProfit += (float) ($ci->line_total_reseller_profit ?? 0);
+                $qty = (int) ($ci->qty ?? 0);
+                $unitPrice = $this->normalizePrice($ci->unit_price ?? $ci->product?->unit_price);
+                $adminPrice = $this->resolveAdminPrice($ci, $unitPrice);
+                $resellerPrice = $this->normalizePrice($ci->reseller_price ?? $adminPrice);
+
+                if (!is_null($adminPrice) && !is_null($resellerPrice) && $resellerPrice < $adminPrice) {
+                    return $this->failed('Cart item reseller price can not be less than admin price', [
+                        'cart_item_id' => $ci->id,
+                        'product_id' => $ci->product_id,
+                        'admin_price' => $adminPrice,
+                        'reseller_price' => $resellerPrice,
+                    ], 422);
+                }
+
+                $lineTotal = !is_null($resellerPrice) ? round($qty * $resellerPrice, 2) : 0;
+                $lineResellerProfit = (!is_null($resellerPrice) && !is_null($adminPrice))
+                    ? round($qty * ($resellerPrice - $adminPrice), 2)
+                    : 0;
+
+                $subtotal += $lineTotal;
+                $resellerProfit += $lineResellerProfit;
+                $cartItemPricing[$ci->id] = [
+                    'unit_price' => $unitPrice,
+                    'admin_price' => $adminPrice,
+                    'reseller_price' => $resellerPrice,
+                    'line_total' => $lineTotal,
+                    'line_total_reseller_profit' => $lineResellerProfit,
+                ];
             }
 
+            DB::beginTransaction();
 
             // For now: shipping_fee & discount are kept null (or 0) until you add those modules
-            $shippingFee = request()->input('delivery_charge', 0);
+            $shippingFee = $request->input('delivery_charge', 0);
             $discount = 0;
             $total = round(($subtotal + $shippingFee) - $discount, 2);
 
@@ -380,6 +455,7 @@ class OrderController extends Controller
                 'lon' => $validated['lon'] ?? null,
 
                 'subtotal' => round($subtotal, 2),
+                'reseller_price' => round($subtotal, 2),
                 'reseller_profit' => round($resellerProfit, 2),
                 'shipping_fee' => $shippingFee,
                 'discount' => $discount,
@@ -398,6 +474,7 @@ class OrderController extends Controller
 
             foreach ($cartItems as $ci) {
                 $product = $ci->product;
+                $pricing = $cartItemPricing[$ci->id];
 
                 OrderItem::create([
                     'order_id' => $order->id,
@@ -410,11 +487,12 @@ class OrderController extends Controller
                     'sku' => $product ? ($product->sku ?? null) : null,
 
                     // Snapshot cart-time pricing
-                    'unit_price' => $ci->unit_price,
-                    'reseller_price' => $ci->reseller_price,
+                    'unit_price' => $pricing['unit_price'],
+                    'admin_price' => $pricing['admin_price'],
+                    'reseller_price' => $pricing['reseller_price'],
                     'qty' => $ci->qty,
-                    'line_total' => $ci->line_total,
-                    'line_total_reseller_profit' => $ci->line_total_reseller_profit,
+                    'line_total' => $pricing['line_total'],
+                    'line_total_reseller_profit' => $pricing['line_total_reseller_profit'],
 
                     'status' => 1,
                     'note' => $ci->note ?? null,

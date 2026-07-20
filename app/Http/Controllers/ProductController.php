@@ -98,6 +98,23 @@ class ProductController extends Controller
         return $candidate;
     }
 
+    private function defaultAdminPrice($unitPrice): ?float
+    {
+        return is_null($unitPrice) ? null : round((float) $unitPrice * 1.05, 2);
+    }
+
+    private function validateAdminPriceCoversUnit(?float $unitPrice, ?float $adminPrice): ?array
+    {
+        if (!is_null($unitPrice) && !is_null($adminPrice) && $adminPrice < $unitPrice) {
+            return [
+                'unit_price' => $unitPrice,
+                'admin_price' => $adminPrice,
+            ];
+        }
+
+        return null;
+    }
+
     /**
      * POST /products/duplicate/{id}
      */
@@ -192,6 +209,7 @@ class ProductController extends Controller
                 'sku' => ['nullable', 'string'],
 
                 'unit_price' => ['nullable', 'numeric', 'min:0'],
+                'admin_price' => ['nullable', 'numeric', 'min:0'],
                 'max_resell_price' => ['nullable', 'numeric', 'min:0'],
                 'purchase_price' => ['nullable', 'numeric', 'min:0'],
 
@@ -265,6 +283,18 @@ class ProductController extends Controller
                 $slug = \Illuminate\Support\Str::slug($request->name);
             }
 
+            $unitPrice = array_key_exists('unit_price', $validated) && !is_null($validated['unit_price'])
+                ? round((float) $validated['unit_price'], 2)
+                : null;
+            $adminPrice = array_key_exists('admin_price', $validated) && !is_null($validated['admin_price'])
+                ? round((float) $validated['admin_price'], 2)
+                : $this->defaultAdminPrice($unitPrice);
+
+            $priceError = $this->validateAdminPriceCoversUnit($unitPrice, $adminPrice);
+            if ($priceError) {
+                return $this->failed('Admin price can not be less than unit price', $priceError, 422);
+            }
+
             $productData = [
                 'name' => $validated['name'] ?? null,
                 'added_by' => $validated['added_by'] ?? null,
@@ -278,7 +308,8 @@ class ProductController extends Controller
                 'video_link' => $validated['video_link'] ?? null,
                 'tags' => $validated['tags'] ?? null,
                 'description' => $validated['description'] ?? null,
-                'unit_price' => $validated['unit_price'] ?? null,
+                'unit_price' => $unitPrice,
+                'admin_price' => $adminPrice,
                 'max_resell_price' => $validated['max_resell_price'] ?? null,
                 'purchase_price' => $validated['purchase_price'] ?? null,
                 'variant_product' => array_key_exists('variant_product', $validated) ? (bool) $validated['variant_product'] : null,
@@ -735,6 +766,7 @@ class ProductController extends Controller
                 'sku' => ['sometimes', 'nullable', 'string'],
 
                 'unit_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+                'admin_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
                 'max_resell_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
                 'purchase_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
 
@@ -819,6 +851,33 @@ class ProductController extends Controller
             }
 
             $oldUnitPrice = $product->unit_price;
+            $oldAdminPrice = $product->admin_price;
+
+            if (
+                array_key_exists('unit_price', $validated)
+                && !array_key_exists('admin_price', $validated)
+                && is_null($product->admin_price)
+                && !is_null($validated['unit_price'])
+            ) {
+                $validated['admin_price'] = $this->defaultAdminPrice($validated['unit_price']);
+            }
+
+            $effectiveUnitPrice = array_key_exists('unit_price', $validated)
+                ? (is_null($validated['unit_price']) ? null : round((float) $validated['unit_price'], 2))
+                : (is_null($product->unit_price) ? null : round((float) $product->unit_price, 2));
+            $effectiveAdminPrice = array_key_exists('admin_price', $validated)
+                ? (is_null($validated['admin_price']) ? null : round((float) $validated['admin_price'], 2))
+                : (is_null($product->admin_price) ? null : round((float) $product->admin_price, 2));
+            $shouldValidatePrice = array_key_exists('unit_price', $validated)
+                || array_key_exists('admin_price', $validated);
+
+            if ($shouldValidatePrice) {
+                $priceError = $this->validateAdminPriceCoversUnit($effectiveUnitPrice, $effectiveAdminPrice);
+                if ($priceError) {
+                    return $this->failed('Admin price can not be less than unit price', $priceError, 422);
+                }
+            }
+
             $product->fill($validated);
             $product->save();
 
@@ -827,9 +886,7 @@ class ProductController extends Controller
                 $newPrice = is_null($product->unit_price) ? null : (float) $product->unit_price;
 
                 if ($beforePrice !== $newPrice) {
-                    $updatedBy = $request->input('updated_by')
-                     
-                        ?? null;
+                    $updatedBy = $request->input('updated_by') ?? null;
 
                     if (!is_null($updatedBy)) {
                         PriceUpdateLog::create([
@@ -839,6 +896,26 @@ class ProductController extends Controller
                             'updated_by' => $updatedBy,
                             'status' => 'updated',
                             'note' => 'Unit price updated from product update endpoint',
+                        ]);
+                    }
+                }
+            }
+
+            if (array_key_exists('admin_price', $validated)) {
+                $beforePrice = is_null($oldAdminPrice) ? null : (float) $oldAdminPrice;
+                $newPrice = is_null($product->admin_price) ? null : (float) $product->admin_price;
+
+                if ($beforePrice !== $newPrice) {
+                    $updatedBy = $request->input('updated_by') ?? null;
+
+                    if (!is_null($updatedBy)) {
+                        PriceUpdateLog::create([
+                            'product_id' => $product->id,
+                            'before_price' => $beforePrice ?? 0,
+                            'new_price' => $newPrice ?? 0,
+                            'updated_by' => $updatedBy,
+                            'status' => 'updated',
+                            'note' => 'Admin price updated from product update endpoint',
                         ]);
                     }
                 }

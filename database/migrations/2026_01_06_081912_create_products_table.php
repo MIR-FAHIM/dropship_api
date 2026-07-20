@@ -24,6 +24,7 @@ return new class extends Migration
             $table->string('tags', 500)->index()->nullable();
             $table->longText('description')->nullable();
             $table->double('unit_price', 20, 2);
+            $table->double('admin_price', 20, 2);
             $table->double('max_resell_price', 20, 2)->nullable();
             $table->double('purchase_price', 20, 2)->nullable();
             $table->integer('variant_product')->default(0);

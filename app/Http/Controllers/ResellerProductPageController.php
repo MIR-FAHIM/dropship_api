@@ -46,6 +46,47 @@ class ResellerProductPageController extends Controller
         return $candidate;
     }
 
+    private function normalizePrice($value): ?float
+    {
+        return is_null($value) ? null : round((float) $value, 2);
+    }
+
+    private function resolveProductAdminPrice(Product $product): ?float
+    {
+        if (!is_null($product->admin_price)) {
+            return $this->normalizePrice($product->admin_price);
+        }
+
+        return !is_null($product->unit_price) ? round((float) $product->unit_price * 1.05, 2) : null;
+    }
+
+    private function validatePagePrices(Product $product, $sellingPrice, $discountPrice = null): ?array
+    {
+        $adminPrice = $this->resolveProductAdminPrice($product);
+        $sellingPrice = $this->normalizePrice($sellingPrice);
+        $discountPrice = $this->normalizePrice($discountPrice);
+
+        if (!is_null($adminPrice) && !is_null($sellingPrice) && $sellingPrice < $adminPrice) {
+            return [
+                'field' => 'selling_price',
+                'product_id' => $product->id,
+                'admin_price' => $adminPrice,
+                'selling_price' => $sellingPrice,
+            ];
+        }
+
+        if (!is_null($adminPrice) && !is_null($discountPrice) && $discountPrice < $adminPrice) {
+            return [
+                'field' => 'discount_price',
+                'product_id' => $product->id,
+                'admin_price' => $adminPrice,
+                'discount_price' => $discountPrice,
+            ];
+        }
+
+        return null;
+    }
+
     public function list(Request $request)
     {
         try {
@@ -97,8 +138,16 @@ class ResellerProductPageController extends Controller
                 'published_status' => ['nullable', 'string', 'max:50'],
             ]);
 
+            $product = Product::find($validated['product_id']);
+            $priceError = $product
+                ? $this->validatePagePrices($product, $validated['selling_price'], $validated['discount_price'] ?? null)
+                : null;
+
+            if ($priceError) {
+                return $this->failed('Product page price can not be less than admin price', $priceError, 422);
+            }
+
             if (empty($validated['slug'])) {
-                $product = Product::find($validated['product_id']);
                 $validated['slug'] = $this->uniqueSlug($validated['custom_title'] ?? $product?->name ?? 'product-page');
             }
 
@@ -187,8 +236,29 @@ class ResellerProductPageController extends Controller
                 return $this->failed('This reseller already has a page for this product', null, 422);
             }
 
-            if (array_key_exists('slug', $validated) && empty($validated['slug'])) {
+            $shouldValidatePrice = array_key_exists('product_id', $validated)
+                || array_key_exists('selling_price', $validated)
+                || array_key_exists('discount_price', $validated);
+
+            if ($shouldValidatePrice) {
                 $product = Product::find($productId);
+                $sellingPrice = array_key_exists('selling_price', $validated)
+                    ? $validated['selling_price']
+                    : $page->selling_price;
+                $discountPrice = array_key_exists('discount_price', $validated)
+                    ? $validated['discount_price']
+                    : $page->discount_price;
+                $priceError = $product
+                    ? $this->validatePagePrices($product, $sellingPrice, $discountPrice)
+                    : null;
+
+                if ($priceError) {
+                    return $this->failed('Product page price can not be less than admin price', $priceError, 422);
+                }
+            }
+
+            if (array_key_exists('slug', $validated) && empty($validated['slug'])) {
+                $product = $product ?? Product::find($productId);
                 $validated['slug'] = $this->uniqueSlug($validated['custom_title'] ?? $product?->name ?? 'product-page', $page->id);
             }
 

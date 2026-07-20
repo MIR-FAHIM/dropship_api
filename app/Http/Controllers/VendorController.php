@@ -417,7 +417,7 @@ return $this->failed($firstError ?? 'Validation failed', null, 422);
             $topProducts = Product::where('vendor_id', $vendorId)
                 ->orderBy('num_of_sale', 'desc')
                 ->take(5)
-                ->get(['id', 'name', 'num_of_sale', 'current_stock', 'unit_price']);
+                ->get(['id', 'name', 'num_of_sale', 'current_stock', 'unit_price', 'admin_price']);
 
             return $this->success('Vendor dashboard report fetched', [
                 'vendor' => $vendor,

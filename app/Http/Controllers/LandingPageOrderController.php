@@ -103,6 +103,46 @@ class LandingPageOrderController extends Controller
         return round(($sellingPrice * $quantity) + $deliveryCharge, 2);
     }
 
+    private function normalizePrice($value): ?float
+    {
+        return is_null($value) ? null : round((float) $value, 2);
+    }
+
+    private function resolveProductAdminPrice(Product $product, ?float $unitPrice): ?float
+    {
+        if (!is_null($product->admin_price)) {
+            return $this->normalizePrice($product->admin_price);
+        }
+
+        return !is_null($unitPrice) ? round($unitPrice * 1.05, 2) : null;
+    }
+
+    private function sellingPriceAdminValidationError(?int $productId, $sellingPrice): ?array
+    {
+        if (!$productId) {
+            return null;
+        }
+
+        $product = Product::find($productId);
+        if (!$product) {
+            return null;
+        }
+
+        $unitPrice = $this->normalizePrice($product->unit_price);
+        $adminPrice = $this->resolveProductAdminPrice($product, $unitPrice);
+        $sellingPrice = $this->normalizePrice($sellingPrice);
+
+        if (!is_null($adminPrice) && !is_null($sellingPrice) && $sellingPrice < $adminPrice) {
+            return [
+                'product_id' => $product->id,
+                'admin_price' => $adminPrice,
+                'selling_price' => $sellingPrice,
+            ];
+        }
+
+        return null;
+    }
+
     private function notifyLandingOrderCreated(LandingPageOrder $landingOrder): void
     {
         $amount = number_format((float) $landingOrder->total_amount, 2, '.', '');
@@ -246,6 +286,14 @@ class LandingPageOrderController extends Controller
             $validated['tracking_code'] = $validated['tracking_code'] ?? $this->uniqueTrackingCode();
             $validated['total_amount'] = $validated['total_amount'] ?? $this->calculateTotal($validated);
 
+            $priceError = $this->sellingPriceAdminValidationError(
+                $validated['product_id'] ?? null,
+                $validated['selling_price'] ?? null
+            );
+            if ($priceError) {
+                return $this->failed('Selling price can not be less than admin price', $priceError, 422);
+            }
+
             $landingOrder = LandingPageOrder::create($validated);
             $this->notifyLandingOrderCreated($landingOrder);
 
@@ -316,6 +364,21 @@ class LandingPageOrderController extends Controller
                 $validated['total_amount'] = $validated['total_amount'] ?? $this->calculateTotal($merged);
             }
 
+            $shouldValidatePrice = array_key_exists('reseller_product_page_id', $validated)
+                || array_key_exists('product_id', $validated)
+                || array_key_exists('selling_price', $validated);
+
+            if ($shouldValidatePrice) {
+                $priceCheckData = array_merge($landingOrder->toArray(), $validated);
+                $priceError = $this->sellingPriceAdminValidationError(
+                    $priceCheckData['product_id'] ?? null,
+                    $priceCheckData['selling_price'] ?? null
+                );
+                if ($priceError) {
+                    return $this->failed('Selling price can not be less than admin price', $priceError, 422);
+                }
+            }
+
             $landingOrder->update($validated);
 
             return $this->success('Landing page order updated successfully', $landingOrder->load($this->relations()));
@@ -364,14 +427,24 @@ class LandingPageOrderController extends Controller
                 return $this->failed('Product not found for this landing page order', null, 404);
             }
 
-            $order = DB::transaction(function () use ($landingOrder, $product) {
-                $quantity = max(1, (int) $landingOrder->quantity);
-                $sellingPrice = round((float) $landingOrder->selling_price, 2);
-                $unitPrice = round((float) ($product->unit_price ?? 0), 2);
-                $deliveryCharge = round((float) $landingOrder->delivery_charge, 2);
+            $quantity = max(1, (int) $landingOrder->quantity);
+            $sellingPrice = $this->normalizePrice($landingOrder->selling_price) ?? 0;
+            $unitPrice = $this->normalizePrice($product->unit_price) ?? 0;
+            $adminPrice = $this->resolveProductAdminPrice($product, $unitPrice) ?? $unitPrice;
+            $deliveryCharge = $this->normalizePrice($landingOrder->delivery_charge) ?? 0;
+
+            if ($sellingPrice < $adminPrice) {
+                return $this->failed('Selling price can not be less than admin price', [
+                    'product_id' => $product->id,
+                    'admin_price' => $adminPrice,
+                    'selling_price' => $sellingPrice,
+                ], 422);
+            }
+
+            $order = DB::transaction(function () use ($landingOrder, $product, $quantity, $sellingPrice, $unitPrice, $adminPrice, $deliveryCharge) {
                 $subtotal = round($sellingPrice * $quantity, 2);
-                $resellerProfit = round(($sellingPrice - $unitPrice) * $quantity, 2);
-                $total = round((float) ($landingOrder->total_amount ?: ($subtotal + $deliveryCharge)), 2);
+                $resellerProfit = round(($sellingPrice - $adminPrice) * $quantity, 2);
+                $total = round($subtotal + $deliveryCharge, 2);
 
                 $districtName = $landingOrder->district_id
                     ? District::where('id', $landingOrder->district_id)->value('name')
@@ -412,6 +485,7 @@ class LandingPageOrderController extends Controller
                     'product_name' => $product->name,
                     'sku' => $product->sku,
                     'unit_price' => $unitPrice,
+                    'admin_price' => $adminPrice,
                     'reseller_price' => $sellingPrice,
                     'qty' => $quantity,
                     'line_total' => $subtotal,

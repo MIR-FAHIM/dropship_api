@@ -31,7 +31,7 @@ class PriceUpdateLogController extends Controller
             $query = PriceUpdateLog::query()
                 ->with([
                     'updatedBy:id,name',
-                    'product:id,name,unit_price',
+                    'product:id,name,unit_price,admin_price',
                 ]);
 
             if ($request->filled('product_id')) {

@@ -28,6 +28,32 @@ class CartController extends Controller
         ], $code);
     }
 
+    private function normalizePrice($value): ?float
+    {
+        return is_null($value) ? null : round((float) $value, 2);
+    }
+
+    private function resolveAdminPrice(Product $product, ?float $unitPrice): ?float
+    {
+        if (!is_null($product->admin_price)) {
+            return $this->normalizePrice($product->admin_price);
+        }
+
+        return !is_null($unitPrice) ? round($unitPrice * 1.05, 2) : null;
+    }
+
+    private function calculateLineTotal(int $qty, ?float $resellerPrice): ?float
+    {
+        return !is_null($resellerPrice) ? round($qty * $resellerPrice, 2) : null;
+    }
+
+    private function calculateResellerProfit(int $qty, ?float $resellerPrice, ?float $adminPrice): ?float
+    {
+        return (!is_null($resellerPrice) && !is_null($adminPrice))
+            ? round($qty * ($resellerPrice - $adminPrice), 2)
+            : null;
+    }
+
     /**
      * Get active cart for a user, or create one
      * GET /carts/active/{userId}
@@ -49,6 +75,7 @@ class CartController extends Controller
                 ]);
             }
 
+            $this->recalculateCart($cart->id);
             $cart->load(['items.product.primaryImage',  'items.shop.district', 
             'items.product.productDiscount', 'items.productAttribute.attribute', 'items.productAttribute.value']);
 
@@ -78,24 +105,16 @@ class CartController extends Controller
                 return $this->failed('Product not found', null, 404);
             }
 
-            // Decide the unit price snapshot
-            $unitPrice = null;
-            if (!is_null($product->unit_price) && $product->unit_price > 0) {
-                $unitPrice = (float) $product->unit_price;
-            } else {
-                $unitPrice = !is_null($product->unit_price) ? (float) $product->unit_price : null;
-            }
+            $unitPrice = $this->normalizePrice($product->unit_price);
+            $adminPrice = $this->resolveAdminPrice($product, $unitPrice);
+            $resellerPrice = $this->normalizePrice($request->input('reseller_price'));
+            $resellerPrice = !is_null($resellerPrice) ? $resellerPrice : $adminPrice;
 
-            // Apply product-level discount if available and valid
-            if (!is_null($unitPrice) && $product->productDiscount && $product->productDiscount->isValid()) {
-                $unitPrice = (float) $product->productDiscount->applyDiscount($unitPrice);
-            }
-
-            $resellerPrice = $request->input('reseller_price');
-            $resellerPrice = !is_null($resellerPrice) ? (float) $resellerPrice : $unitPrice;
-
-            if (!is_null($resellerPrice) && $product->productDiscount && $product->productDiscount->isValid()) {
-                $resellerPrice = (float) $product->productDiscount->applyDiscount($resellerPrice);
+            if (!is_null($resellerPrice) && !is_null($adminPrice) && $resellerPrice < $adminPrice) {
+                return $this->failed('Reseller price can not be less than admin price', [
+                    'admin_price' => $adminPrice,
+                    'reseller_price' => $resellerPrice,
+                ], 422);
             }
 
             DB::beginTransaction();
@@ -124,11 +143,10 @@ class CartController extends Controller
                 $newQty = ((int) $item->qty) + (int) $validated['qty'];
                 $item->qty = $newQty;
                 $item->unit_price = $unitPrice;
+                $item->admin_price = $adminPrice;
                 $item->reseller_price = $resellerPrice;
-                $item->line_total = ($resellerPrice !== null) ? round($newQty * $resellerPrice, 2) : null;
-                $item->line_total_reseller_profit = ($resellerPrice !== null && $unitPrice !== null)
-                    ? round($newQty * ($resellerPrice - $unitPrice), 2)
-                    : null;
+                $item->line_total = $this->calculateLineTotal($newQty, $resellerPrice);
+                $item->line_total_reseller_profit = $this->calculateResellerProfit($newQty, $resellerPrice, $adminPrice);
                 $item->status = $item->status ?? 'active';
                 $item->save();
             } else {
@@ -139,11 +157,10 @@ class CartController extends Controller
                     'shop_id' => $product->vendor_id ?? null,
                     'qty' => (int) $validated['qty'],
                     'unit_price' => $unitPrice,
+                    'admin_price' => $adminPrice,
                     'reseller_price' => $resellerPrice,
-                    'line_total' => ($resellerPrice !== null) ? round(((int) $validated['qty']) * $resellerPrice, 2) : null,
-                    'line_total_reseller_profit' => ($resellerPrice !== null && $unitPrice !== null)
-                        ? round(((int) $validated['qty']) * ($resellerPrice - $unitPrice), 2)
-                        : null,
+                    'line_total' => $this->calculateLineTotal((int) $validated['qty'], $resellerPrice),
+                    'line_total_reseller_profit' => $this->calculateResellerProfit((int) $validated['qty'], $resellerPrice, $adminPrice),
                     'status' => 'active',
                     'note' => $request->input('note') ?? null,
                 ]);
@@ -199,12 +216,10 @@ class CartController extends Controller
             }
 
             $item->qty = (int) $validated['qty'];
-            $item->line_total = ($item->unit_price !== null)
-                ? round(((int) $validated['qty']) * (float) $item->unit_price, 2)
-                : null;
-            $item->line_total_reseller_profit = ($item->reseller_price !== null && $item->unit_price !== null)
-                ? round(((int) $validated['qty']) * ((float) $item->reseller_price - (float) $item->unit_price), 2)
-                : null;
+            $adminPrice = $this->normalizePrice($item->admin_price ?? $item->unit_price);
+            $resellerPrice = $this->normalizePrice($item->reseller_price);
+            $item->line_total = $this->calculateLineTotal((int) $validated['qty'], $resellerPrice);
+            $item->line_total_reseller_profit = $this->calculateResellerProfit((int) $validated['qty'], $resellerPrice, $adminPrice);
        
           
             $item->save();
@@ -322,7 +337,7 @@ class CartController extends Controller
      */
     private function recalculateCart($cartId)
     {
-        $items = CartItem::where('cart_id', $cartId)->get();
+        $items = CartItem::with('product')->where('cart_id', $cartId)->get();
 
         $totalItems = 0;
         $subtotal = 0;
@@ -330,8 +345,34 @@ class CartController extends Controller
 
         foreach ($items as $item) {
             $qty = (int) ($item->qty ?? 0);
-            $line = (float) ($item->line_total ?? 0);
-            $resellerProfit = (float) ($item->line_total_reseller_profit ?? 0);
+            $unitPrice = $this->normalizePrice($item->unit_price ?? $item->product?->unit_price);
+            $adminPrice = $this->normalizePrice($item->admin_price ?? $item->product?->admin_price);
+            $adminPrice = !is_null($adminPrice)
+                ? $adminPrice
+                : (!is_null($unitPrice) ? round($unitPrice * 1.05, 2) : null);
+            $resellerPrice = $this->normalizePrice($item->reseller_price ?? $adminPrice);
+
+            if (!is_null($resellerPrice) && !is_null($adminPrice) && $resellerPrice < $adminPrice) {
+                $resellerPrice = $adminPrice;
+            }
+
+            $line = (float) ($this->calculateLineTotal($qty, $resellerPrice) ?? 0);
+            $resellerProfit = (float) ($this->calculateResellerProfit($qty, $resellerPrice, $adminPrice) ?? 0);
+
+            if (
+                $item->unit_price !== $unitPrice
+                || $item->admin_price !== $adminPrice
+                || $item->reseller_price !== $resellerPrice
+                || $item->line_total !== $line
+                || $item->line_total_reseller_profit !== $resellerProfit
+            ) {
+                $item->unit_price = $unitPrice;
+                $item->admin_price = $adminPrice;
+                $item->reseller_price = $resellerPrice;
+                $item->line_total = $line;
+                $item->line_total_reseller_profit = $resellerProfit;
+                $item->save();
+            }
 
             $totalItems += $qty;
             $subtotal += $line;

@@ -24,6 +24,7 @@ class Product extends Model
         'tags',
         'description',
         'unit_price',
+        'admin_price',
         'max_resell_price',
         'purchase_price',
         'variant_product',
