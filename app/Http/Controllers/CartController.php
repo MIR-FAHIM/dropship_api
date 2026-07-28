@@ -39,7 +39,7 @@ class CartController extends Controller
             return $this->normalizePrice($product->admin_price);
         }
 
-        return !is_null($unitPrice) ? round($unitPrice * 1.05, 2) : null;
+        return !is_null($unitPrice) ? (float) ceil($unitPrice * 1.05) : null;
     }
 
     private function calculateLineTotal(int $qty, ?float $resellerPrice): ?float
@@ -349,7 +349,7 @@ class CartController extends Controller
             $adminPrice = $this->normalizePrice($item->admin_price ?? $item->product?->admin_price);
             $adminPrice = !is_null($adminPrice)
                 ? $adminPrice
-                : (!is_null($unitPrice) ? round($unitPrice * 1.05, 2) : null);
+                : (!is_null($unitPrice) ? (float) ceil($unitPrice * 1.05) : null);
             $resellerPrice = $this->normalizePrice($item->reseller_price ?? $adminPrice);
 
             if (!is_null($resellerPrice) && !is_null($adminPrice) && $resellerPrice < $adminPrice) {

@@ -57,7 +57,7 @@ class ResellerProductPageController extends Controller
             return $this->normalizePrice($product->admin_price);
         }
 
-        return !is_null($product->unit_price) ? round((float) $product->unit_price * 1.05, 2) : null;
+        return !is_null($product->unit_price) ? (float) ceil((float) $product->unit_price * 1.05) : null;
     }
 
     private function validatePagePrices(Product $product, $sellingPrice, $discountPrice = null): ?array

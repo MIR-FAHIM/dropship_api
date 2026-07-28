@@ -114,7 +114,7 @@ class LandingPageOrderController extends Controller
             return $this->normalizePrice($product->admin_price);
         }
 
-        return !is_null($unitPrice) ? round($unitPrice * 1.05, 2) : null;
+        return !is_null($unitPrice) ? (float) ceil($unitPrice * 1.05) : null;
     }
 
     private function sellingPriceAdminValidationError(?int $productId, $sellingPrice): ?array

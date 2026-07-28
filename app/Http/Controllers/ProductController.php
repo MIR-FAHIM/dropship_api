@@ -100,7 +100,7 @@ class ProductController extends Controller
 
     private function defaultAdminPrice($unitPrice): ?float
     {
-        return is_null($unitPrice) ? null : round((float) $unitPrice * 1.05, 2);
+        return is_null($unitPrice) ? null : (float) ceil((float) $unitPrice * 1.05);
     }
 
     /**
@@ -275,7 +275,7 @@ class ProductController extends Controller
                 ? round((float) $validated['unit_price'], 2)
                 : null;
             $adminPrice = array_key_exists('admin_price', $validated) && !is_null($validated['admin_price'])
-                ? round((float) $validated['admin_price'], 2)
+                ? (float) ceil((float) $validated['admin_price'])
                 : $this->defaultAdminPrice($unitPrice);
 
             $productData = [
@@ -839,6 +839,8 @@ class ProductController extends Controller
             if (array_key_exists('unit_price', $validated) && !is_null($validated['unit_price'])) {
                 $validated['unit_price'] = round((float) $validated['unit_price'], 2);
                 $validated['admin_price'] = $this->defaultAdminPrice($validated['unit_price']);
+            } elseif (array_key_exists('admin_price', $validated) && !is_null($validated['admin_price'])) {
+                $validated['admin_price'] = (float) ceil((float) $validated['admin_price']);
             }
 
             $product->fill($validated);
