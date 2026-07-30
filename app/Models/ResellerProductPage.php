@@ -19,6 +19,8 @@ class ResellerProductPage extends Model
         'custom_description',
         'delivery_charge',
         'template_id',
+        'design_settings',
+        'design_version',
         'published_status',
     ];
 
@@ -26,7 +28,8 @@ class ResellerProductPage extends Model
         'selling_price' => 'float',
         'discount_price' => 'float',
         'delivery_charge' => 'float',
-        'template_id' => 'integer',
+        'design_settings' => 'array',
+        'design_version' => 'integer',
     ];
 
     public function reseller()

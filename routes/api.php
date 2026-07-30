@@ -82,6 +82,7 @@ Route::prefix('reseller-product-pages')->group(function () {
     Route::post('/add', [ResellerProductPageController::class, 'add']);
     Route::post('/create', [ResellerProductPageController::class, 'add']);
     Route::put('/update/{id}', [ResellerProductPageController::class, 'update']);
+    Route::put('/design/{id}', [ResellerProductPageController::class, 'updateDesign']);
     Route::delete('/remove/{id}', [ResellerProductPageController::class, 'remove']);
     Route::get('/slug/{slug}', [ResellerProductPageController::class, 'getBySlug']);
     Route::get('/{id}', [ResellerProductPageController::class, 'details']);
