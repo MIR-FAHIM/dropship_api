@@ -8,6 +8,7 @@ use App\Models\ProductClicks;
 use App\Models\ProductImage;
 use App\Models\ProductCreateErrorLog;
 use App\Models\PriceUpdateLog;
+use App\Models\ResellerProductPage;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
@@ -712,6 +713,18 @@ class ProductController extends Controller
                 'is_guest' => $request->user_id ? 0 : 1,
                // 'ip_address' => $request->ip(),
             ]);
+
+            $resellerId = $request->input('reseller_id') ?? $request->input('user_id');
+            $resellerProductPage = null;
+
+            if ($resellerId) {
+                $resellerProductPage = ResellerProductPage::with(['reseller'])
+                    ->where('reseller_id', $resellerId)
+                    ->where('product_id', $product->id)
+                    ->first();
+            }
+
+            $product->setAttribute('reseller_product_page', $resellerProductPage);
 
             return $this->success('Product fetched successfully', $product);
         } catch (\Throwable $e) {
