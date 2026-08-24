@@ -29,6 +29,7 @@ use App\Http\Controllers\DeliveryController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\FacebookPostController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\NoticeController;
 use App\Http\Controllers\VendorController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskPriorityController;
@@ -394,6 +395,17 @@ Route::prefix('notifications')->group(function () {
     Route::get('/user/{userId}', [NotificationController::class, 'getNotificationByUser']);
     Route::patch('/read-unread/{id}', [NotificationController::class, 'readUnread']);
     Route::patch('/mark-all-read/{userId}', [NotificationController::class, 'markAllAsReadByUser']);
+});
+
+Route::prefix('notices')->group(function () {
+    Route::get('/list', [NoticeController::class, 'list']);
+    Route::get('/reseller', [NoticeController::class, 'resellerNotices']);
+    Route::post('/add', [NoticeController::class, 'add']);
+    Route::post('/create', [NoticeController::class, 'add']);
+    Route::get('/details/{id}', [NoticeController::class, 'details']);
+    Route::put('/update/{id}', [NoticeController::class, 'update']);
+    Route::delete('/delete/{id}', [NoticeController::class, 'delete']);
+    Route::delete('/remove/{id}', [NoticeController::class, 'delete']);
 });
 
 Route::prefix('sms')->group(function () {
