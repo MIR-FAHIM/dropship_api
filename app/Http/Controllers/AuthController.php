@@ -231,6 +231,15 @@ class AuthController extends Controller
                 return $this->failed('No mobile number found for this email', null, 422);
             }
 
+            $dailySentCount = PasswordResetCode::where('phone', $phone)
+                ->whereNotNull('sms_sent_at')
+                ->whereDate('sms_sent_at', Carbon::today())
+                ->count();
+
+            if ($dailySentCount >= 3) {
+                return $this->failed('Daily password reset OTP limit reached for this mobile number', null, 429);
+            }
+
             $recentCodeCount = PasswordResetCode::where('user_id', $user->id)
                 ->where('created_at', '>=', Carbon::now()->subMinutes(2))
                 ->count();
@@ -266,6 +275,8 @@ class AuthController extends Controller
                     'sms_error' => $smsResult['body'],
                 ], $smsResult['status'] ?: 500);
             }
+
+            $resetCode->update(['sms_sent_at' => now()]);
 
             return $this->success('Password reset OTP sent successfully', [
                 'email' => $user->email,

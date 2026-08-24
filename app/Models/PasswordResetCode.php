@@ -16,6 +16,7 @@ class PasswordResetCode extends Model
         'code_hash',
         'attempts',
         'expires_at',
+        'sms_sent_at',
         'used_at',
         'ip_address',
         'user_agent',
@@ -24,6 +25,7 @@ class PasswordResetCode extends Model
     protected $casts = [
         'attempts' => 'integer',
         'expires_at' => 'datetime',
+        'sms_sent_at' => 'datetime',
         'used_at' => 'datetime',
     ];
 
