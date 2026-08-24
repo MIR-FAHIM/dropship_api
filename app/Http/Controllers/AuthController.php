@@ -8,7 +8,10 @@ use App\Models\User;
 use App\Models\ApiToken;
 use App\Models\LoginError;
 use App\Models\LoginSuccessLog;
+use App\Models\PasswordResetCode;
 use App\Service\ApiTokenService;
+use App\Service\MuthobartaSmsService;
+use Illuminate\Support\Carbon;
 
 class AuthController extends Controller
 {
@@ -62,6 +65,49 @@ class AuthController extends Controller
         } catch (\Throwable $e) {
             // Avoid breaking authentication flow if success logging fails.
         }
+    }
+
+    private function normalizePhoneForSms(?string $phone): ?string
+    {
+        if (!$phone) {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', $phone);
+
+        if (!$digits) {
+            return null;
+        }
+
+        if (str_starts_with($digits, '880')) {
+            return $digits;
+        }
+
+        if (str_starts_with($digits, '0')) {
+            return '88' . $digits;
+        }
+
+        if (strlen($digits) === 10) {
+            return '880' . $digits;
+        }
+
+        return $digits;
+    }
+
+    private function maskPhone(?string $phone): ?string
+    {
+        if (!$phone) {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', $phone);
+        $length = strlen($digits);
+
+        if ($length <= 4) {
+            return str_repeat('*', $length);
+        }
+
+        return str_repeat('*', max(0, $length - 4)) . substr($digits, -4);
     }
 
     private function success($message, $data = null, int $code = 200)
@@ -155,6 +201,147 @@ class AuthController extends Controller
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
             $this->storeLoginError($request, 'Login failed with server error', null, 'error', $e);
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /auth/forgot-password
+     */
+    public function forgotPassword(Request $request, MuthobartaSmsService $smsService)
+    {
+        try {
+            $validated = $request->validate([
+                'email' => ['required', 'email'],
+            ]);
+
+            $user = User::where('email', $validated['email'])->first();
+
+            if (!$user) {
+                return $this->failed('User not found with this email', null, 404);
+            }
+
+            if (isset($user->banned) && (int) $user->banned === 1) {
+                return $this->failed('You need to activate your account', null, 403);
+            }
+
+            $phone = $this->normalizePhoneForSms($user->phone);
+
+            if (!$phone) {
+                return $this->failed('No mobile number found for this email', null, 422);
+            }
+
+            $recentCodeCount = PasswordResetCode::where('user_id', $user->id)
+                ->where('created_at', '>=', Carbon::now()->subMinutes(2))
+                ->count();
+
+            if ($recentCodeCount >= 1) {
+                return $this->failed('Please wait before requesting another OTP', null, 429);
+            }
+
+            PasswordResetCode::where('user_id', $user->id)
+                ->whereNull('used_at')
+                ->update(['used_at' => now()]);
+
+            $code = (string) random_int(100000, 999999);
+            $expiresAt = Carbon::now()->addMinutes(10);
+
+            $resetCode = PasswordResetCode::create([
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'phone' => $phone,
+                'code_hash' => Hash::make($code),
+                'expires_at' => $expiresAt,
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+
+            $message = "Your password reset OTP is {$code}. It will expire in 10 minutes.";
+            $smsResult = $smsService->send($phone, $message, 'password_reset');
+
+            if (!$smsResult['success']) {
+                $resetCode->update(['used_at' => now()]);
+
+                return $this->failed('Could not send password reset OTP', [
+                    'sms_error' => $smsResult['body'],
+                ], $smsResult['status'] ?: 500);
+            }
+
+            return $this->success('Password reset OTP sent successfully', [
+                'email' => $user->email,
+                'phone' => $this->maskPhone($phone),
+                'expires_at' => $expiresAt,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /auth/reset-password
+     */
+    public function resetPassword(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'email' => ['required', 'email'],
+                'otp' => ['required_without:code', 'nullable', 'digits:6'],
+                'code' => ['required_without:otp', 'nullable', 'digits:6'],
+                'password' => ['required', 'string', 'min:6', 'confirmed'],
+            ]);
+
+            $user = User::where('email', $validated['email'])->first();
+
+            if (!$user) {
+                return $this->failed('User not found with this email', null, 404);
+            }
+
+            if (isset($user->banned) && (int) $user->banned === 1) {
+                return $this->failed('You need to activate your account', null, 403);
+            }
+
+            $code = $validated['otp'] ?? $validated['code'];
+            $resetCode = PasswordResetCode::where('user_id', $user->id)
+                ->where('email', $user->email)
+                ->whereNull('used_at')
+                ->latest()
+                ->first();
+
+            if (!$resetCode) {
+                return $this->failed('Invalid or expired OTP', null, 400);
+            }
+
+            if (Carbon::now()->greaterThan($resetCode->expires_at)) {
+                $resetCode->update(['used_at' => now()]);
+
+                return $this->failed('OTP expired', null, 400);
+            }
+
+            if ($resetCode->attempts >= 5) {
+                $resetCode->update(['used_at' => now()]);
+
+                return $this->failed('Too many invalid OTP attempts', null, 429);
+            }
+
+            if (!Hash::check($code, $resetCode->code_hash)) {
+                $resetCode->increment('attempts');
+
+                return $this->failed('Invalid OTP', null, 400);
+            }
+
+            $user->password = Hash::make($validated['password']);
+            $user->save();
+
+            $resetCode->update(['used_at' => now()]);
+
+            ApiToken::where('user_id', $user->id)->update(['is_revoked' => true]);
+
+            return $this->success('Password reset successfully');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }

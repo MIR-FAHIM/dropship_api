@@ -48,6 +48,8 @@ use App\Models\TaskType;
 // Authentication endpoints
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
 Route::post('/auth/login-as-vendor', [AuthController::class, 'loginAsVendor']);
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])->withoutMiddleware('token');
+Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])->withoutMiddleware('token');
 Route::post('/auth/logout', [AuthController::class, 'logout']);
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
