@@ -413,8 +413,8 @@ Route::prefix('documents-kyc')->group(function () {
     Route::get('/list', [DocumentKycController::class, 'list']);
     Route::get('/user/{userId}', [DocumentKycController::class, 'getByUser']);
     Route::post('/prepare-default/{userId}', [DocumentKycController::class, 'createDefaultForUser']);
-    Route::post('/add', [DocumentKycController::class, 'add']);
-    Route::post('/create', [DocumentKycController::class, 'add']);
+    Route::post('/add', [DocumentKycController::class, 'add'])->withoutMiddleware('token');
+    Route::post('/create', [DocumentKycController::class, 'add'])->withoutMiddleware('token');
     Route::get('/details/{id}', [DocumentKycController::class, 'details']);
     Route::post('/update/{id}', [DocumentKycController::class, 'update']);
     Route::put('/update/{id}', [DocumentKycController::class, 'update']);
