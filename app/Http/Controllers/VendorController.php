@@ -47,9 +47,15 @@ class VendorController extends Controller
                 'phone' => ['nullable', 'string', 'max:20'],
                 'address' => ['nullable', 'string', 'max:300'],
                 // Vendor-specific fields
-                'shop_name' => ['required', 'string', 'max:255'],
+                'shop_name' => ['nullable', 'string', 'max:255'],
                 'contact_person' => ['nullable', 'string', 'max:255'],
                 'emergency_contact' => ['nullable', 'string', 'max:255'],
+                'division_id' => ['nullable'],
+                'district_id' => ['nullable'],
+                'upazila_id' => ['nullable'],
+                'division' => ['nullable', 'string', 'max:255'],
+                'district' => ['nullable', 'string', 'max:255'],
+                'upazila' => ['nullable', 'string', 'max:255'],
                 'zone' => ['nullable', 'string', 'max:255'],
                 'state' => ['nullable', 'string', 'max:255'],
                 'city' => ['nullable', 'string', 'max:255'],
@@ -57,34 +63,71 @@ class VendorController extends Controller
                 'owner_name' => ['nullable', 'string', 'max:255'],
                 'shop_type' => ['nullable', 'string', 'max:255'],
                 'description' => ['nullable', 'string'],
+                // KYC Document files
+                'nid_front' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
+                'nid_back' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
+                'trade_license' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
+                'irc' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
             ]);
 
-            $result = DB::transaction(function () use ($validated) {
+            $result = DB::transaction(function () use ($validated, $request) {
+                $divInput = $validated['division_id'] ?? $validated['division'] ?? $validated['state'] ?? null;
+                $distInput = $validated['district_id'] ?? $validated['district'] ?? $validated['city'] ?? null;
+                $upaInput = $validated['upazila_id'] ?? $validated['upazila'] ?? $validated['zone'] ?? null;
+
                 $user = User::create([
                     'name' => $validated['name'],
                     'email' => $validated['email'],
                     'password' => Hash::make($validated['password']),
                     'phone' => $validated['phone'] ?? null,
                     'address' => $validated['address'] ?? null,
-                    'state' => $validated['state'] ?? null,
-                    'city' => $validated['city'] ?? null,
+                    'division_id' => is_numeric($divInput) ? (int)$divInput : null,
+                    'district_id' => is_numeric($distInput) ? (int)$distInput : null,
+                    'upazila_id' => is_numeric($upaInput) ? (int)$upaInput : null,
+                    'division' => is_string($divInput) && !is_numeric($divInput) ? $divInput : null,
+                    'district' => is_string($distInput) && !is_numeric($distInput) ? $distInput : null,
+                    'upazila' => is_string($upaInput) && !is_numeric($upaInput) ? $upaInput : null,
                     'user_type' => 'vendor',
                 ]);
 
+                $shopName = !empty($validated['shop_name'])
+                    ? $validated['shop_name']
+                    : ($validated['owner_name'] ?? $validated['name']);
+
                 $vendor = Vendor::create([
                     'user_id' => $user->id,
-                    'shop_name' => $validated['shop_name'],
+                    'shop_name' => $shopName,
                     'contact_person' => $validated['contact_person'] ?? null,
                     'emergency_contact' => $validated['emergency_contact'] ?? null,
-                    'division' => $validated['state'] ?? null,
-                    'district' => $validated['city'] ?? null,
-                    'zone' => $validated['zone'] ?? null,
+                    'division' => $validated['division'] ?? $validated['state'] ?? null,
+                    'district' => $validated['district'] ?? $validated['city'] ?? null,
+                    'zone' => $validated['upazila'] ?? $validated['zone'] ?? null,
                     'whatsapp' => $validated['whatsapp'] ?? null,
-                    'owner_name' => $validated['owner_name'] ?? null,
+                    'owner_name' => $validated['owner_name'] ?? $validated['name'],
                     'shop_type' => $validated['shop_type'] ?? null,
                     'description' => $validated['description'] ?? null,
-                  
                 ]);
+
+                // Store KYC documents if uploaded
+                $docTypes = [
+                    'nid_front' => 'NID Front Side',
+                    'nid_back' => 'NID Back Side',
+                    'trade_license' => 'Trade License',
+                    'irc' => 'Import Registration Certificate - IRC',
+                ];
+
+                foreach ($docTypes as $docKey => $docLabel) {
+                    if ($request->hasFile($docKey)) {
+                        $filePath = $request->file($docKey)->store("kyc-documents/{$user->id}", 'public');
+                        \App\Models\DocumentKyc::create([
+                            'user_id' => $user->id,
+                            'document_name' => $docLabel,
+                            'type' => $docKey,
+                            'status' => 'submitted',
+                            'document_file_path' => $filePath,
+                        ]);
+                    }
+                }
 
                 $created = ApiTokenService::create($user, ['basic'], 30, 'vendor-register-token');
 
@@ -99,9 +142,9 @@ class VendorController extends Controller
 
             return $this->success('Vendor registered successfully', $result, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
-          $errors = $e->errors();
-$firstError = collect($errors)->flatten()->first();
-return $this->failed($firstError ?? 'Validation failed', null, 422);
+            $errors = $e->errors();
+            $firstError = collect($errors)->flatten()->first();
+            return $this->failed($firstError ?? 'Validation failed', null, 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

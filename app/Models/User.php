@@ -36,6 +36,12 @@ class User extends Model
         'avatar_original',
         'address',
         'country',
+        'division_id',
+        'district_id',
+        'upazila_id',
+        'division',
+        'district',
+        'upazila',
         'state',
         'city',
         'postal_code',
@@ -70,7 +76,25 @@ class User extends Model
         'remaining_uploads' => 'integer',
         'customer_package_id' => 'integer',
         'referred_by' => 'integer',
+        'division_id' => 'integer',
+        'district_id' => 'integer',
+        'upazila_id' => 'integer',
     ];
+
+    public function divisionRelation()
+    {
+        return $this->belongsTo(Division::class, 'division_id');
+    }
+
+    public function districtRelation()
+    {
+        return $this->belongsTo(District::class, 'district_id');
+    }
+
+    public function upazilaRelation()
+    {
+        return $this->belongsTo(Upazila::class, 'upazila_id');
+    }
 
     /**
      * Self reference: who referred this user.

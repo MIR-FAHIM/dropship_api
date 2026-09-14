@@ -66,11 +66,12 @@ return new class extends Migration
             // 19) country varchar(30) NULL
             $table->string('country', 30)->nullable();
 
-            // 20) state varchar(30) NULL
-            $table->string('state', 30)->nullable();
-
-            // 21) city varchar(30) NULL
-            $table->string('city', 30)->nullable();
+            $table->unsignedBigInteger('division_id')->nullable();
+            $table->unsignedBigInteger('district_id')->nullable();
+            $table->unsignedBigInteger('upazila_id')->nullable();
+            $table->string('division', 100)->nullable();
+            $table->string('district', 100)->nullable();
+            $table->string('upazila', 100)->nullable();
 
             // 22) postal_code varchar(20) NULL
             $table->string('postal_code', 20)->nullable();

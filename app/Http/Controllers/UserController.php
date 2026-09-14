@@ -81,7 +81,19 @@ class UserController extends Controller
                 'password' => ['required', 'string', 'min:6'],
                 'phone' => ['nullable', 'string', 'max:20'],
                 'address' => ['nullable', 'string', 'max:300'],
+                'division_id' => ['nullable'],
+                'district_id' => ['nullable'],
+                'upazila_id' => ['nullable'],
+                'division' => ['nullable', 'string', 'max:255'],
+                'district' => ['nullable', 'string', 'max:255'],
+                'upazila' => ['nullable', 'string', 'max:255'],
+                'state' => ['nullable', 'string', 'max:255'],
+                'city' => ['nullable', 'string', 'max:255'],
             ]);
+
+            $divInput = $validated['division_id'] ?? $validated['division'] ?? $validated['state'] ?? null;
+            $distInput = $validated['district_id'] ?? $validated['district'] ?? $validated['city'] ?? null;
+            $upaInput = $validated['upazila_id'] ?? $validated['upazila'] ?? null;
 
             $user = User::create([
                 'name' => $validated['name'],
@@ -89,6 +101,12 @@ class UserController extends Controller
                 'password' => Hash::make($validated['password']),
                 'phone' => $validated['phone'] ?? null,
                 'address' => $validated['address'] ?? null,
+                'division_id' => is_numeric($divInput) ? (int)$divInput : null,
+                'district_id' => is_numeric($distInput) ? (int)$distInput : null,
+                'upazila_id' => is_numeric($upaInput) ? (int)$upaInput : null,
+                'division' => is_string($divInput) && !is_numeric($divInput) ? $divInput : null,
+                'district' => is_string($distInput) && !is_numeric($distInput) ? $distInput : null,
+                'upazila' => is_string($upaInput) && !is_numeric($upaInput) ? $upaInput : null,
                 'user_type' => 'dropshipper',
             ]);
 
@@ -127,13 +145,22 @@ class UserController extends Controller
                 'fcm_token' => ['nullable', 'string', 'max:500'],
                 'status' => ['nullable', 'string', 'max:50'],
 
-                'zone' => ['nullable', 'string', 'max:100'],
+                'division_id' => ['nullable'],
+                'district_id' => ['nullable'],
+                'upazila_id' => ['nullable'],
+                'division' => ['nullable', 'string', 'max:100'],
                 'district' => ['nullable', 'string', 'max:100'],
+                'upazila' => ['nullable', 'string', 'max:100'],
+                'zone' => ['nullable', 'string', 'max:100'],
                 'area' => ['nullable', 'string', 'max:100'],
                 'lat' => ['nullable', 'numeric'],
                 'lon' => ['nullable', 'numeric'],
                 'is_banned' => ['nullable', 'boolean'],
             ]);
+
+            $divInput = $validated['division_id'] ?? $validated['division'] ?? null;
+            $distInput = $validated['district_id'] ?? $validated['district'] ?? null;
+            $upaInput = $validated['upazila_id'] ?? $validated['upazila'] ?? $validated['zone'] ?? null;
 
             $user = User::create([
                 'name' => $validated['name'] ?? null,
@@ -147,8 +174,13 @@ class UserController extends Controller
                 'fcm_token' => $validated['fcm_token'] ?? null,
                 'status' => $validated['status'] ?? null,
 
-                'zone' => $validated['zone'] ?? null,
-                'district' => $validated['district'] ?? null,
+                'division_id' => is_numeric($divInput) ? (int)$divInput : null,
+                'district_id' => is_numeric($distInput) ? (int)$distInput : null,
+                'upazila_id' => is_numeric($upaInput) ? (int)$upaInput : null,
+                'division' => is_string($divInput) && !is_numeric($divInput) ? $divInput : null,
+                'district' => is_string($distInput) && !is_numeric($distInput) ? $distInput : null,
+                'upazila' => is_string($upaInput) && !is_numeric($upaInput) ? $upaInput : null,
+
                 'area' => $validated['area'] ?? null,
                 'lat' => $validated['lat'] ?? null,
                 'lon' => $validated['lon'] ?? null,
@@ -346,8 +378,13 @@ class UserController extends Controller
                 'fcm_token' => ['nullable', 'string', 'max:500'],
                 'status' => ['nullable', 'string', 'max:50'],
 
-                'zone' => ['nullable', 'string', 'max:100'],
+                'division_id' => ['nullable'],
+                'district_id' => ['nullable'],
+                'upazila_id' => ['nullable'],
+                'division' => ['nullable', 'string', 'max:100'],
                 'district' => ['nullable', 'string', 'max:100'],
+                'upazila' => ['nullable', 'string', 'max:100'],
+                'zone' => ['nullable', 'string', 'max:100'],
                 'area' => ['nullable', 'string', 'max:100'],
                 'lat' => ['nullable', 'numeric'],
                 'lon' => ['nullable', 'numeric'],
@@ -366,8 +403,12 @@ class UserController extends Controller
                 'fcm_token' => array_key_exists('fcm_token', $validated) ? $validated['fcm_token'] : $user->fcm_token,
                 'status' => array_key_exists('status', $validated) ? $validated['status'] : $user->status,
 
-                'zone' => array_key_exists('zone', $validated) ? $validated['zone'] : $user->zone,
+                'division_id' => array_key_exists('division_id', $validated) ? $validated['division_id'] : $user->division_id,
+                'district_id' => array_key_exists('district_id', $validated) ? $validated['district_id'] : $user->district_id,
+                'upazila_id' => array_key_exists('upazila_id', $validated) ? $validated['upazila_id'] : $user->upazila_id,
+                'division' => array_key_exists('division', $validated) ? $validated['division'] : $user->division,
                 'district' => array_key_exists('district', $validated) ? $validated['district'] : $user->district,
+                'upazila' => array_key_exists('upazila', $validated) ? $validated['upazila'] : (array_key_exists('zone', $validated) ? $validated['zone'] : $user->upazila),
                 'area' => array_key_exists('area', $validated) ? $validated['area'] : $user->area,
                 'lat' => array_key_exists('lat', $validated) ? $validated['lat'] : $user->lat,
                 'lon' => array_key_exists('lon', $validated) ? $validated['lon'] : $user->lon,
