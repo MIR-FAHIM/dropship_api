@@ -77,6 +77,7 @@ class UserController extends Controller
         try {
             $validated = $request->validate([
                 'name' => ['required', 'string', 'max:191'],
+                'business_name' => ['nullable', 'string', 'max:255'],
                 'email' => ['required', 'email', 'unique:users,email'],
                 'password' => ['required', 'string', 'min:6'],
                 'phone' => ['nullable', 'string', 'max:20'],
@@ -97,6 +98,7 @@ class UserController extends Controller
 
             $user = User::create([
                 'name' => $validated['name'],
+                'business_name' => $validated['business_name'] ?? null,
                 'email' => $validated['email'],
                 'password' => Hash::make($validated['password']),
                 'phone' => $validated['phone'] ?? null,
@@ -135,6 +137,7 @@ class UserController extends Controller
         try {
             $validated = $request->validate([
                 'name' => ['nullable', 'string', 'max:255'],
+                'business_name' => ['nullable', 'string', 'max:255'],
                 'email' => ['nullable', 'email', 'max:255', 'unique:users,email'],
                 'password' => ['required', 'string', 'min:6'],
                 'role' => ['nullable', Rule::in(['admin', 'vendor', 'customer'])],
@@ -164,6 +167,7 @@ class UserController extends Controller
 
             $user = User::create([
                 'name' => $validated['name'] ?? null,
+                'business_name' => $validated['business_name'] ?? null,
                 'email' => $validated['email'] ?? null,
                 'password' => Hash::make($validated['password']),
                 'role' => $validated['role'] ?? 'customer',
@@ -368,6 +372,7 @@ class UserController extends Controller
 
             $validated = $request->validate([
                 'name' => ['nullable', 'string', 'max:255'],
+                'business_name' => ['nullable', 'string', 'max:255'],
                 'email' => ['nullable', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
                 'password' => ['nullable', 'string', 'min:6'],
                 'role' => ['nullable', Rule::in(['admin', 'vendor', 'customer'])],
@@ -394,6 +399,7 @@ class UserController extends Controller
 
             $user->fill([
                 'name' => array_key_exists('name', $validated) ? $validated['name'] : $user->name,
+                'business_name' => array_key_exists('business_name', $validated) ? $validated['business_name'] : $user->business_name,
                 'email' => array_key_exists('email', $validated) ? $validated['email'] : $user->email,
                 'role' => array_key_exists('role', $validated) ? $validated['role'] : $user->role,
 

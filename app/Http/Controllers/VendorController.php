@@ -42,6 +42,7 @@ class VendorController extends Controller
             $validated = $request->validate([
                 // User fields
                 'name' => ['required', 'string', 'max:191'],
+                'business_name' => ['nullable', 'string', 'max:255'],
                 'email' => ['required', 'email', 'unique:users,email'],
                 'password' => ['required', 'string', 'min:6'],
                 'phone' => ['nullable', 'string', 'max:20'],
@@ -75,8 +76,13 @@ class VendorController extends Controller
                 $distInput = $validated['district_id'] ?? $validated['district'] ?? $validated['city'] ?? null;
                 $upaInput = $validated['upazila_id'] ?? $validated['upazila'] ?? $validated['zone'] ?? null;
 
+                $shopName = !empty($validated['shop_name'])
+                    ? $validated['shop_name']
+                    : ($validated['owner_name'] ?? $validated['name']);
+
                 $user = User::create([
                     'name' => $validated['name'],
+                    'business_name' => $validated['business_name'] ?? $shopName,
                     'email' => $validated['email'],
                     'password' => Hash::make($validated['password']),
                     'phone' => $validated['phone'] ?? null,

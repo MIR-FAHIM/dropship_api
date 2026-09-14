@@ -25,6 +25,7 @@ class User extends Model
         'access_token',
         'user_type',
         'name',
+        'business_name',
         'email',
         'email_verified_at',
         'verification_code',

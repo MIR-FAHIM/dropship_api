@@ -32,6 +32,7 @@ return new class extends Migration
 
             // 8) name varchar(191) NOT NULL
             $table->string('name', 191);
+            $table->string('business_name', 255)->nullable();
 
             // 9) email varchar(191) NULL + INDEX
             $table->string('email', 191)->nullable()->index();
