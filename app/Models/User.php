@@ -96,4 +96,9 @@ class User extends Model
     {
         return $this->hasOne(Vendor::class);
     }
+
+    public function kycDocuments()
+    {
+        return $this->hasMany(DocumentKyc::class);
+    }
 }

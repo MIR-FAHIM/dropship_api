@@ -30,6 +30,7 @@ use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\FacebookPostController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\NoticeController;
+use App\Http\Controllers\DocumentKycController;
 use App\Http\Controllers\VendorController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskPriorityController;
@@ -406,6 +407,19 @@ Route::prefix('notices')->group(function () {
     Route::put('/update/{id}', [NoticeController::class, 'update']);
     Route::delete('/delete/{id}', [NoticeController::class, 'delete']);
     Route::delete('/remove/{id}', [NoticeController::class, 'delete']);
+});
+
+Route::prefix('documents-kyc')->group(function () {
+    Route::get('/list', [DocumentKycController::class, 'list']);
+    Route::get('/user/{userId}', [DocumentKycController::class, 'getByUser']);
+    Route::post('/prepare-default/{userId}', [DocumentKycController::class, 'createDefaultForUser']);
+    Route::post('/add', [DocumentKycController::class, 'add']);
+    Route::post('/create', [DocumentKycController::class, 'add']);
+    Route::get('/details/{id}', [DocumentKycController::class, 'details']);
+    Route::post('/update/{id}', [DocumentKycController::class, 'update']);
+    Route::put('/update/{id}', [DocumentKycController::class, 'update']);
+    Route::delete('/delete/{id}', [DocumentKycController::class, 'delete']);
+    Route::delete('/remove/{id}', [DocumentKycController::class, 'delete']);
 });
 
 Route::prefix('sms')->group(function () {
