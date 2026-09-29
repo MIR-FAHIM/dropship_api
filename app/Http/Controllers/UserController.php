@@ -110,6 +110,7 @@ class UserController extends Controller
                 'district' => is_string($distInput) && !is_numeric($distInput) ? $distInput : null,
                 'upazila' => is_string($upaInput) && !is_numeric($upaInput) ? $upaInput : null,
                 'user_type' => 'dropshipper',
+                'banned' => 1,
             ]);
 
             $created = ApiTokenService::create($user, ['basic'], 30, 'dropshipper-register-token');
