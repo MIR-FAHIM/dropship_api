@@ -46,6 +46,7 @@ use App\Http\Controllers\MuthobartaSmsController;
 use App\Http\Controllers\ResellerProductPageController;
 use App\Http\Controllers\ResellerStoreProfileController;
 use App\Http\Controllers\SocialMediaTextContentController;
+use App\Http\Controllers\ProductAssistantQaController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -487,4 +488,18 @@ Route::prefix('social-media-text-contents')->group(function () {
     Route::delete('/delete/{id}', [SocialMediaTextContentController::class, 'delete']);
     Route::delete('/remove/{id}', [SocialMediaTextContentController::class, 'delete']);
 });
+
+Route::prefix('product-assistant-qas')->group(function () {
+    Route::get('/list', [ProductAssistantQaController::class, 'list']);
+    Route::get('/product/{productId}', [ProductAssistantQaController::class, 'getByProduct'])->withoutMiddleware('token');
+    Route::get('/details/{id}', [ProductAssistantQaController::class, 'details']);
+    Route::post('/add', [ProductAssistantQaController::class, 'add']);
+    Route::post('/create', [ProductAssistantQaController::class, 'add']);
+    Route::post('/update/{id}', [ProductAssistantQaController::class, 'update']);
+    Route::put('/update/{id}', [ProductAssistantQaController::class, 'update']);
+    Route::patch('/toggle-active/{id}', [ProductAssistantQaController::class, 'toggleActive']);
+    Route::delete('/delete/{id}', [ProductAssistantQaController::class, 'delete']);
+    Route::delete('/remove/{id}', [ProductAssistantQaController::class, 'delete']);
+});
+
 

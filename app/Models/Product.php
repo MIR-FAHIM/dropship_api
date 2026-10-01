@@ -155,4 +155,9 @@ public function productDiscount()
     {
         return $this->hasMany(SocialMediaTextContent::class, 'product_id');
     }
+
+    public function productAssistantQas()
+    {
+        return $this->hasMany(ProductAssistantQa::class, 'product_id');
+    }
 }
