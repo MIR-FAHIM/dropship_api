@@ -150,4 +150,9 @@ public function productDiscount()
             ->selectRaw('product_id, AVG(star_count) as average_rating, COUNT(*) as review_count')
             ->groupBy('product_id');
     }
+
+    public function socialMediaTextContents()
+    {
+        return $this->hasMany(SocialMediaTextContent::class, 'product_id');
+    }
 }

@@ -45,6 +45,7 @@ use App\Http\Controllers\LandingPageOrderController;
 use App\Http\Controllers\MuthobartaSmsController;
 use App\Http\Controllers\ResellerProductPageController;
 use App\Http\Controllers\ResellerStoreProfileController;
+use App\Http\Controllers\SocialMediaTextContentController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -473,3 +474,17 @@ Route::prefix('vendor-carrybee-credentials')->group(function () {
     Route::put('/update/{id}', [VendorCarryBeeCredintialController::class, 'update']);
     Route::delete('/delete/{id}', [VendorCarryBeeCredintialController::class, 'delete']);
 });
+
+Route::prefix('social-media-text-contents')->group(function () {
+    Route::get('/list', [SocialMediaTextContentController::class, 'list']);
+    Route::get('/product/{productId}', [SocialMediaTextContentController::class, 'getByProduct'])->withoutMiddleware('token');
+    Route::get('/details/{id}', [SocialMediaTextContentController::class, 'details']);
+    Route::post('/add', [SocialMediaTextContentController::class, 'add']);
+    Route::post('/create', [SocialMediaTextContentController::class, 'add']);
+    Route::post('/update/{id}', [SocialMediaTextContentController::class, 'update']);
+    Route::put('/update/{id}', [SocialMediaTextContentController::class, 'update']);
+    Route::patch('/toggle-active/{id}', [SocialMediaTextContentController::class, 'toggleActive']);
+    Route::delete('/delete/{id}', [SocialMediaTextContentController::class, 'delete']);
+    Route::delete('/remove/{id}', [SocialMediaTextContentController::class, 'delete']);
+});
+
