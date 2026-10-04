@@ -126,11 +126,33 @@ class DeliveryCompanyController extends Controller
     // -------------------------------------------------------------------------
 
     /**
-     * Resolve a DeliveryCompany and build a CarrybeeService instance.
-     * Returns the service or a failed JSON response.
+     * Resolve Carrybee credentials (Vendor specific or Global DeliveryCompany) and build CarrybeeService.
+     * Returns the CarrybeeService instance or a failed JSON response.
      */
     private function carrybeeService($vendorId)
     {
+        // Check if vendor exists and has own delivery account enabled
+        $vendor = Vendor::where('id', $vendorId)->orWhere('user_id', $vendorId)->first();
+
+        if ($vendor && $vendor->has_own_delivery_account) {
+            $vendorUserIds = array_unique(array_filter([$vendor->user_id, $vendor->id, (int) $vendorId]));
+            $vendorCredential = VendorCarryBeeCredintial::where('is_active', true)
+                ->whereIn('vendor_id', $vendorUserIds)
+                ->latest()
+                ->first();
+
+            if (!$vendorCredential) {
+                return $this->failed('No active Carrybee credentials found for this vendor', null, 404);
+            }
+
+            if (!$vendorCredential->client_id || !$vendorCredential->client_secret || !$vendorCredential->client_context) {
+                return $this->failed('Vendor Carrybee credentials are incomplete', null, 422);
+            }
+
+            return new CarrybeeService($vendorCredential->client_id, $vendorCredential->client_secret, $vendorCredential->client_context);
+        }
+
+        // Fallback to global active DeliveryCompany credentials
         $credential = DeliveryCompany::where('is_active', true)->latest()->first();
 
         if (!$credential) {
@@ -299,7 +321,7 @@ class DeliveryCompanyController extends Controller
                 ?? data_get($result['body'], 'id');
 
             if ($carrybeeStoreId) {
-                Vendor::where('id', $vendorId)->update([
+                Vendor::where('id', $vendorId)->orWhere('user_id', $vendorId)->update([
                     'carryb_store_id' => $carrybeeStoreId,
                 ]);
             }
