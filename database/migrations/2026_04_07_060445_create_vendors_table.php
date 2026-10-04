@@ -26,6 +26,7 @@ return new class extends Migration
             $table->string('shop_type')->nullable();
             $table->text('description')->nullable();
             $table->boolean('is_active')->default(false);
+            $table->boolean('has_own_delivery_account')->default(false);
             $table->integer('carryb_store_id')->nullable();
             $table->timestamps();
         });

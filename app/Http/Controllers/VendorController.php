@@ -64,6 +64,7 @@ class VendorController extends Controller
                 'owner_name' => ['nullable', 'string', 'max:255'],
                 'shop_type' => ['nullable', 'string', 'max:255'],
                 'description' => ['nullable', 'string'],
+                'has_own_delivery_account' => ['sometimes', 'boolean'],
                 // KYC Document files
                 'nid_front' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
                 'nid_back' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
@@ -96,10 +97,6 @@ class VendorController extends Controller
                     'user_type' => 'vendor',
                 ]);
 
-                $shopName = !empty($validated['shop_name'])
-                    ? $validated['shop_name']
-                    : ($validated['owner_name'] ?? $validated['name']);
-
                 $vendor = Vendor::create([
                     'user_id' => $user->id,
                     'shop_name' => $shopName,
@@ -112,6 +109,7 @@ class VendorController extends Controller
                     'owner_name' => $validated['owner_name'] ?? $validated['name'],
                     'shop_type' => $validated['shop_type'] ?? null,
                     'description' => $validated['description'] ?? null,
+                    'has_own_delivery_account' => isset($validated['has_own_delivery_account']) ? (bool)$validated['has_own_delivery_account'] : false,
                 ]);
 
                 // Store KYC documents if uploaded
@@ -295,6 +293,7 @@ class VendorController extends Controller
                 'owner_name' => ['nullable', 'string', 'max:255'],
                 'shop_type' => ['nullable', 'string', 'max:255'],
                 'description' => ['nullable', 'string'],
+                'has_own_delivery_account' => ['sometimes', 'boolean'],
             ]);
 
             DB::transaction(function () use ($vendor, $validated) {
@@ -314,7 +313,7 @@ class VendorController extends Controller
 
                 // Update vendor fields
                 $vendorFields = [];
-                foreach (['shop_name', 'contact_person', 'emergency_contact', 'zone', 'whatsapp', 'owner_name', 'shop_type', 'description'] as $field) {
+                foreach (['shop_name', 'contact_person', 'emergency_contact', 'zone', 'whatsapp', 'owner_name', 'shop_type', 'description', 'has_own_delivery_account'] as $field) {
                     if (array_key_exists($field, $validated)) {
                         $vendorFields[$field] = $validated[$field];
                     }

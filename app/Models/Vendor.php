@@ -23,6 +23,12 @@ class Vendor extends Model
         'description',
         'carryb_store_id',
         'is_active',
+        'has_own_delivery_account',
+    ];
+
+    protected $casts = [
+        'is_active' => 'boolean',
+        'has_own_delivery_account' => 'boolean',
     ];
 
     public function user()
