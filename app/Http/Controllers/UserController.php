@@ -192,7 +192,7 @@ class UserController extends Controller
                 'lat' => $validated['lat'] ?? null,
                 'lon' => $validated['lon'] ?? null,
 
-                'is_banned' => 0,
+                'banned' => 0,
             ]);
 
             return $this->success('User created successfully', $user, 201);
@@ -461,7 +461,7 @@ class UserController extends Controller
                 'lat' => array_key_exists('lat', $validated) ? $validated['lat'] : $user->lat,
                 'lon' => array_key_exists('lon', $validated) ? $validated['lon'] : $user->lon,
 
-                'is_banned' => array_key_exists('is_banned', $validated) ? (bool) $validated['is_banned'] : $user->is_banned,
+                'banned' => array_key_exists('banned', $validated) ? (int) $validated['banned'] : (array_key_exists('is_banned', $validated) ? ($validated['is_banned'] ? 1 : 0) : $user->banned),
             ]);
 
             if (!empty($validated['password'])) {
@@ -574,7 +574,6 @@ class UserController extends Controller
                 return $this->failed('User not found', null, 404);
             }
 
-            $user->is_banned = false;
             $user->banned = 0;
             $user->save();
 
