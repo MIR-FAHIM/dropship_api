@@ -302,12 +302,51 @@ class UserController extends Controller
 
     /**
      * GET /users/dropshippers?per_page=20
+     * Filters: id, name, email, mobile/phone, search/q, per_page, all
      */
     public function getDropshipperList(Request $request)
     {
         try {
             $perPage = (int) ($request->get('per_page', 20));
-            $dropshippers = User::where('user_type', 'dropshipper')->latest()->paginate($perPage);
+            $query = User::where('user_type', 'dropshipper');
+
+            if ($request->filled('id')) {
+                $query->where('id', $request->id);
+            }
+
+            if ($request->filled('name')) {
+                $query->where('name', 'like', '%' . trim($request->name) . '%');
+            }
+
+            if ($request->filled('email')) {
+                $query->where('email', 'like', '%' . trim($request->email) . '%');
+            }
+
+            $mobile = $request->input('mobile') ?? $request->input('phone');
+            if (!empty($mobile)) {
+                $query->where('phone', 'like', '%' . trim($mobile) . '%');
+            }
+
+            $search = $request->input('search') ?? $request->input('q');
+            if (!empty($search)) {
+                $search = trim($search);
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhere('phone', 'like', "%{$search}%")
+                        ->orWhere('business_name', 'like', "%{$search}%");
+
+                    if (is_numeric($search)) {
+                        $q->orWhere('id', (int) $search);
+                    }
+                });
+            }
+
+            if ($request->filled('all') && (int) $request->get('all') === 1) {
+                return $this->success('Dropshippers fetched successfully', $query->latest()->get());
+            }
+
+            $dropshippers = $query->latest()->paginate($perPage);
 
             return $this->success('Dropshippers fetched successfully', $dropshippers);
         } catch (\Throwable $e) {
