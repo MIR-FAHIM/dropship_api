@@ -6,8 +6,10 @@ use App\Models\User;
 use App\Models\RegistrationErrorLog;
 use App\Models\ResellerTransaction;
 use App\Service\ApiTokenService;
+use App\Service\MuthobartaSmsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 class UserController extends Controller
@@ -476,6 +478,62 @@ class UserController extends Controller
         }
     }
 
+    private function normalizePhoneForSms(?string $phone): ?string
+    {
+        if (!$phone) {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', $phone);
+
+        if (!$digits) {
+            return null;
+        }
+
+        if (str_starts_with($digits, '880')) {
+            return $digits;
+        }
+
+        if (str_starts_with($digits, '0')) {
+            return '88' . $digits;
+        }
+
+        if (strlen($digits) === 10) {
+            return '880' . $digits;
+        }
+
+        return $digits;
+    }
+
+    private function sendDropshipperUnbannedSms(User $user): void
+    {
+        $rawPhone = $user->phone ?? $user->mobile ?? null;
+        $receiver = $this->normalizePhoneForSms($rawPhone);
+
+        if (!$receiver) {
+            return;
+        }
+
+        // Only send if user is a dropshipper (or customer/unspecified dropshipper registration)
+        if ($user->user_type && !in_array($user->user_type, ['dropshipper', 'customer'])) {
+            return;
+        }
+
+        try {
+            $name = trim((string) ($user->name ?? ''));
+            $greeting = $name !== '' ? "Hi {$name} ," : "Hi ,";
+            $message = "{$greeting} Your ResellerBrain Account is activated , Please feel free to get any support. whatsapp 01941606310.";
+
+            $smsService = app(MuthobartaSmsService::class);
+            $smsService->send($receiver, $message, 'account_activation');
+        } catch (\Throwable $e) {
+            Log::warning('Failed to send dropshipper unban SMS: ' . $e->getMessage(), [
+                'user_id' => $user->id,
+                'phone'   => $receiver,
+            ]);
+        }
+    }
+
     /**
      * PATCH /users/ban/{id}
      */
@@ -493,6 +551,11 @@ class UserController extends Controller
             $user->save();
 
             $status = $user->banned ? 'banned' : 'unbanned';
+
+            if (!$user->banned) {
+                $this->sendDropshipperUnbannedSms($user);
+            }
+
             return $this->success("User {$status} successfully", $user);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
@@ -512,7 +575,10 @@ class UserController extends Controller
             }
 
             $user->is_banned = false;
+            $user->banned = 0;
             $user->save();
+
+            $this->sendDropshipperUnbannedSms($user);
 
             return $this->success('User unbanned successfully', $user);
         } catch (\Throwable $e) {
