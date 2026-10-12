@@ -47,6 +47,7 @@ use App\Http\Controllers\ResellerProductPageController;
 use App\Http\Controllers\ResellerStoreProfileController;
 use App\Http\Controllers\SocialMediaTextContentController;
 use App\Http\Controllers\ProductAssistantQaController;
+use App\Http\Controllers\WhatsAppWebhookController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -500,6 +501,11 @@ Route::prefix('product-assistant-qas')->group(function () {
     Route::patch('/toggle-active/{id}', [ProductAssistantQaController::class, 'toggleActive']);
     Route::delete('/delete/{id}', [ProductAssistantQaController::class, 'delete']);
     Route::delete('/remove/{id}', [ProductAssistantQaController::class, 'delete']);
+});
+
+Route::prefix('webhooks/whatsapp')->group(function () {
+    Route::get('/', [WhatsAppWebhookController::class, 'verify'])->withoutMiddleware('token');
+    Route::post('/', [WhatsAppWebhookController::class, 'handle'])->withoutMiddleware('token');
 });
 
 

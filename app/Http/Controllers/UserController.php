@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Models\RegistrationErrorLog;
 use App\Models\ResellerTransaction;
+use App\Jobs\SendWhatsAppActivationJob;
 use App\Service\ApiTokenService;
 use App\Service\MuthobartaSmsService;
 use Illuminate\Http\Request;
@@ -113,6 +114,9 @@ class UserController extends Controller
                 'upazila' => is_string($upaInput) && !is_numeric($upaInput) ? $upaInput : null,
                 'user_type' => 'dropshipper',
                 'banned' => 1,
+                'whatsapp_consent' => true,
+                'whatsapp_consent_source' => 'dropshipper_registration',
+                'whatsapp_consented_at' => now(),
             ]);
 
             $created = ApiTokenService::create($user, ['basic'], 30, 'dropshipper-register-token');
@@ -522,7 +526,7 @@ class UserController extends Controller
         try {
             $name = trim((string) ($user->name ?? ''));
             $greeting = $name !== '' ? "Hi {$name} ," : "Hi ,";
-            $message = "{$greeting} Your ResellerBrain Account is activated , Please feel free to get any support. whatsapp 01941606310.";
+            $message = "{$greeting} Your ResellerBrain Account is activated , Please feel free to get any support. whatsapp 01941606310. Visit https://resellerbrain.com for more details. Thank you.";
 
             $smsService = app(MuthobartaSmsService::class);
             $smsService->send($receiver, $message, 'account_activation');
@@ -530,6 +534,21 @@ class UserController extends Controller
             Log::warning('Failed to send dropshipper unban SMS: ' . $e->getMessage(), [
                 'user_id' => $user->id,
                 'phone'   => $receiver,
+            ]);
+        }
+    }
+
+    private function dispatchDropshipperWhatsAppActivation(User $user): void
+    {
+        try {
+            if ($user->user_type && !in_array($user->user_type, ['dropshipper', 'customer'])) {
+                return;
+            }
+
+            SendWhatsAppActivationJob::dispatch($user)->afterCommit();
+        } catch (\Throwable $e) {
+            Log::warning('Failed to dispatch WhatsApp activation notification: ' . $e->getMessage(), [
+                'user_id' => $user->id,
             ]);
         }
     }
@@ -554,6 +573,7 @@ class UserController extends Controller
 
             if (!$user->banned) {
                 $this->sendDropshipperUnbannedSms($user);
+                $this->dispatchDropshipperWhatsAppActivation($user);
             }
 
             return $this->success("User {$status} successfully", $user);
@@ -578,6 +598,7 @@ class UserController extends Controller
             $user->save();
 
             $this->sendDropshipperUnbannedSms($user);
+            $this->dispatchDropshipperWhatsAppActivation($user);
 
             return $this->success('User unbanned successfully', $user);
         } catch (\Throwable $e) {

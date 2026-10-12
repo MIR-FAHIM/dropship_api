@@ -377,7 +377,7 @@ class DeliveryCompanyController extends Controller
                 'recipient_address'           => ['required', 'string', 'max:500'],
                 'city_id'                     => ['required', 'integer'],
                 'zone_id'                     => ['required', 'integer'],
-                'area_id'                     => ['required', 'integer'],
+                'area_id'                     => ['nullable', 'integer'],
                 'special_instruction'         => ['nullable', 'string'],
                 'product_description'         => ['nullable', 'string'],
                 'item_weight'                 => ['required', 'numeric', 'min:0'],

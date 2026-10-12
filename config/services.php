@@ -42,4 +42,16 @@ return [
         ],
     ],
 
+    'whatsapp' => [
+        'enabled' => filter_var(env('WHATSAPP_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        'access_token' => env('WHATSAPP_ACCESS_TOKEN'),
+        'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
+        'business_account_id' => env('WHATSAPP_BUSINESS_ACCOUNT_ID'),
+        'api_version' => env('WHATSAPP_API_VERSION', 'v22.0'),
+        'activation_template' => trim((string) env('WHATSAPP_ACTIVATION_TEMPLATE', 'dropshipper_activation')),
+        'template_language' => trim((string) env('WHATSAPP_TEMPLATE_LANGUAGE', 'bn')),
+        'webhook_verify_token' => env('WHATSAPP_WEBHOOK_VERIFY_TOKEN'),
+        'login_url' => env('RESELLERBRAIN_LOGIN_URL', 'https://resellerbrain.com/login'),
+    ],
+
 ];

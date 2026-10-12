@@ -53,6 +53,10 @@ class User extends Model
         'referral_code',
         'customer_package_id',
         'remaining_uploads',
+        'whatsapp_consent',
+        'whatsapp_consent_source',
+        'whatsapp_consented_at',
+        'whatsapp_opted_out_at',
     ];
 
     /**
@@ -80,6 +84,9 @@ class User extends Model
         'division_id' => 'integer',
         'district_id' => 'integer',
         'upazila_id' => 'integer',
+        'whatsapp_consent' => 'boolean',
+        'whatsapp_consented_at' => 'datetime',
+        'whatsapp_opted_out_at' => 'datetime',
     ];
 
     public function divisionRelation()
@@ -125,5 +132,10 @@ class User extends Model
     public function kycDocuments()
     {
         return $this->hasMany(DocumentKyc::class);
+    }
+
+    public function whatsAppLogs()
+    {
+        return $this->hasMany(WhatsAppMessageLog::class);
     }
 }
