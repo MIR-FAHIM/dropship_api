@@ -11,10 +11,13 @@ return new class extends Migration
      */
     public function up(): void
     {
+        Schema::dropIfExists('whatsapp_message_logs');
+
         Schema::create('whatsapp_message_logs', function (Blueprint $table) {
             $table->id();
             $table->string('direction', 20)->default('outbound'); // outbound, inbound
-            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->unsignedInteger('user_id')->nullable();
+            $table->foreign('user_id')->references('id')->on('users')->onDelete('set null');
             $table->string('phone_number', 50)->index();
             $table->string('message_type', 50)->default('template'); // template, text, interactive, media
             $table->string('template_name', 100)->nullable();
