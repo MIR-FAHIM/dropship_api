@@ -35,10 +35,17 @@ class UserController extends Controller
     private function storeRegistrationError(Request $request, string $message, ?User $user = null, string $level = 'error', ?\Throwable $exception = null): void
     {
         try {
+            $logMessage = $message;
+            if ($exception instanceof \Illuminate\Validation\ValidationException) {
+                $logMessage .= ' | Errors: ' . json_encode($exception->errors(), JSON_UNESCAPED_UNICODE);
+            } elseif ($exception) {
+                $logMessage .= ' | ' . $exception->getMessage();
+            }
+
             RegistrationErrorLog::create([
                 'user_id' => $user?->id,
                 'level' => $level,
-                'message' => $message,
+                'message' => $logMessage,
                 'file' => $exception?->getFile(),
                 'line' => $exception?->getLine(),
                 'url' => $request->fullUrl(),
@@ -78,11 +85,33 @@ class UserController extends Controller
     public function dropshipperRegister(Request $request)
     {
         try {
+            // Trim inputs to prevent trailing/leading whitespace issues from mobile keyboards
+            $request->merge([
+                'name'  => is_string($request->name) ? trim($request->name) : $request->name,
+                'email' => is_string($request->email) ? strtolower(trim($request->email)) : $request->email,
+                'phone' => is_string($request->phone) ? trim($request->phone) : $request->phone,
+            ]);
+
+            // Check if user with this email already exists to give a clear, descriptive response
+            if ($request->filled('email')) {
+                $existingUser = User::where('email', $request->email)->first();
+                if ($existingUser) {
+                    if ($existingUser->banned == 1) {
+                        return $this->failed('An account with this email has already registered and is currently awaiting admin activation.', [
+                            'email' => ['An account with this email has already registered and is currently awaiting admin activation.'],
+                        ], 409);
+                    }
+                    return $this->failed('This email is already registered. Please log in to your account.', [
+                        'email' => ['The email has already been taken. Please log in.'],
+                    ], 409);
+                }
+            }
+
             $validated = $request->validate([
                 'name' => ['required', 'string', 'max:191'],
                 'business_name' => ['nullable', 'string', 'max:255'],
                 'email' => ['required', 'email', 'unique:users,email'],
-                'password' => ['required', 'string', 'min:6'],
+                'password' => ['nullable', 'string', 'min:4'],
                 'phone' => ['nullable', 'string', 'max:20'],
                 'address' => ['nullable', 'string', 'max:300'],
                 'division_id' => ['nullable'],
@@ -95,6 +124,14 @@ class UserController extends Controller
                 'city' => ['nullable', 'string', 'max:255'],
             ]);
 
+            // Use provided password or auto-generate fallback
+            if (!empty($validated['password'])) {
+                $rawPassword = $validated['password'];
+            } else {
+                $digits = !empty($validated['phone']) ? preg_replace('/\D+/', '', $validated['phone']) : '';
+                $rawPassword = strlen($digits) >= 6 ? $digits : '123456';
+            }
+
             $divInput = $validated['division_id'] ?? $validated['division'] ?? $validated['state'] ?? null;
             $distInput = $validated['district_id'] ?? $validated['district'] ?? $validated['city'] ?? null;
             $upaInput = $validated['upazila_id'] ?? $validated['upazila'] ?? null;
@@ -103,7 +140,7 @@ class UserController extends Controller
                 'name' => $validated['name'],
                 'business_name' => $validated['business_name'] ?? null,
                 'email' => $validated['email'],
-                'password' => Hash::make($validated['password']),
+                'password' => Hash::make($rawPassword),
                 'phone' => $validated['phone'] ?? null,
                 'address' => $validated['address'] ?? null,
                 'division_id' => is_numeric($divInput) ? (int)$divInput : null,
