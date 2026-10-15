@@ -129,10 +129,10 @@ class DeliveryCompanyController extends Controller
      * Resolve Carrybee credentials (Vendor specific or Global DeliveryCompany) and build CarrybeeService.
      * Returns the CarrybeeService instance or a failed JSON response.
      */
-    private function carrybeeService($vendorId)
+    private function carrybeeService($vendorId = null)
     {
         // Check if vendor exists and has own delivery account enabled
-        $vendor = Vendor::where('id', $vendorId)->orWhere('user_id', $vendorId)->first();
+        $vendor = !empty($vendorId) ? Vendor::where('id', $vendorId)->orWhere('user_id', $vendorId)->first() : null;
 
         if ($vendor && $vendor->has_own_delivery_account) {
             $vendorUserIds = array_unique(array_filter([$vendor->user_id, $vendor->id, (int) $vendorId]));
@@ -152,8 +152,16 @@ class DeliveryCompanyController extends Controller
             return new CarrybeeService($vendorCredential->client_id, $vendorCredential->client_secret, $vendorCredential->client_context);
         }
 
+        // If vendorId corresponds directly to a DeliveryCompany record
+        $credential = null;
+        if (!empty($vendorId) && is_numeric($vendorId)) {
+            $credential = DeliveryCompany::where('id', $vendorId)->where('is_active', true)->first();
+        }
+
         // Fallback to global active DeliveryCompany credentials
-        $credential = DeliveryCompany::where('is_active', true)->latest()->first();
+        if (!$credential) {
+            $credential = DeliveryCompany::where('is_active', true)->latest()->first();
+        }
 
         if (!$credential) {
             return $this->failed('No active Carrybee credentials found', null, 404);
@@ -502,6 +510,66 @@ class DeliveryCompanyController extends Controller
             }
 
             return $this->success('Order details fetched successfully', $result['body']);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /delivery-companies/carrybee/track/{consignmentId}
+     * Track an order with only consignmentId by resolving vendor / credentials from database.
+     */
+    public function carrybeeTrackOrder(Request $request, string $consignmentId)
+    {
+        try {
+            $deliveryInfo = DeliveryAssignedInfo::with('order')
+                ->where('consignment_id', $consignmentId)
+                ->first();
+
+            $vendorId = null;
+            if ($deliveryInfo) {
+                $vendorId = $deliveryInfo->delivery_company_id ?: $deliveryInfo->order?->vendor_id;
+            }
+
+            $service = $this->carrybeeService($vendorId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->getOrderDetails($consignmentId);
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            // Sync transfer_status_id if provided by Carrybee
+            $body = $result['body'] ?? [];
+            $details = $body['data']['data'] ?? $body['data'] ?? [];
+            if ($deliveryInfo && is_array($details) && !empty($details['transfer_status_id'])) {
+                $deliveryInfo->update([
+                    'transfer_status_id' => $details['transfer_status_id'],
+                ]);
+            }
+
+            $response = $result['body'];
+            if (is_array($response)) {
+                $response['local_delivery_info'] = $deliveryInfo ? [
+                    'order_id'           => $deliveryInfo->order_id,
+                    'order_number'       => $deliveryInfo->order?->order_number,
+                    'merchant_order_id'  => $deliveryInfo->merchant_order_id,
+                    'recipient_name'     => $deliveryInfo->recipient_name,
+                    'recipient_phone'    => $deliveryInfo->recipient_phone,
+                    'recipient_address'  => $deliveryInfo->recipient_address,
+                    'collectable_amount' => $deliveryInfo->collectable_amount,
+                    'delivery_fee'       => $deliveryInfo->delivery_fee,
+                    'total_fee'          => $deliveryInfo->total_fee,
+                    'transfer_status_id' => $deliveryInfo->transfer_status_id,
+                    'created_at'         => $deliveryInfo->created_at,
+                ] : null;
+            }
+
+            return $this->success('Order tracking details fetched successfully', $response);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
