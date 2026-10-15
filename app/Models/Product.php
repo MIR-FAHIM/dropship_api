@@ -78,6 +78,35 @@ class Product extends Model
         'frequently_brought_selection_type',
     ];
 
+    protected $attributes = [
+        'added_by' => 'admin',
+        'variant_product' => 0,
+        'attributes' => '[]',
+        'todays_deal' => 0,
+        'published' => 1,
+        'approved' => 0,
+        'stock_visibility_state' => 'quantity',
+        'cash_on_delivery' => 0,
+        'featured' => 0,
+        'seller_featured' => 0,
+        'current_stock' => 0,
+        'weight' => 0.00,
+        'min_qty' => 1,
+        'starting_bid' => 0.00,
+        'shipping_type' => 'flat_rate',
+        'shipping_cost' => 0.00,
+        'is_quantity_multiplied' => 0,
+        'num_of_sale' => 0,
+        'refundable' => 0,
+        'earn_point' => 0.00,
+        'rating' => 0.00,
+        'show_home' => 0,
+        'digital' => 0,
+        'auction_product' => 0,
+        'external_link_btn' => 'Buy Now',
+        'wholesale_product' => 0,
+    ];
+
     // ✅ Relationships
     public function user()
     {
