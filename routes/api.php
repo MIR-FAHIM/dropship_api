@@ -53,6 +53,7 @@ use App\Models\TaskType;
 // Authentication endpoints
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
 Route::post('/auth/login-as-vendor', [AuthController::class, 'loginAsVendor']);
+Route::post('/auth/login-as-dropshipper', [AuthController::class, 'loginAsDropshipper']);
 Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])->withoutMiddleware('token');
 Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])->withoutMiddleware('token');
 Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -115,6 +116,7 @@ Route::prefix('users')->group(function () {
     Route::get('/vendors', [UserController::class, 'getVendors']);
     Route::get('/delivery-men', [UserController::class, 'getDeliveryMan']);
     Route::get('/dropshippers', [UserController::class, 'getDropshipperList']);
+    Route::post('/login-as-dropshipper', [AuthController::class, 'loginAsDropshipper']);
     Route::get('/details/{id}', [UserController::class, 'getUserDetails']);
     Route::get('/getBalance/{id}', [UserController::class, 'getUserBalance']);
     Route::put('/update/{id}', [UserController::class, 'updateUser']);

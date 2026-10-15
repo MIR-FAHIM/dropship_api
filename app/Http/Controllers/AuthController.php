@@ -428,6 +428,115 @@ class AuthController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+
+
+    /**
+     * POST /auth/login-as-dropshipper
+     * Admin impersonation for dropshippers (no password required).
+     * Accepts: id, user_id, email, or phone.
+     */
+    public function loginAsDropshipper(Request $request)
+    {
+        try {
+            $admin = $request->attributes->get('api_user');
+
+            if (!$admin) {
+                return $this->failed('Unauthenticated', null, 401);
+            }
+
+            if ($admin->role !== 'admin' && $admin->user_type !== 'admin') {
+                return $this->failed('Unauthorized. Admin access required.', null, 403);
+            }
+
+            $validated = $request->validate([
+                'id' => ['nullable', 'integer'],
+                'user_id' => ['nullable', 'integer'],
+                'email' => ['nullable', 'email'],
+                'phone' => ['nullable', 'string', 'max:50'],
+                'expires_in_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
+                'name' => ['nullable', 'string', 'max:255'],
+            ]);
+
+            $targetId = $validated['id'] ?? $validated['user_id'] ?? null;
+            $email = $validated['email'] ?? null;
+            $phone = $validated['phone'] ?? null;
+
+            if (empty($targetId) && empty($email) && empty($phone)) {
+                return $this->failed('Please provide id, user_id, email, or phone', null, 422);
+            }
+
+            $query = User::where(function ($q) {
+                $q->where('user_type', 'dropshipper')
+                  ->orWhere('role', 'dropshipper');
+            });
+
+            if (!empty($targetId)) {
+                $query->where('id', $targetId);
+            } elseif (!empty($email)) {
+                $query->where('email', $email);
+            } elseif (!empty($phone)) {
+                $rawPhone = trim($phone);
+                $digits = preg_replace('/\D+/', '', $rawPhone);
+
+                $local = preg_replace('/^88/', '', $digits);
+                $local = preg_replace('/^0/', '', $local);
+
+                $variants = array_filter(array_unique([
+                    $rawPhone,
+                    $digits,
+                    '+88' . '0' . $local,
+                    '+88' . $local,
+                    '88' . '0' . $local,
+                    '88' . $local,
+                    '0' . $local,
+                    $local,
+                ]));
+
+                $query->whereIn('phone', $variants);
+            }
+
+            $user = $query->first();
+
+            if (!$user) {
+                return $this->failed('Dropshipper not found', null, 404);
+            }
+
+            // Check if dropshipper is banned (not active)
+            if (isset($user->banned) && $user->banned == 1 && !$request->boolean('force')) {
+                return $this->failed('Dropshipper account is not active', null, 403);
+            }
+
+            $scopes = ['basic'];
+            if ($user->role === 'admin') {
+                $scopes[] = 'admin';
+            }
+
+            $days = $validated['expires_in_days'] ?? 30;
+            $tokenName = $validated['name'] ?? 'login-dropshipper-token';
+
+            $created = ApiTokenService::create($user, $scopes, $days, $tokenName);
+            $this->storeLoginSuccess($request, $user, $created['token'], 'login_as_dropshipper');
+
+            return $this->success('Login successful', [
+                'token' => $created['plain'],
+                'token_type' => 'Bearer',
+                'expires_at' => $created['token']->expires_at,
+                'token_id' => $created['token']->id,
+                'user' => $user,
+                'impersonated_by' => [
+                    'id' => $admin->id,
+                    'name' => $admin->name,
+                    'email' => $admin->email,
+                ],
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
     /**
      * POST /auth/logout
      */
