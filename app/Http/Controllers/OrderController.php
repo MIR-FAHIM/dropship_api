@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Models\DeliveryCompany;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use App\Service\NotificationService;
 use App\Service\CarrybeeService;
@@ -35,31 +36,56 @@ class OrderController extends Controller
         $userId = $request->input('user_id');
 
         if (!empty($userId)) {
-            return User::find($userId);
+            $user = User::find($userId);
+            if ($user) {
+                return $user;
+            }
         }
 
-        return null;
+        return $request->attributes->get('api_user') ?? $request->user();
     }
 
-    private function storeOrderError(Request $request, string $message, ?User $user = null, string $level = 'error', ?\Throwable $exception = null): void
-    {
+    private function storeOrderError(
+        Request $request,
+        string $message,
+        ?User $user = null,
+        string $level = 'error',
+        ?\Throwable $exception = null,
+        ?array $extraData = null
+    ): void {
         try {
+            $logMessage = $message;
+
+            if ($exception instanceof \Illuminate\Validation\ValidationException) {
+                $logMessage .= ' | Errors: ' . json_encode($exception->errors(), JSON_UNESCAPED_UNICODE);
+            } elseif ($exception) {
+                $logMessage .= ' | ' . $exception->getMessage();
+            }
+
+            $requestPayload = $this->maskSensitive($request->all());
+            if (!empty($extraData)) {
+                $requestPayload['_error_context'] = $extraData;
+            }
+
             OrderErrorLog::create([
-                'user_id' => $user?->id,
-                'level' => $level,
-                'message' => $message,
-                'file' => $exception?->getFile(),
-                'line' => $exception?->getLine(),
-                'url' => $request->fullUrl(),
-                'method' => $request->method(),
-                'ip_address' => $request->ip(),
-                'user_agent' => $request->userAgent(),
-                'request_data' => json_encode($this->maskSensitive($request->all()), JSON_UNESCAPED_UNICODE),
-                'stack_trace' => $exception?->getTraceAsString(),
-                'created_at' => now(),
+                'user_id'      => $user?->id,
+                'level'        => $level,
+                'message'      => $logMessage,
+                'file'         => $exception?->getFile(),
+                'line'         => $exception?->getLine(),
+                'url'          => $request->fullUrl(),
+                'method'       => $request->method(),
+                'ip_address'   => $request->ip(),
+                'user_agent'   => $request->userAgent(),
+                'request_data' => json_encode($requestPayload, JSON_UNESCAPED_UNICODE),
+                'stack_trace'  => $exception?->getTraceAsString(),
+                'created_at'   => now(),
             ]);
         } catch (\Throwable $e) {
-            // Do not interrupt checkout response if logging fails.
+            Log::error('Failed to write order error log: ' . $e->getMessage(), [
+                'original_message' => $message,
+                'url'              => $request->fullUrl(),
+            ]);
         }
     }
 
@@ -379,7 +405,7 @@ class OrderController extends Controller
                 ->first();
 
             if (!$cart) {
-                $this->storeOrderError($request, 'Checkout failed: active cart not found', User::find($validated['user_id']));
+                $this->storeOrderError($request, 'Checkout failed: active cart not found', $this->resolveCheckoutUser($request), 'warning');
                 return $this->failed('Active cart not found', null, 404);
             }
 
@@ -388,7 +414,7 @@ class OrderController extends Controller
                 ->get();
 
             if ($cartItems->count() === 0) {
-                $this->storeOrderError($request, 'Checkout failed: cart is empty', User::find($validated['user_id']), 'warning');
+                $this->storeOrderError($request, 'Checkout failed: cart is empty', $this->resolveCheckoutUser($request), 'warning');
                 return $this->failed('Cart is empty', null, 409);
             }
 
@@ -403,12 +429,21 @@ class OrderController extends Controller
                 $resellerPrice = $this->normalizePrice($ci->reseller_price ?? $adminPrice);
 
                 if (!is_null($adminPrice) && !is_null($resellerPrice) && $resellerPrice < $adminPrice) {
-                    return $this->failed('Cart item reseller price can not be less than admin price', [
-                        'cart_item_id' => $ci->id,
-                        'product_id' => $ci->product_id,
-                        'admin_price' => $adminPrice,
+                    $errorData = [
+                        'cart_item_id'   => $ci->id,
+                        'product_id'     => $ci->product_id,
+                        'admin_price'    => $adminPrice,
                         'reseller_price' => $resellerPrice,
-                    ], 422);
+                    ];
+                    $this->storeOrderError(
+                        $request,
+                        'Checkout failed: Cart item reseller price cannot be less than admin price',
+                        $this->resolveCheckoutUser($request),
+                        'warning',
+                        null,
+                        $errorData
+                    );
+                    return $this->failed('Cart item reseller price can not be less than admin price', $errorData, 422);
                 }
 
                 $lineTotal = !is_null($resellerPrice) ? round($qty * $resellerPrice, 2) : 0;
