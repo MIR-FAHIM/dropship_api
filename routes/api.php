@@ -81,8 +81,8 @@ Route::prefix('reseller-store-profiles')->group(function () {
     Route::post('/add', [ResellerStoreProfileController::class, 'add']);
     Route::post('/update/{id}', [ResellerStoreProfileController::class, 'update']);
     Route::put('/update/{id}', [ResellerStoreProfileController::class, 'update']);
-    Route::get('/reseller/{resellerId}', [ResellerStoreProfileController::class, 'getByReseller']);
-    Route::get('/{id}', [ResellerStoreProfileController::class, 'details']);
+    Route::get('/reseller/{resellerId}', [ResellerStoreProfileController::class, 'getByReseller'])->withoutMiddleware('token');
+    Route::get('/{id}', [ResellerStoreProfileController::class, 'details'])->withoutMiddleware('token');
 });
 
 Route::prefix('reseller-product-pages')->group(function () {
@@ -92,15 +92,15 @@ Route::prefix('reseller-product-pages')->group(function () {
     Route::put('/update/{id}', [ResellerProductPageController::class, 'update']);
     Route::put('/design/{id}', [ResellerProductPageController::class, 'updateDesign']);
     Route::delete('/remove/{id}', [ResellerProductPageController::class, 'remove']);
-    Route::get('/slug/{slug}', [ResellerProductPageController::class, 'getBySlug']);
-    Route::get('/{id}', [ResellerProductPageController::class, 'details']);
+    Route::get('/slug/{slug}', [ResellerProductPageController::class, 'getBySlug'])->withoutMiddleware('token');
+    Route::get('/{id}', [ResellerProductPageController::class, 'details'])->withoutMiddleware('token');
 });
 
 Route::prefix('landing-page-orders')->group(function () {
     Route::get('/list', [LandingPageOrderController::class, 'list']);
-    Route::post('/add', [LandingPageOrderController::class, 'add']);
-    Route::post('/create', [LandingPageOrderController::class, 'add']);
-    Route::get('/details/{id}', [LandingPageOrderController::class, 'details']);
+    Route::post('/add', [LandingPageOrderController::class, 'add'])->withoutMiddleware('token');
+    Route::post('/create', [LandingPageOrderController::class, 'add'])->withoutMiddleware('token');
+    Route::get('/details/{id}', [LandingPageOrderController::class, 'details'])->withoutMiddleware('token');
     Route::put('/update/{id}', [LandingPageOrderController::class, 'update']);
     Route::delete('/delete/{id}', [LandingPageOrderController::class, 'delete']);
     Route::delete('/remove/{id}', [LandingPageOrderController::class, 'delete']);
@@ -237,15 +237,15 @@ Route::prefix('wishlists')->group(function () {
 // Related products endpoints
 Route::prefix('related-products')->group(function () {
     Route::post('/add', [RelatedProductController::class, 'addRelatedProduct']);
-    Route::get('/list/{productId}', [RelatedProductController::class, 'getRelatedProduct']);
+    Route::get('/list/{productId}', [RelatedProductController::class, 'getRelatedProduct'])->withoutMiddleware('token');
     Route::delete('/remove/{id}', [RelatedProductController::class, 'remove']);
 });
 
 // Review endpoints
 Route::prefix('reviews')->group(function () {
     Route::post('/add', [ReviewController::class, 'addReview']);
-    Route::get('/list', [ReviewController::class, 'getAllReview']);
-    Route::get('/product/{productId}', [ReviewController::class, 'getReviewByProduct']);
+    Route::get('/list', [ReviewController::class, 'getAllReview'])->withoutMiddleware('token');
+    Route::get('/product/{productId}', [ReviewController::class, 'getReviewByProduct'])->withoutMiddleware('token');
     Route::get('/user/{userId}', [ReviewController::class, 'getReviewByUser']);
     Route::put('/update-by-user/{id}', [ReviewController::class, 'updateReviewByUser']);
     Route::delete('/remove/{id}', [ReviewController::class, 'removeReview']);
@@ -255,7 +255,7 @@ Route::prefix('reviews')->group(function () {
 // Banner endpoints
 Route::prefix('banners')->group(function () {
     Route::post('/add', [BannerController::class, 'addBanner']);
-    Route::get('/active', [BannerController::class, 'getActiveBanner']);
+    Route::get('/active', [BannerController::class, 'getActiveBanner'])->withoutMiddleware('token');
     Route::delete('/remove/{id}', [BannerController::class, 'removeBanner']);
 });
 
@@ -276,8 +276,8 @@ Route::prefix('attributes')->group(function () {
 Route::prefix('product-attributes')->group(function () {
     Route::post('/create', [ProductAttributeController::class, 'create']);
     Route::get('/list', [ProductAttributeController::class, 'list']);
-    Route::get('/details/{id}', [ProductAttributeController::class, 'details']);
-    Route::get('/by-product/{product_id}', [ProductAttributeController::class, 'getProductAttribute']);
+    Route::get('/details/{id}', [ProductAttributeController::class, 'details'])->withoutMiddleware('token');
+    Route::get('/by-product/{product_id}', [ProductAttributeController::class, 'getProductAttribute'])->withoutMiddleware('token');
     Route::put('/update/{id}', [ProductAttributeController::class, 'update']);
     Route::delete('/delete/{id}', [ProductAttributeController::class, 'delete']);
 });

@@ -37,6 +37,11 @@ class ResellerProductPage extends Model
         return $this->belongsTo(ResellerStoreProfile::class, 'reseller_id', 'reseller_id');
     }
 
+    public function user()
+    {
+        return $this->belongsTo(User::class, 'reseller_id');
+    }
+
     public function product()
     {
         return $this->belongsTo(Product::class);

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Product;
+use App\Models\ProductClicks;
 use App\Models\ResellerProductPage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -26,6 +27,22 @@ class ResellerProductPageController extends Controller
             'message' => $message,
             'errors' => $errors,
         ], $code);
+    }
+
+    private function pageRelations(): array
+    {
+        return [
+            'reseller.reseller',
+            'product.images.image',
+            'product.primaryImage',
+            'product.brand',
+            'product.category',
+            'product.subCategory',
+            'product.productAttributes.attribute',
+            'product.productAttributes.value',
+            'product.productDiscount',
+            'product.averageReview',
+        ];
     }
 
     private function uniqueSlug(string $base, ?int $ignoreId = null): string
@@ -259,7 +276,7 @@ class ResellerProductPageController extends Controller
     public function list(Request $request)
     {
         try {
-            $query = ResellerProductPage::with(['reseller', 'product.images.image', 'product.primaryImage']);
+            $query = ResellerProductPage::with($this->pageRelations());
 
             if ($request->filled('reseller_id')) {
                 $query->where('reseller_id', $request->reseller_id);
@@ -334,11 +351,7 @@ class ResellerProductPageController extends Controller
 
             $page = ResellerProductPage::create($validated);
 
-            return $this->success('Reseller product page created successfully', $page->load([
-                'reseller',
-                'product.images.image',
-                'product.primaryImage',
-            ]), 201);
+            return $this->success('Reseller product page created successfully', $page->load($this->pageRelations()), 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
@@ -349,7 +362,7 @@ class ResellerProductPageController extends Controller
     public function details($id)
     {
         try {
-            $page = ResellerProductPage::with(['reseller', 'product.images.image', 'product.primaryImage'])->find($id);
+            $page = ResellerProductPage::with($this->pageRelations())->find($id);
 
             if (!$page) {
                 return $this->failed('Reseller product page not found', null, 404);
@@ -361,15 +374,40 @@ class ResellerProductPageController extends Controller
         }
     }
 
-    public function getBySlug($slug)
+    public function getBySlug(Request $request, $slug)
     {
         try {
-            $page = ResellerProductPage::with(['reseller', 'product.images.image', 'product.primaryImage'])
+            $page = ResellerProductPage::with($this->pageRelations())
                 ->where('slug', $slug)
                 ->first();
 
+            // Fallback: If not found by page slug, check if $slug matches a Product's slug
+            if (!$page) {
+                $product = Product::where('slug', $slug)->first();
+                if ($product) {
+                    $page = ResellerProductPage::with($this->pageRelations())
+                        ->where('product_id', $product->id)
+                        ->first();
+                }
+            }
+
             if (!$page) {
                 return $this->failed('Reseller product page not found', null, 404);
+            }
+
+            // Record guest / user product click safely
+            try {
+                if ($page->product_id) {
+                    ProductClicks::create([
+                        'product_id' => $page->product_id,
+                        'page' => 'reseller_product_page',
+                        'clicked_by' => $request->input('user_id'),
+                        'is_guest' => $request->filled('user_id') ? false : true,
+                        'ip_address' => $request->ip(),
+                    ]);
+                }
+            } catch (\Throwable $clickEx) {
+                // Silently continue so the user always sees the page even if click logging fails
             }
 
             return $this->success('Reseller product page fetched successfully', $page);
