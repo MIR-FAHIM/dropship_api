@@ -204,6 +204,122 @@ class VendorController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * GET /reseller/stores or GET /vendors/stores
+     * Dedicated stores API for resellers:
+     * - Only active vendors (is_active = true)
+     * - Active user account (banned = 0)
+     * - Only vendors with more than 1 product (> 1)
+     * - Returns vendortype, logo, banner, product count, etc.
+     */
+    public function getResellerStores(Request $request)
+    {
+        try {
+            $productCondition = function ($q) {
+                $q->where(function ($sub) {
+                    $sub->where('published', 1)->orWhereNull('published');
+                });
+            };
+
+            $query = Vendor::with(['user', 'district', 'shop.logo', 'shop.banner'])
+                ->withCount(['products as total_products' => $productCondition])
+                ->where('is_active', true)
+                ->whereHas('user', function ($q) {
+                    $q->where('banned', 0);
+                })
+                ->whereHas('products', $productCondition, '>', 1);
+
+            // Optional keyword search
+            if ($request->filled('search')) {
+                $search = trim($request->search);
+                $query->where(function ($q) use ($search) {
+                    $q->where('shop_name', 'like', "%{$search}%")
+                        ->orWhere('owner_name', 'like', "%{$search}%")
+                        ->orWhere('contact_person', 'like', "%{$search}%")
+                        ->orWhere('shop_type', 'like', "%{$search}%")
+                        ->orWhere('zone', 'like', "%{$search}%");
+                });
+            }
+
+            // Optional vendortype / shop_type filter
+            if ($request->filled('vendortype')) {
+                $query->where('shop_type', $request->vendortype);
+            } elseif ($request->filled('shop_type')) {
+                $query->where('shop_type', $request->shop_type);
+            }
+
+            // Optional district filter
+            if ($request->filled('district')) {
+                $district = trim($request->district);
+                $query->where(function ($q) use ($district) {
+                    $q->where('district', $district)
+                        ->orWhereHas('district', function ($qd) use ($district) {
+                            $qd->where('name', 'like', "%{$district}%");
+                        });
+                });
+            }
+
+            // Sorting
+            $sort = $request->get('sort', 'products');
+            if ($sort === 'newest' || $sort === 'latest') {
+                $query->orderByDesc('id');
+            } elseif ($sort === 'name') {
+                $query->orderBy('shop_name', 'asc');
+            } else {
+                $query->orderByDesc('total_products')->orderByDesc('id');
+            }
+
+            $transformStore = function ($vendor) {
+                $districtName = null;
+                if ($vendor->relationLoaded('district') && $vendor->district instanceof \App\Models\District) {
+                    $districtName = $vendor->district->name;
+                } elseif (is_string($vendor->getRawOriginal('district'))) {
+                    $districtName = $vendor->getRawOriginal('district');
+                } elseif ($vendor->user && !empty($vendor->user->city)) {
+                    $districtName = $vendor->user->city;
+                }
+
+                return [
+                    'id'               => $vendor->id,
+                    'code'             => 's' . $vendor->id,
+                    'shop_name'        => $vendor->shop_name ?: ($vendor->owner_name ?: 'Store ' . $vendor->id),
+                    'name'             => $vendor->shop_name ?: ($vendor->owner_name ?: 'Store ' . $vendor->id),
+                    'vendortype'       => $vendor->vendortype,
+                    'shop_type'        => $vendor->shop_type ?: $vendor->vendortype,
+                    'logo'             => $vendor->logo_url,
+                    'banner'           => $vendor->banner_url,
+                    'is_active'        => (bool) $vendor->is_active,
+                    'total_products'   => (int) ($vendor->total_products ?? 0),
+                    'products_count'   => (int) ($vendor->total_products ?? 0),
+                    'owner_name'       => $vendor->owner_name,
+                    'contact_person'   => $vendor->contact_person,
+                    'phone'            => $vendor->user?->phone,
+                    'whatsapp'         => $vendor->whatsapp,
+                    'district'         => $districtName ?: 'N/A',
+                    'zone'             => $vendor->zone ?: 'N/A',
+                    'description'      => $vendor->description,
+                    'rating'           => 4.9,
+                    'fulfilment_rate'  => '98%',
+                    'avg_dispatch_time'=> '24h',
+                    'created_at'       => $vendor->created_at?->toIso8601String(),
+                ];
+            };
+
+            if ($request->has('page') || $request->has('per_page')) {
+                $perPage = (int) $request->get('per_page', 15);
+                $paginated = $query->paginate($perPage);
+                $paginated->getCollection()->transform($transformStore);
+                return $this->success('Stores fetched successfully', $paginated);
+            }
+
+            $stores = $query->get()->map($transformStore);
+
+            return $this->success('Stores fetched successfully', $stores);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
     /**
      * GET /vendors/vendor/id/{id}
      */

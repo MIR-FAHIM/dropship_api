@@ -46,7 +46,12 @@ class Upload extends Model
             return $this->external_link;
         }
 
-      
+        if (!empty($this->file_name)) {
+            if (str_starts_with($this->file_name, 'http://') || str_starts_with($this->file_name, 'https://')) {
+                return $this->file_name;
+            }
+            return asset('storage/' . ltrim($this->file_name, '/'));
+        }
 
         return null;
     }
