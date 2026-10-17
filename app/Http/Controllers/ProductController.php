@@ -1009,7 +1009,9 @@ class ProductController extends Controller
                 'subCategory',
                 'brand',
                 'productDiscount',
-                'averageReview'
+                'averageReview',
+                      'productAttributes.attribute',
+                'productAttributes.value',
             ])->where('approved', 1)->whereHas('vendor', function ($q) {
                 $q->where('is_active', 1);
             });
