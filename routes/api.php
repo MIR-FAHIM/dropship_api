@@ -47,6 +47,7 @@ use App\Http\Controllers\ResellerProductPageController;
 use App\Http\Controllers\ResellerStoreProfileController;
 use App\Http\Controllers\SocialMediaTextContentController;
 use App\Http\Controllers\ProductAssistantQaController;
+use App\Http\Controllers\PasswordResetOtpController;
 use App\Http\Controllers\WhatsAppWebhookController;
 use App\Models\TaskType;
 
@@ -54,8 +55,17 @@ use App\Models\TaskType;
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
 Route::post('/auth/login-as-vendor', [AuthController::class, 'loginAsVendor']);
 Route::post('/auth/login-as-dropshipper', [AuthController::class, 'loginAsDropshipper']);
-Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])->withoutMiddleware('token');
-Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])->withoutMiddleware('token');
+
+// Email OTP Password Reset (Public)
+Route::post('/forgot-password', [PasswordResetOtpController::class, 'forgotPassword'])->withoutMiddleware('token');
+Route::post('/reset-password', [PasswordResetOtpController::class, 'resetPassword'])->withoutMiddleware('token');
+Route::post('/auth/forgot-password', [PasswordResetOtpController::class, 'forgotPassword'])->withoutMiddleware('token');
+Route::post('/auth/reset-password', [PasswordResetOtpController::class, 'resetPassword'])->withoutMiddleware('token');
+
+// Preserved Mobile SMS OTP Password Reset (Public)
+Route::post('/auth/forgot-password-mobile', [AuthController::class, 'forgotPassword'])->withoutMiddleware('token');
+Route::post('/auth/reset-password-mobile', [AuthController::class, 'resetPassword'])->withoutMiddleware('token');
+
 Route::post('/auth/logout', [AuthController::class, 'logout']);
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);

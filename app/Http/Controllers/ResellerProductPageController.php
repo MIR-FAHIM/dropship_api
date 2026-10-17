@@ -348,6 +348,7 @@ class ResellerProductPageController extends Controller
 
             $validated['template_id'] = $validated['template_id'] ?? 'default';
             $validated['design_version'] = 1;
+            $validated['published_status'] = $validated['published_status'] ?? 'published';
 
             $page = ResellerProductPage::create($validated);
 
