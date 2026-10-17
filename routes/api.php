@@ -369,15 +369,16 @@ Route::prefix('facebook')->group(function () {
 
 Route::prefix('vendors')->group(function () {
     Route::post('/register', [VendorController::class, 'vendorRegister'])->withoutMiddleware('token');
-    Route::get('/list', [VendorController::class, 'getVendorList']);
+    Route::get('/list', [VendorController::class, 'getVendorList'])->withoutMiddleware('token');
     Route::get('/vendor/id/{id}', [VendorController::class, 'getVendorId']);
-    Route::get('/profile/{id}', [VendorController::class, 'getVendorProfile']);
+    Route::get('/profile/{id}', [VendorController::class, 'getVendorProfile'])->withoutMiddleware('token');
     Route::put('/update/{id}', [VendorController::class, 'updateVendor']);
     Route::patch('/is-active/{id}', [VendorController::class, 'isActiveVendor']);
     Route::delete('/remove/{id}', [VendorController::class, 'removeVendor']);
-    Route::get('/products/{vendor_id}', [VendorController::class, 'getVendorProductList']);
+    Route::get('/products/{vendor_id}', [VendorController::class, 'getVendorProductList'])->withoutMiddleware('token');
     Route::get('/dashboard/report/{vendor_id}', [VendorController::class, 'getVendorDashboardReport']);
 });
+Route::get('/public/vendors/list', [VendorController::class, 'getVendorList'])->withoutMiddleware('token');
 
 Route::prefix('task-priorities')->group(function () {
     Route::post('/create', [TaskPriorityController::class, 'create']);

@@ -7,6 +7,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\Vendor;
 use App\Models\User;
+use App\Models\ApiToken;
 use App\Service\ApiTokenService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -156,14 +157,47 @@ class VendorController extends Controller
 
     /**
      * GET /vendors/list
+     * Query params:
+     * - is_active (boolean, optional): 1/0 or true/false
+     * - status (string, optional): 'active' or 'inactive'
      */
-    public function getVendorList()
+    public function getVendorList(Request $request)
     {
         try {
-            $vendors = Vendor::with('user', 'carryBeeInfo', 'district')
+            $query = Vendor::with('user', 'carryBeeInfo', 'district')
                 ->withCount(['products as total_products'])
-                ->orderBy('id', 'desc')
-                ->get();
+                ->orderBy('id', 'desc');
+
+            // Resolve authenticated user if token is present
+            $authUser = $request->attributes->get('api_user') ?? $request->user();
+            if (!$authUser && $plainToken = $request->bearerToken()) {
+                $tokenHash = hash('sha256', $plainToken);
+                $apiToken = ApiToken::with('user')->where('token_hash', $tokenHash)->first();
+                if ($apiToken && $apiToken->isValid()) {
+                    $authUser = $apiToken->user;
+                }
+            }
+
+            $isAdmin = $authUser && in_array($authUser->user_type ?? $authUser->role, ['admin', 'superadmin']);
+
+            // 1. Explicit query parameter filtering (?is_active=1 or ?is_active=0)
+            if ($request->has('is_active')) {
+                $isActive = filter_var($request->query('is_active'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if ($isActive !== null) {
+                    $query->where('is_active', $isActive);
+                }
+            } elseif ($request->has('status')) {
+                if ($request->query('status') === 'active') {
+                    $query->where('is_active', true);
+                } elseif ($request->query('status') === 'inactive') {
+                    $query->where('is_active', false);
+                }
+            } elseif (!$isAdmin) {
+                // For public / resellers / non-admins, default to active vendors only
+                $query->where('is_active', true);
+            }
+
+            $vendors = $query->get();
 
             return $this->success('Vendor list fetched', $vendors);
         } catch (\Throwable $e) {
