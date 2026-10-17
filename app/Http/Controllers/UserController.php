@@ -112,7 +112,7 @@ class UserController extends Controller
                 'business_name' => ['nullable', 'string', 'max:255'],
                 'email' => ['required', 'email', 'unique:users,email'],
                 'password' => ['nullable', 'string', 'min:4'],
-                'phone' => ['nullable', 'string', 'max:20'],
+                'phone' => ['required', 'string', 'max:20'],
                 'address' => ['nullable', 'string', 'max:300'],
                 'division_id' => ['nullable'],
                 'district_id' => ['nullable'],

@@ -55,6 +55,7 @@ use App\Models\TaskType;
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
 Route::post('/auth/login-as-vendor', [AuthController::class, 'loginAsVendor']);
 Route::post('/auth/login-as-dropshipper', [AuthController::class, 'loginAsDropshipper']);
+Route::post('/dropshipper-register', [UserController::class, 'dropshipperRegister'])->withoutMiddleware('token');
 
 // Email OTP Password Reset (Public)
 Route::post('/forgot-password', [PasswordResetOtpController::class, 'forgotPassword'])->withoutMiddleware('token');

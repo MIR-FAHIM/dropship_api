@@ -118,4 +118,40 @@ class DropshipperRegisterTest extends TestCase
         $this->assertStringContainsString('name', $log->message);
         $this->assertStringContainsString('email', $log->message);
     }
+
+    public function test_phone_and_email_are_both_strictly_required(): void
+    {
+        // 1. Missing phone
+        $responseWithoutPhone = $this->postJson('/api/dropshipper-register', [
+            'name'  => 'Test User',
+            'email' => 'testuser@example.com',
+        ]);
+        $responseWithoutPhone->assertStatus(422)
+            ->assertJsonValidationErrors(['phone']);
+
+        // 2. Missing email
+        $responseWithoutEmail = $this->postJson('/api/dropshipper-register', [
+            'name'  => 'Test User',
+            'phone' => '01700000000',
+        ]);
+        $responseWithoutEmail->assertStatus(422)
+            ->assertJsonValidationErrors(['email']);
+    }
+
+    public function test_root_dropshipper_register_route_succeeds_without_token(): void
+    {
+        $payload = [
+            'name'  => 'Root Route User',
+            'email' => 'rootuser@example.com',
+            'phone' => '01799999999',
+        ];
+
+        $response = $this->postJson('/api/dropshipper-register', $payload);
+
+        $response->assertStatus(201)
+            ->assertJson([
+                'status'  => 'success',
+                'message' => 'Dropshipper registered successfully',
+            ]);
+    }
 }
