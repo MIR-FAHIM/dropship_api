@@ -28,13 +28,19 @@ class OrderController extends Controller
 {
     protected NotificationService $notificationService;
     protected OrderAccountingService $orderAccountingService;
+    protected MuthobartaSmsService $smsService;
+    protected CompanyTransactionService $companyTransactions;
 
     public function __construct(
         NotificationService $notificationService,
-        OrderAccountingService $orderAccountingService
+        OrderAccountingService $orderAccountingService,
+        MuthobartaSmsService $smsService,
+        CompanyTransactionService $companyTransactions
     ) {
         $this->notificationService = $notificationService;
         $this->orderAccountingService = $orderAccountingService;
+        $this->smsService = $smsService;
+        $this->companyTransactions = $companyTransactions;
     }
     private function maskSensitive(array $payload): array
     {
@@ -371,20 +377,7 @@ class OrderController extends Controller
             ]
         );
     }
-    protected $notificationService;
-    protected $smsService;
-    protected $companyTransactions;
 
-    public function __construct(
-        NotificationService $notificationService,
-        MuthobartaSmsService $smsService,
-        CompanyTransactionService $companyTransactions
-    )
-    {
-        $this->notificationService = $notificationService;
-        $this->smsService = $smsService;
-        $this->companyTransactions = $companyTransactions;
-    }
     /**
      * POST /orders/checkout
      * Body: user_id, customer_name, customer_phone, shipping_address, zone, district, area, lat, lon, note
@@ -872,14 +865,11 @@ class OrderController extends Controller
                 ]);
             }
 
-            if ($statusId === 9) {
+            if (in_array($statusId, [6, 9])) {
                 $order->payment_status = 'paid';
                 $order->save();
 
                 $this->orderAccountingService->processOrderDelivery($order);
-            } elseif (in_array($statusId, [10, 11])) {
-                $this->orderAccountingService->processOrderReversal($order, "Order status changed to {$statusName}");
-            }
 
                 if ($previousPaymentStatus !== 'paid') {
                     $formattedTotal = number_format((float) $order->total, 2, '.', '');
@@ -907,9 +897,9 @@ class OrderController extends Controller
                         'module'     => 'order',
                     ]);
                 }
+            } elseif (in_array($statusId, [7, 8, 10, 11])) {
+                $this->orderAccountingService->processOrderReversal($order, "Order status changed to {$statusName}");
             }
-
-
 
             return $this->success('Order status updated successfully', $order);
         } catch (\Illuminate\Validation\ValidationException $e) {
