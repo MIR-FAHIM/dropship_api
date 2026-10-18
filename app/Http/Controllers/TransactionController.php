@@ -195,41 +195,57 @@ class TransactionController extends Controller
                     ];
                 });
 
+            $vendorLiabilityBalance = (float) \App\Models\OrderSettlement::where('user_type', 'vendor')
+                ->where('status', \App\Models\OrderSettlement::STATUS_PENDING)
+                ->sum('settleable_amount');
+
+            $advancesInCustody = (float) \App\Models\Order::sum('advance_amount');
+
             return $this->success('Transaction report generated', [
                 'total_credit' => $totalCredit,
                 'total_debit' => $totalDebit,
                 'profit' => $profit,
                 'margin_percent' => $margin,
                 'reseller_liablity_balance' => $resellerLiabilityBalance,
+                'reseller_liability_balance' => $resellerLiabilityBalance,
+                'vendor_liability_balance' => $vendorLiabilityBalance,
+                'advances_in_custody' => $advancesInCustody,
                 'by_type' => $byType,
             ]);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
     public function resellerTransactions(Request $request)
     {
         try {
             $perPage = (int) $request->get('per_page', 20);
+            $resellerId = $request->reseller_id ?: $request->user()?->id;
 
-            $query = ResellerTransaction::where('status', 'completed')->where('reseller_id', $request->reseller_id);
+            $accountingService = app(\App\Service\OrderAccountingService::class);
+            $balances = $resellerId ? $accountingService->calculateUserBalances((int) $resellerId) : [
+                'total_credit' => 0,
+                'total_debit' => 0,
+                'net_balance' => 0,
+                'pending_reserved' => 0,
+                'available_balance' => 0,
+            ];
+
+            $query = ResellerTransaction::where('status', 'completed');
+            if ($resellerId) {
+                $query->where('reseller_id', $resellerId);
+            }
             $this->applyDateFilters($query, $request);
 
-            // Calculate sums for debit and credit
-            $credit = (float) (clone $query)->where('trx_type', 'credit')->sum('amount');
-            $debit = (float) (clone $query)->where('trx_type', 'debit')->sum('amount');
-
-            $balance = $credit - $debit;
-
-            // Reset query for items (remove trx_type filter)
-            $items = ResellerTransaction::where('status', 'completed')->where('reseller_id', $request->reseller_id);
-            $this->applyDateFilters($items, $request);
-            $items = $items->latest()->paginate($perPage);
+            $items = $query->latest()->paginate($perPage);
 
             return $this->success('Reseller transactions fetched', [
-                'debit' => $debit,
-                'credit' => $credit,
-                'balance' => $balance,
+                'debit' => $balances['total_debit'],
+                'credit' => $balances['total_credit'],
+                'balance' => $balances['net_balance'],
+                'pending_reserved' => $balances['pending_reserved'],
+                'available_balance' => $balances['available_balance'],
                 'items' => $items,
             ]);
         } catch (\Throwable $e) {

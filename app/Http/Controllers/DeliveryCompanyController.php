@@ -152,9 +152,9 @@ class DeliveryCompanyController extends Controller
             return new CarrybeeService($vendorCredential->client_id, $vendorCredential->client_secret, $vendorCredential->client_context);
         }
 
-        // If vendorId corresponds directly to a DeliveryCompany record
+        // If vendorId corresponds directly to a DeliveryCompany record (and is not an existing vendor)
         $credential = null;
-        if (!empty($vendorId) && is_numeric($vendorId)) {
+        if (empty($vendor) && !empty($vendorId) && is_numeric($vendorId)) {
             $credential = DeliveryCompany::where('id', $vendorId)->where('is_active', true)->first();
         }
 

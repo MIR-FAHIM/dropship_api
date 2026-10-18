@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->unsignedBigInteger('user_id');
             $table->decimal('amount', 15, 2);
-            $table->enum('status', ['pending', 'approved', 'rejected'])->default('pending');
+            $table->string('status', 30)->default('pending'); // pending, approved, transferred, rejected
             $table->string('payment_method');
             $table->unsignedBigInteger('bank_id')->nullable();
             $table->text('note')->nullable();

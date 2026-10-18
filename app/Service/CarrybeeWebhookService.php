@@ -13,8 +13,10 @@ use Illuminate\Support\Arr;
 
 class CarrybeeWebhookService
 {
-    public function __construct(private readonly NotificationService $notificationService)
-    {
+    public function __construct(
+        private readonly NotificationService $notificationService,
+        private readonly OrderAccountingService $orderAccountingService
+    ) {
     }
 
     public function process(array $payload, string $rawBody, string $signature, array $headers = []): array
@@ -76,8 +78,9 @@ class CarrybeeWebhookService
             ];
         }
 
-        $mappedStatusId = config('carrybee.event_status_map.' . $event);
-        if (!array_key_exists($event, (array) config('carrybee.event_status_map', []))) {
+        $eventStatusMap = (array) config('carrybee.event_status_map', []);
+        $mappedStatusId = $eventStatusMap[$event] ?? null;
+        if (!array_key_exists($event, $eventStatusMap)) {
             $webhookEvent->processing_status = 'ignored';
             $webhookEvent->message = 'Unsupported event: ' . $event;
             $webhookEvent->processed_at = now();
@@ -172,6 +175,14 @@ class CarrybeeWebhookService
 
     private function resolveOrder(array $payload): ?Order
     {
+        $orderId = Arr::get($payload, 'order_id');
+        if (!empty($orderId)) {
+            $order = Order::find($orderId);
+            if ($order) {
+                return $order;
+            }
+        }
+
         $consignmentId = Arr::get($payload, 'consignment_id');
         if (!empty($consignmentId)) {
             $assigned = DeliveryAssignedInfo::where('consignment_id', $consignmentId)->first();
@@ -212,9 +223,17 @@ class CarrybeeWebhookService
             $order->status = $targetStatusId;
         }
 
-        if ($targetStatusId === 9) {
+        if (in_array($targetStatusId, [6, 9])) {
             $order->payment_status = 'paid';
-            $this->ensureCreditTransactionForCompletedOrder($order);
+            $courierFeeData = [
+                'actual_courier_fee' => Arr::get($payload, 'delivery_fee', null),
+                'actual_cod_fee' => Arr::get($payload, 'cod_fee', 0),
+                'confirmed' => true,
+                'payout_status' => 'received',
+            ];
+            $this->orderAccountingService->processOrderDelivery($order, $courierFeeData);
+        } elseif (in_array($targetStatusId, [7, 8, 10, 11])) {
+            $this->orderAccountingService->processOrderReversal($order, 'CarryBee delivery returned/cancelled');
         }
 
         $order->save();

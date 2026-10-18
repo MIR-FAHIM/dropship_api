@@ -27,6 +27,10 @@ class OrderSettlement extends Model
         'user_type',
         'settlement_type',
         'settleable_amount',
+        'gross_entitlement',
+        'deducted_by_courier',
+        'advance_deduction',
+        'net_payable_amount',
         'currency',
         'status',
         'admin_note',
@@ -38,6 +42,10 @@ class OrderSettlement extends Model
 
     protected $casts = [
         'settleable_amount' => 'float',
+        'gross_entitlement' => 'float',
+        'deducted_by_courier' => 'float',
+        'advance_deduction' => 'float',
+        'net_payable_amount' => 'float',
         'settled_at' => 'datetime',
     ];
 

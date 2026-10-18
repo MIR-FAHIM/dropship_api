@@ -9,17 +9,23 @@ use App\Models\ResellerTransaction;
 use App\Models\UserBankAccount;
 use App\Service\CompanyTransactionService;
 use App\Service\NotificationService;
+use App\Service\OrderAccountingService;
 use Illuminate\Support\Facades\DB;
 
 class WithdrawController extends Controller
 {
 	protected $companyTransactions;
 	protected $notificationService;
+	protected $orderAccountingService;
 
-	public function __construct(CompanyTransactionService $companyTransactions, NotificationService $notificationService)
-	{
+	public function __construct(
+		CompanyTransactionService $companyTransactions,
+		NotificationService $notificationService,
+		OrderAccountingService $orderAccountingService
+	) {
 		$this->companyTransactions = $companyTransactions;
 		$this->notificationService = $notificationService;
+		$this->orderAccountingService = $orderAccountingService;
 	}
 
 	private function notifyWithdrawCreated(WithdrawRequest $withdraw): void
@@ -87,26 +93,41 @@ class WithdrawController extends Controller
 		try {
 			$validated = $request->validate([
 				'amount' => 'required|numeric|min:1',
-				'user_id' => 'required|exists:users,id',
+				'user_id' => 'nullable|exists:users,id',
 				'bank_id' => 'nullable|exists:user_bank_accounts,id',
 				'note' => 'nullable|string',
 				'type' => 'nullable|string',
 			]);
-			$userBank = UserBankAccount::where('id', $validated['bank_id'])->where('user_id', $request->user_id)->first();
-			if (!$userBank) {
-				return response()->json(['success' => false, 'message' => 'Invalid bank account.'], 400);
+
+			$targetUserId = (int) ($request->user()?->id ?: ($validated['user_id'] ?? null));
+			if (!$targetUserId) {
+				return response()->json(['success' => false, 'message' => 'User ID is required.'], 400);
 			}
-			$withdraw = WithdrawRequest::create([
-				'user_id' => $request->user_id,
-				'amount' => $validated['amount'],
-				'status' => 'pending',
-				'payment_method' => $userBank->payment_method_id,
-				'bank_id' => $validated['bank_id'] ?? null,
-				'note' => $validated['note'] ?? null,
-				'type' => $validated['type'] ?? null,
-			]);
+
+			// Validate ownership if bank_id is provided
+			if (!empty($validated['bank_id'])) {
+				$userBank = UserBankAccount::where('id', $validated['bank_id'])->where('user_id', $targetUserId)->first();
+				if (!$userBank) {
+					return response()->json(['success' => false, 'message' => 'Invalid bank account.'], 400);
+				}
+			}
+
+			$withdraw = $this->orderAccountingService->reserveWithdrawal(
+				$targetUserId,
+				(float) $validated['amount'],
+				$validated['type'] ?? null,
+				$validated['bank_id'] ?? null,
+				$validated['note'] ?? null
+			);
+
 			$this->notifyWithdrawCreated($withdraw);
 			return response()->json(['success' => true, 'data' => $withdraw], 201);
+		} catch (\Illuminate\Validation\ValidationException $e) {
+			return response()->json([
+				'success' => false,
+				'message' => $e->validator->errors()->first() ?: 'Validation failed',
+				'errors' => $e->errors(),
+			], 422);
 		} catch (\Exception $e) {
 			return response()->json([
 				'success' => false,
@@ -155,39 +176,26 @@ class WithdrawController extends Controller
 	{
 		try {
 			$validated = $request->validate([
-				'status' => 'required|in:pending,approved,rejected',
+				'status' => 'required|in:pending,approved,transferred,rejected',
+				'bank_reference' => 'nullable|string',
+				'note' => 'nullable|string',
 			]);
+
 			$withdraw = WithdrawRequest::findOrFail($id);
-			$wasApproved = $withdraw->status === 'approved';
 			$previousStatus = $withdraw->status;
 
-			DB::transaction(function () use ($withdraw, $validated, $wasApproved) {
+			if ($validated['status'] === 'transferred') {
+				$bankRef = $validated['bank_reference'] ?? ('BNK-' . time());
+				$withdraw = $this->orderAccountingService->transferWithdrawal($withdraw, $bankRef);
+			} elseif ($validated['status'] === 'rejected') {
+				$withdraw = $this->orderAccountingService->rejectWithdrawal($withdraw, $validated['note'] ?? null);
+			} elseif ($validated['status'] === 'approved') {
+				$withdraw->status = 'approved';
+				$withdraw->save();
+			} else {
 				$withdraw->status = $validated['status'];
 				$withdraw->save();
-
-				if ($validated['status'] === 'approved' && !$wasApproved) {
-					$trxId = 'WD-' . $withdraw->id . '-' . time();
-
-					ResellerTransaction::updateOrCreate(
-						[
-							'reseller_id' => $withdraw->user_id,
-							'ref_id' => $withdraw->id,
-							'type' => 'withdraw',
-							'trx_type' => 'debit',
-						],
-						[
-							'amount' => $withdraw->amount,
-							'trx_id' => $trxId,
-							'note' => 'Withdraw approved',
-							'status' => 'completed',
-							'source' => 'withdraw',
-							'order_id' => null,
-						]
-					);
-
-					$this->companyTransactions->recordWithdrawApproval($withdraw, $trxId);
-				}
-			});
+			}
 
 			$withdraw->refresh();
 			if ($previousStatus !== $withdraw->status) {

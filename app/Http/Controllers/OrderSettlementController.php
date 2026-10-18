@@ -61,9 +61,28 @@ class OrderSettlementController extends Controller
     private function buildSettlementStatusObject($settlements): array
     {
         $settlementsByType = $settlements->keyBy('settlement_type');
+        $vendorSettlements = $settlements->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE);
         $statusObject = [];
 
         foreach ($this->settlementTypes() as $type) {
+            if ($type === OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE && $vendorSettlements->count() > 1) {
+                $allSettled = $vendorSettlements->every(fn($s) => $s->status === OrderSettlement::STATUS_SETTLED);
+                $anySettled = $vendorSettlements->contains(fn($s) => $s->status === OrderSettlement::STATUS_SETTLED);
+
+                $statusObject[$type] = [
+                    'exists' => true,
+                    'is_multivendor' => true,
+                    'count' => $vendorSettlements->count(),
+                    'id' => $vendorSettlements->first()?->id,
+                    'status' => $allSettled ? OrderSettlement::STATUS_SETTLED : ($anySettled ? 'partially_settled' : OrderSettlement::STATUS_PENDING),
+                    'is_settled' => $allSettled,
+                    'settleable_amount' => (float) $vendorSettlements->sum('settleable_amount'),
+                    'settled_trx_id' => $allSettled ? $vendorSettlements->pluck('settled_trx_id')->filter()->join(', ') : null,
+                    'settled_at' => $allSettled ? $vendorSettlements->max('settled_at') : null,
+                ];
+                continue;
+            }
+
             $settlement = $settlementsByType->get($type);
 
             $statusObject[$type] = [

@@ -579,6 +579,7 @@ class VendorController extends Controller
             $baseQuery = function () use ($productIds) {
                 return DB::table('order_items')
                     ->join('orders', 'order_items.order_id', '=', 'orders.id')
+                    ->leftJoin('products', 'order_items.product_id', '=', 'products.id')
                     ->leftJoin('order_statuses', 'orders.status', '=', 'order_statuses.id')
                     ->whereIn('order_items.product_id', $productIds);
             };
@@ -610,7 +611,7 @@ class VendorController extends Controller
                 if ($extraConditions) {
                     $extraConditions($q);
                 }
-                return (float) ($q->sum('order_items.line_total') ?? 0);
+                return (float) ($q->sum(DB::raw('COALESCE(order_items.unit_price, products.unit_price, 0) * COALESCE(order_items.qty, 1)')) ?? 0);
             };
 
             $sumPending = function ($extraConditions = null) use ($baseQuery, $applyPendingFilter) {
@@ -619,7 +620,7 @@ class VendorController extends Controller
                 if ($extraConditions) {
                     $extraConditions($q);
                 }
-                return (float) ($q->sum('order_items.line_total') ?? 0);
+                return (float) ($q->sum(DB::raw('COALESCE(order_items.unit_price, products.unit_price, 0) * COALESCE(order_items.qty, 1)')) ?? 0);
             };
 
             // Totals
@@ -728,6 +729,12 @@ class VendorController extends Controller
                     'pending_last_7_days' => $last7DaysPending,
                     'daily_breakdown' => $dailyBreakdown,
                     'monthly_breakdown' => $monthlyBreakdown,
+                ],
+                'financials' => [
+                    'settled_amount' => (float) \App\Models\OrderSettlement::where('vendor_id', $vendorId)->where('status', 'settled')->sum('settleable_amount'),
+                    'pending_settlement' => (float) \App\Models\OrderSettlement::where('vendor_id', $vendorId)->where('status', 'pending')->sum('settleable_amount'),
+                    'paid_by_courier' => (float) \App\Models\OrderSettlement::where('vendor_id', $vendorId)->sum('deducted_by_courier'),
+                    'total_gross_entitlement' => (float) \App\Models\OrderSettlement::where('vendor_id', $vendorId)->sum('gross_entitlement'),
                 ],
                 'top_selling_products' => $topProducts,
             ]);

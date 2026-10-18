@@ -16,11 +16,20 @@ class WithdrawRequest extends Model
     protected $fillable = [
         'user_id',
         'amount',
+        'reserved_amount',
         'status',
         'payment_method',
         'bank_id',
+        'bank_reference',
         'note',
         'type',
+        'transferred_at',
+    ];
+
+    protected $casts = [
+        'amount' => 'float',
+        'reserved_amount' => 'float',
+        'transferred_at' => 'datetime',
     ];
 
     /**

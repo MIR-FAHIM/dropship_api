@@ -19,12 +19,23 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use App\Service\NotificationService;
+use App\Service\OrderAccountingService;
 use App\Service\CarrybeeService;
 use App\Service\CompanyTransactionService;
 use App\Service\MuthobartaSmsService;
 
 class OrderController extends Controller
 {
+    protected NotificationService $notificationService;
+    protected OrderAccountingService $orderAccountingService;
+
+    public function __construct(
+        NotificationService $notificationService,
+        OrderAccountingService $orderAccountingService
+    ) {
+        $this->notificationService = $notificationService;
+        $this->orderAccountingService = $orderAccountingService;
+    }
     private function maskSensitive(array $payload): array
     {
         unset($payload['password'], $payload['password_confirmation']);
@@ -540,6 +551,14 @@ class OrderController extends Controller
 
             CartItem::where('cart_id', $cart->id)->delete();
 
+            $advanceData = [
+                'amount' => $request->input('advance_amount', 0),
+                'recipient' => $request->input('advance_recipient', 'platform'),
+                'payment_method' => $request->input('advance_payment_method', null),
+                'trx_id' => $request->input('advance_trx_id', null),
+            ];
+            $this->orderAccountingService->processOrderBooking($order, $advanceData);
+
             DB::commit();
 
             $order->load(['items', 'vendor.user']);
@@ -856,24 +875,11 @@ class OrderController extends Controller
             if ($statusId === 9) {
                 $order->payment_status = 'paid';
                 $order->save();
-                $hasCredit = Transaction::where('order_id', $order->id)
-                    ->where('trx_type', 'credit')
-                    ->where('type', 'order_status')
-                    ->exists();
 
-                if (!$hasCredit) {
-                    Transaction::create([
-                        'amount' => $order->total,
-                        'trx_type' => 'credit',
-                        'status' => 'completed',
-                        'source' => 'cod',
-                        'order_id' => $order->id,
-                        'type' => 'order_status',
-                        'note' => 'Credit transaction for order #' . $order->order_number,
-                    ]);
-                }
-
-                $this->createOrderSettlements($order, $request->input('changed_by'));
+                $this->orderAccountingService->processOrderDelivery($order);
+            } elseif (in_array($statusId, [10, 11])) {
+                $this->orderAccountingService->processOrderReversal($order, "Order status changed to {$statusName}");
+            }
 
                 if ($previousPaymentStatus !== 'paid') {
                     $formattedTotal = number_format((float) $order->total, 2, '.', '');

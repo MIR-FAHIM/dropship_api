@@ -34,6 +34,19 @@ class Order extends Model
         'reseller_profit',
         'vendor_id',
 
+        'advance_amount',
+        'advance_recipient',
+        'advance_payment_method',
+        'advance_trx_id',
+        'remaining_cod',
+        'courier_account_owner',
+        'actual_courier_fee',
+        'actual_cod_fee',
+        'actual_courier_cost',
+        'courier_cost_confirmed',
+        'courier_net_payout',
+        'courier_payout_status',
+
         'note',
     ];
 
@@ -43,6 +56,13 @@ class Order extends Model
         'discount' => 'float',
         'total' => 'float',
         'reseller_profit' => 'float',
+        'advance_amount' => 'float',
+        'remaining_cod' => 'float',
+        'actual_courier_fee' => 'float',
+        'actual_cod_fee' => 'float',
+        'actual_courier_cost' => 'float',
+        'courier_cost_confirmed' => 'boolean',
+        'courier_net_payout' => 'float',
         'lat' => 'float',
         'lon' => 'float',
     ];
@@ -97,5 +117,10 @@ class Order extends Model
     public function settlements()
     {
         return $this->hasMany(OrderSettlement::class, 'order_id');
+    }
+
+    public function accountingLedgers()
+    {
+        return $this->hasMany(OrderAccountingLedger::class, 'order_id');
     }
 }

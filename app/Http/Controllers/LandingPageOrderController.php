@@ -507,6 +507,8 @@ class LandingPageOrderController extends Controller
                     'passed_at' => now(),
                 ]);
 
+                app(\App\Service\OrderAccountingService::class)->processOrderBooking($order);
+
                 return $order->load(['items', 'user', 'vendor']);
             });
 
