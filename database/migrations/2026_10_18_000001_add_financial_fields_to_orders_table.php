@@ -12,41 +12,46 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('orders', function (Blueprint $table) {
+            $afterCol = Schema::hasColumn('orders', 'shipping_fee') ? 'shipping_fee' : (Schema::hasColumn('orders', 'total') ? 'total' : null);
+
             if (!Schema::hasColumn('orders', 'advance_amount')) {
-                $table->decimal('advance_amount', 12, 2)->default(0.00)->after('shipping_charge');
+                $col = $table->decimal('advance_amount', 12, 2)->default(0.00);
+                if ($afterCol) {
+                    $col->after($afterCol);
+                }
             }
             if (!Schema::hasColumn('orders', 'advance_recipient')) {
-                $table->string('advance_recipient', 20)->default('platform')->after('advance_amount'); // platform, reseller, none
+                $table->string('advance_recipient', 20)->default('platform'); // platform, reseller, none
             }
             if (!Schema::hasColumn('orders', 'advance_payment_method')) {
-                $table->string('advance_payment_method', 50)->nullable()->after('advance_recipient');
+                $table->string('advance_payment_method', 50)->nullable();
             }
             if (!Schema::hasColumn('orders', 'advance_trx_id')) {
-                $table->string('advance_trx_id', 100)->nullable()->after('advance_payment_method');
+                $table->string('advance_trx_id', 100)->nullable();
             }
             if (!Schema::hasColumn('orders', 'remaining_cod')) {
-                $table->decimal('remaining_cod', 12, 2)->default(0.00)->after('advance_trx_id');
+                $table->decimal('remaining_cod', 12, 2)->default(0.00);
             }
             if (!Schema::hasColumn('orders', 'courier_account_owner')) {
-                $table->string('courier_account_owner', 20)->default('platform')->after('remaining_cod'); // platform, vendor
+                $table->string('courier_account_owner', 20)->default('platform'); // platform, vendor
             }
             if (!Schema::hasColumn('orders', 'actual_courier_fee')) {
-                $table->decimal('actual_courier_fee', 12, 2)->nullable()->after('courier_account_owner');
+                $table->decimal('actual_courier_fee', 12, 2)->nullable();
             }
             if (!Schema::hasColumn('orders', 'actual_cod_fee')) {
-                $table->decimal('actual_cod_fee', 12, 2)->nullable()->after('actual_courier_fee');
+                $table->decimal('actual_cod_fee', 12, 2)->nullable();
             }
             if (!Schema::hasColumn('orders', 'actual_courier_cost')) {
-                $table->decimal('actual_courier_cost', 12, 2)->nullable()->after('actual_cod_fee');
+                $table->decimal('actual_courier_cost', 12, 2)->nullable();
             }
             if (!Schema::hasColumn('orders', 'courier_cost_confirmed')) {
-                $table->boolean('courier_cost_confirmed')->default(false)->after('actual_courier_cost');
+                $table->boolean('courier_cost_confirmed')->default(false);
             }
             if (!Schema::hasColumn('orders', 'courier_net_payout')) {
-                $table->decimal('courier_net_payout', 12, 2)->nullable()->after('courier_cost_confirmed');
+                $table->decimal('courier_net_payout', 12, 2)->nullable();
             }
             if (!Schema::hasColumn('orders', 'courier_payout_status')) {
-                $table->string('courier_payout_status', 20)->default('pending')->after('courier_net_payout'); // pending, received, reconciled
+                $table->string('courier_payout_status', 20)->default('pending'); // pending, received, reconciled
             }
         });
     }
