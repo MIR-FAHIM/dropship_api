@@ -377,9 +377,10 @@ Route::prefix('vendors')->group(function () {
     Route::patch('/is-active/{id}', [VendorController::class, 'isActiveVendor']);
     Route::delete('/remove/{id}', [VendorController::class, 'removeVendor']);
     Route::get('/products/{vendor_id}', [VendorController::class, 'getVendorProductList'])->withoutMiddleware('token');
-    Route::get('/dashboard/report/{vendor_id}', [VendorController::class, 'getVendorDashboardReport']);
+    Route::get('/dashboard/report/{vendor_id}', [VendorController::class, 'getVendorDashboardReport'])->withoutMiddleware('token');
 });
 Route::get('/public/vendors/list', [VendorController::class, 'getVendorList'])->withoutMiddleware('token');
+Route::get('/public/vendors/dashboard/report/{vendor_id}', [VendorController::class, 'getVendorDashboardReport'])->withoutMiddleware('token');
 Route::get('/reseller/stores', [VendorController::class, 'getResellerStores'])->withoutMiddleware('token');
 Route::get('/stores', [VendorController::class, 'getResellerStores'])->withoutMiddleware('token');
 

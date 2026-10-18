@@ -553,61 +553,144 @@ class VendorController extends Controller
             // Orders grouped by status name
             $ordersByStatus = DB::table('orders')
                 ->join('order_items', 'orders.id', '=', 'order_items.order_id')
-                ->join('order_statuses', 'orders.status', '=', 'order_statuses.id')
+                ->leftJoin('order_statuses', 'orders.status', '=', 'order_statuses.id')
                 ->whereIn('order_items.product_id', $productIds)
-                ->select('order_statuses.name as status', DB::raw('COUNT(DISTINCT orders.id) as total'))
-                ->groupBy('order_statuses.name')
-                ->get();
+                ->select(
+                    DB::raw('COALESCE(order_statuses.name, orders.status, "Unknown") as status'),
+                    DB::raw('COUNT(DISTINCT orders.id) as total')
+                )
+                ->groupBy(DB::raw('COALESCE(order_statuses.name, orders.status, "Unknown")'))
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'status'          => $item->status,
+                        'delivery_status' => strtolower($item->status),
+                        'total'           => (int) $item->total,
+                        'count'           => (int) $item->total,
+                    ];
+                });
 
-            // --- Sales (based on order_items line_total for vendor products) ---
+            // --- Sales (Completed vs Pending, Cancelled Eliminated) ---
             $now = Carbon::now();
 
-            $totalSell = (float) OrderItem::whereIn('product_id', $productIds)->sum('line_total');
+            $completedStatuses = ['delivered', 'completed', 'paid', 'complete'];
+            $cancelledKeywords = ['cancel', 'return', 'fail', 'reject'];
 
-            $thisMonthSell = (float) OrderItem::whereIn('product_id', $productIds)
-                ->whereYear('created_at', $now->year)
-                ->whereMonth('created_at', $now->month)
-                ->sum('line_total');
+            $baseQuery = function () use ($productIds) {
+                return DB::table('order_items')
+                    ->join('orders', 'order_items.order_id', '=', 'orders.id')
+                    ->leftJoin('order_statuses', 'orders.status', '=', 'order_statuses.id')
+                    ->whereIn('order_items.product_id', $productIds);
+            };
 
-            $lastMonthSell = (float) OrderItem::whereIn('product_id', $productIds)
-                ->whereYear('created_at', $now->copy()->subMonth()->year)
-                ->whereMonth('created_at', $now->copy()->subMonth()->month)
-                ->sum('line_total');
+            $applyCompletedFilter = function ($q) use ($completedStatuses) {
+                $q->where(function ($sub) use ($completedStatuses) {
+                    $sub->whereIn(DB::raw('LOWER(TRIM(COALESCE(order_statuses.name, orders.status, "")))'), $completedStatuses)
+                        ->orWhereIn(DB::raw('LOWER(TRIM(COALESCE(order_statuses.type, "")))'), $completedStatuses);
+                });
+            };
 
-            $todaySell = (float) OrderItem::whereIn('product_id', $productIds)
-                ->whereDate('created_at', $now->toDateString())
-                ->sum('line_total');
+            $applyPendingFilter = function ($q) use ($completedStatuses, $cancelledKeywords) {
+                $q->where(function ($sub) use ($completedStatuses, $cancelledKeywords) {
+                    // Exclude completed
+                    $sub->whereNotIn(DB::raw('LOWER(TRIM(COALESCE(order_statuses.name, orders.status, "")))'), $completedStatuses)
+                        ->whereNotIn(DB::raw('LOWER(TRIM(COALESCE(order_statuses.type, "")))'), $completedStatuses);
 
-            $yesterdaySell = (float) OrderItem::whereIn('product_id', $productIds)
-                ->whereDate('created_at', $now->copy()->subDay()->toDateString())
-                ->sum('line_total');
+                    // Exclude cancelled / returned / failed
+                    foreach ($cancelledKeywords as $keyword) {
+                        $sub->where(DB::raw('LOWER(COALESCE(order_statuses.name, orders.status, ""))'), 'NOT LIKE', "%{$keyword}%")
+                            ->where(DB::raw('LOWER(COALESCE(order_statuses.type, ""))'), 'NOT LIKE', "%{$keyword}%");
+                    }
+                });
+            };
 
-            $last7DaysSell = (float) OrderItem::whereIn('product_id', $productIds)
-                ->whereDate('created_at', '>=', $now->copy()->subDays(6)->toDateString())
-                ->sum('line_total');
+            $sumCompleted = function ($extraConditions = null) use ($baseQuery, $applyCompletedFilter) {
+                $q = $baseQuery();
+                $applyCompletedFilter($q);
+                if ($extraConditions) {
+                    $extraConditions($q);
+                }
+                return (float) ($q->sum('order_items.line_total') ?? 0);
+            };
 
-            // Daily breakdown for last 7 days
+            $sumPending = function ($extraConditions = null) use ($baseQuery, $applyPendingFilter) {
+                $q = $baseQuery();
+                $applyPendingFilter($q);
+                if ($extraConditions) {
+                    $extraConditions($q);
+                }
+                return (float) ($q->sum('order_items.line_total') ?? 0);
+            };
+
+            // Totals
+            $totalCompletedSell = $sumCompleted();
+            $totalPendingSell = $sumPending();
+
+            // This month
+            $thisMonthCompleted = $sumCompleted(function ($q) use ($now) {
+                $q->whereYear('orders.created_at', $now->year)
+                  ->whereMonth('orders.created_at', $now->month);
+            });
+            $thisMonthPending = $sumPending(function ($q) use ($now) {
+                $q->whereYear('orders.created_at', $now->year)
+                  ->whereMonth('orders.created_at', $now->month);
+            });
+
+            // Last month
+            $lastMonthDate = $now->copy()->subMonth();
+            $lastMonthCompleted = $sumCompleted(function ($q) use ($lastMonthDate) {
+                $q->whereYear('orders.created_at', $lastMonthDate->year)
+                  ->whereMonth('orders.created_at', $lastMonthDate->month);
+            });
+
+            // Today
+            $todayCompleted = $sumCompleted(function ($q) use ($now) {
+                $q->whereDate('orders.created_at', $now->toDateString());
+            });
+            $todayPending = $sumPending(function ($q) use ($now) {
+                $q->whereDate('orders.created_at', $now->toDateString());
+            });
+
+            // Yesterday
+            $yesterdayDate = $now->copy()->subDay()->toDateString();
+            $yesterdayCompleted = $sumCompleted(function ($q) use ($yesterdayDate) {
+                $q->whereDate('orders.created_at', $yesterdayDate);
+            });
+
+            // Last 7 days
+            $last7DaysDate = $now->copy()->subDays(6)->toDateString();
+            $last7DaysCompleted = $sumCompleted(function ($q) use ($last7DaysDate) {
+                $q->whereDate('orders.created_at', '>=', $last7DaysDate);
+            });
+            $last7DaysPending = $sumPending(function ($q) use ($last7DaysDate) {
+                $q->whereDate('orders.created_at', '>=', $last7DaysDate);
+            });
+
+            // Daily breakdown for last 7 days (sell shows completed sales)
             $dailyBreakdown = [];
             for ($i = 0; $i < 7; $i++) {
                 $date = $now->copy()->subDays($i)->toDateString();
+                $cDay = $sumCompleted(fn($q) => $q->whereDate('orders.created_at', $date));
+                $pDay = $sumPending(fn($q) => $q->whereDate('orders.created_at', $date));
                 $dailyBreakdown[] = [
-                    'date' => $date,
-                    'sell' => (float) OrderItem::whereIn('product_id', $productIds)
-                        ->whereDate('created_at', $date)
-                        ->sum('line_total'),
+                    'date'      => $date,
+                    'sell'      => $cDay,
+                    'completed' => $cDay,
+                    'pending'   => $pDay,
                 ];
             }
 
-            // Monthly breakdown for last 6 months
+            // Monthly breakdown for last 6 months (sell shows completed sales)
             $monthlyBreakdown = [];
             for ($i = 0; $i < 6; $i++) {
-                $month = $now->copy()->subMonths($i);
+                $mDate = $now->copy()->subMonths($i);
+                $cMonth = $sumCompleted(fn($q) => $q->whereYear('orders.created_at', $mDate->year)->whereMonth('orders.created_at', $mDate->month));
+                $pMonth = $sumPending(fn($q) => $q->whereYear('orders.created_at', $mDate->year)->whereMonth('orders.created_at', $mDate->month));
                 $monthlyBreakdown[] = [
-                    'month' => $month->format('Y-m'),
-                    'sell' => (float) OrderItem::whereIn('product_id', $productIds)
-                        ->whereYear('created_at', $month->year)
-                        ->whereMonth('created_at', $month->month)
-                        ->sum('line_total'),
+                    'month'     => $mDate->format('Y-m'),
+                    'sell'      => $cMonth,
+                    'completed' => $cMonth,
+                    'pending'   => $pMonth,
                 ];
             }
 
@@ -631,12 +714,18 @@ class VendorController extends Controller
                     'by_status' => $ordersByStatus,
                 ],
                 'sales' => [
-                    'total' => $totalSell,
-                    'this_month' => $thisMonthSell,
-                    'last_month' => $lastMonthSell,
-                    'today' => $todaySell,
-                    'yesterday' => $yesterdaySell,
-                    'last_7_days' => $last7DaysSell,
+                    'total' => $totalCompletedSell,
+                    'completed_sales' => $totalCompletedSell,
+                    'pending_sales' => $totalPendingSell,
+                    'pending' => $totalPendingSell,
+                    'this_month' => $thisMonthCompleted,
+                    'last_month' => $lastMonthCompleted,
+                    'today' => $todayCompleted,
+                    'yesterday' => $yesterdayCompleted,
+                    'last_7_days' => $last7DaysCompleted,
+                    'pending_this_month' => $thisMonthPending,
+                    'pending_today' => $todayPending,
+                    'pending_last_7_days' => $last7DaysPending,
                     'daily_breakdown' => $dailyBreakdown,
                     'monthly_breakdown' => $monthlyBreakdown,
                 ],
