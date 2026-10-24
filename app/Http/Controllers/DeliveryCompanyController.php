@@ -132,7 +132,7 @@ class DeliveryCompanyController extends Controller
     private function carrybeeService($vendorId = null)
     {
         // Check if vendor exists and has own delivery account enabled
-        $vendor = !empty($vendorId) ? Vendor::where('id', $vendorId)->orWhere('user_id', $vendorId)->first() : null;
+        $vendor = !empty($vendorId) ? Vendor::where('id', $vendorId)->first() : null;
 
         if ($vendor && $vendor->has_own_delivery_account) {
             $vendorUserIds = array_unique(array_filter([$vendor->user_id, $vendor->id, (int) $vendorId]));
