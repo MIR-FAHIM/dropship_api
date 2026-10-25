@@ -21,6 +21,24 @@ class WalletTopupController extends Controller
         $this->orderAccountingService = $orderAccountingService;
     }
 
+    private function success($message, $data = null, int $code = 200)
+    {
+        return response()->json([
+            'status'  => 'success',
+            'message' => $message,
+            'data'    => $data,
+        ], $code);
+    }
+
+    private function failed($message, $errors = null, int $code = 400)
+    {
+        return response()->json([
+            'status'  => 'failed',
+            'message' => $message,
+            'errors'  => $errors,
+        ], $code);
+    }
+
     /**
      * POST /wallet/topup
      * Dropshipper submits wallet recharge request.

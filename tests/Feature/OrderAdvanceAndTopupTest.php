@@ -335,4 +335,30 @@ class OrderAdvanceAndTopupTest extends TestCase
         $balances = $this->accountingService->calculateUserBalances($this->reseller->id);
         $this->assertEquals(130.00, $balances['available_balance']);
     }
+
+    public function test_admin_can_fetch_all_wallet_topups_api(): void
+    {
+        WalletTopup::create([
+            'user_id' => $this->reseller->id,
+            'amount' => 500.00,
+            'payment_method' => 'bkash',
+            'sender_phone' => '01700000000',
+            'trx_id' => 'TOPUP-API-001',
+            'status' => 'pending',
+        ]);
+
+        $tokenData = \App\Service\ApiTokenService::create($this->admin, ['basic', 'admin'], 60, 'admin-token');
+
+        $response = $this->withHeader('Authorization', 'Bearer ' . $tokenData['plain'])
+            ->getJson('/api/wallet/topup/all');
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'data' => [
+                'pending_count' => 1,
+            ],
+        ]);
+        $this->assertNotEmpty($response->json('data.items.data'));
+    }
 }
