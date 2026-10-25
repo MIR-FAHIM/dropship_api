@@ -96,6 +96,11 @@ class Order extends Model
     {
         return $this->belongsTo(OrderStatus::class, 'status', 'id');
     }
+
+    public function orderStatus()
+    {
+        return $this->belongsTo(OrderStatus::class, 'status', 'id');
+    }
     
     public function deliveryMan()
     {
