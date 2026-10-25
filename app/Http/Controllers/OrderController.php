@@ -14,6 +14,8 @@ use App\Models\OrderSettlement;
 use App\Models\ResellerTransaction;
 use App\Models\User;
 use App\Models\DeliveryCompany;
+use App\Models\Product;
+use App\Models\ProductAttribute;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -667,13 +669,31 @@ class OrderController extends Controller
     }
     public function updateOrder(Request $request, $id)
     {
+        DB::beginTransaction();
         try {
-            $order = Order::find($id);
+            /** @var Order|null $order */
+            $order = Order::with(['items', 'deliveryInformation'])->where('id', $id)->lockForUpdate()->first();
             if (!$order) {
+                DB::rollBack();
                 return $this->failed('Order not found', null, 404);
             }
 
+            // Lock order: reject update if consignment has already been created/linked
+            if ($order->hasConsignment()) {
+                DB::rollBack();
+                return $this->failed(
+                    'This order cannot be edited because its delivery consignment has already been created.',
+                    [
+                        'order_id' => $order->id,
+                        'consignment_id' => $order->getConsignmentId(),
+                        'locked' => true,
+                    ],
+                    422
+                );
+            }
+
             $validated = $request->validate([
+                // Customer & Delivery Information
                 'customer_name'    => ['nullable', 'string', 'max:255'],
                 'customer_phone'   => ['nullable', 'string', 'max:50'],
                 'shipping_address' => ['nullable', 'string', 'max:1000'],
@@ -683,14 +703,245 @@ class OrderController extends Controller
                 'lat'              => ['nullable', 'numeric'],
                 'lon'              => ['nullable', 'numeric'],
                 'note'             => ['nullable', 'string'],
+
+                // Financials & Charges
+                'shipping_fee'     => ['nullable', 'numeric', 'min:0'],
+                'delivery_charge'  => ['nullable', 'numeric', 'min:0'],
+                'discount'         => ['nullable', 'numeric', 'min:0'],
+                'subtotal'         => ['nullable', 'numeric', 'min:0'],
+                'total'            => ['nullable', 'numeric', 'min:0'],
+
+                // Payment Information
+                'payment_status'   => ['nullable', 'string', 'max:50'],
+                'advance_amount'   => ['nullable', 'numeric', 'min:0'],
+                'advance_payment_method' => ['nullable', 'string', 'max:50'],
+                'advance_trx_id'   => ['nullable', 'string', 'max:100'],
+                'advance_sender_phone' => ['nullable', 'string', 'max:50'],
+                'advance_status'   => ['nullable', 'string', 'in:none,pending,approved,rejected'],
+                'paid_amount'      => ['nullable', 'numeric', 'min:0'],
+                'due_amount'       => ['nullable', 'numeric', 'min:0'],
+
+                // Line items
+                'items'            => ['nullable', 'array', 'min:1'],
+                'items.*.id'       => ['nullable', 'integer'],
+                'items.*.product_id' => ['nullable', 'integer', 'exists:products,id'],
+                'items.*.qty'      => ['required_with:items', 'integer', 'min:1'],
+                'items.*.reseller_price' => ['required_with:items', 'numeric', 'min:0'],
+                'items.*.admin_price' => ['nullable', 'numeric', 'min:0'],
+                'items.*.unit_price' => ['nullable', 'numeric', 'min:0'],
+                'items.*.product_name' => ['nullable', 'string', 'max:255'],
+                'items.*.sku'      => ['nullable', 'string', 'max:100'],
+                'items.*.attribute_id' => ['nullable', 'integer'],
+                'items.*.shop_id'  => ['nullable', 'integer'],
+                'items.*.note'     => ['nullable', 'string'],
             ]);
 
-            $order->update($validated);
+            // Process order items
+            if ($request->has('items') && is_array($validated['items'])) {
+                $processedItemIds = [];
+                $subtotal = 0.0;
+                $resellerProfit = 0.0;
+
+                foreach ($validated['items'] as $itemData) {
+                    $existingItem = !empty($itemData['id'])
+                        ? $order->items->firstWhere('id', (int) $itemData['id'])
+                        : null;
+
+                    $productId = $itemData['product_id'] ?? $existingItem?->product_id;
+                    $product = $productId ? Product::find($productId) : null;
+
+                    $qty = (int) $itemData['qty'];
+                    if ($qty < 1) {
+                        DB::rollBack();
+                        return $this->failed('Item quantity must be at least 1.', null, 422);
+                    }
+
+                    $resellerPrice = (float) $itemData['reseller_price'];
+
+                    $adminPrice = isset($itemData['admin_price'])
+                        ? (float) $itemData['admin_price']
+                        : (float) ($product?->admin_price ?? $existingItem?->admin_price ?? 0);
+
+                    $unitPrice = isset($itemData['unit_price'])
+                        ? (float) $itemData['unit_price']
+                        : (float) ($product?->unit_price ?? $existingItem?->unit_price ?? 0);
+
+                    if ($resellerPrice < $adminPrice) {
+                        DB::rollBack();
+                        $pName = $itemData['product_name'] ?? $product?->name ?? 'item';
+                        return $this->failed(
+                            "Reseller selling price (৳{$resellerPrice}) cannot be less than admin base price (৳{$adminPrice}) for '{$pName}'.",
+                            ['product_id' => $productId],
+                            422
+                        );
+                    }
+
+                    $attributeId = array_key_exists('attribute_id', $itemData)
+                        ? ($itemData['attribute_id'] ? (int) $itemData['attribute_id'] : null)
+                        : $existingItem?->attribute_id;
+
+                    if ($attributeId && $productId) {
+                        $attrExists = ProductAttribute::where('id', $attributeId)
+                            ->where('product_id', $productId)
+                            ->exists();
+                        if (!$attrExists) {
+                            DB::rollBack();
+                            return $this->failed("Selected product attribute does not belong to this product.", ['attribute_id' => $attributeId], 422);
+                        }
+                    }
+
+                    $lineTotal = round($qty * $resellerPrice, 2);
+                    $lineResellerProfit = round($qty * ($resellerPrice - $adminPrice), 2);
+
+                    $subtotal += $lineTotal;
+                    $resellerProfit += $lineResellerProfit;
+
+                    $itemAttributes = [
+                        'order_id' => $order->id,
+                        'product_id' => $productId,
+                        'shop_id' => $itemData['shop_id'] ?? $product?->shop_id ?? $existingItem?->shop_id ?? $order->vendor_id,
+                        'product_name' => $itemData['product_name'] ?? $product?->name ?? $existingItem?->product_name,
+                        'sku' => $itemData['sku'] ?? $product?->sku ?? $existingItem?->sku,
+                        'attribute_id' => $attributeId,
+                        'unit_price' => $unitPrice,
+                        'admin_price' => $adminPrice,
+                        'reseller_price' => $resellerPrice,
+                        'qty' => $qty,
+                        'line_total' => $lineTotal,
+                        'line_total_reseller_profit' => $lineResellerProfit,
+                        'note' => $itemData['note'] ?? $existingItem?->note ?? null,
+                    ];
+
+                    if ($existingItem) {
+                        $existingItem->update($itemAttributes);
+                        $processedItemIds[] = $existingItem->id;
+                    } else {
+                        $newItem = OrderItem::create(array_merge($itemAttributes, ['status' => 1]));
+                        $processedItemIds[] = $newItem->id;
+                    }
+                }
+
+                // Delete items removed from the order
+                foreach ($order->items as $oldItem) {
+                    if (!in_array($oldItem->id, $processedItemIds)) {
+                        $oldItem->delete();
+                    }
+                }
+            } else {
+                $subtotal = (float) $order->items->sum('line_total');
+                $resellerProfit = (float) $order->items->sum('line_total_reseller_profit');
+            }
+
+            // Delivery charge & Discount
+            $shippingFee = isset($validated['shipping_fee'])
+                ? (float) $validated['shipping_fee']
+                : (isset($validated['delivery_charge']) ? (float) $validated['delivery_charge'] : (float) ($order->shipping_fee ?? 0));
+
+            $discount = isset($validated['discount'])
+                ? (float) $validated['discount']
+                : (float) ($order->discount ?? 0);
+
+            if ($discount > ($subtotal + $shippingFee)) {
+                DB::rollBack();
+                return $this->failed('Discount cannot exceed the subtotal plus shipping fee.', null, 422);
+            }
+
+            // Authoritative total recalculation
+            $recalculatedTotal = round(($subtotal + $shippingFee) - $discount, 2);
+
+            // Validate client-submitted total if provided
+            if (isset($validated['total'])) {
+                $submittedTotal = (float) $validated['total'];
+                if (abs($submittedTotal - $recalculatedTotal) > 0.05) {
+                    DB::rollBack();
+                    return $this->failed(
+                        "Total order amount mismatch: submitted ৳{$submittedTotal}, but recalculated ৳{$recalculatedTotal} (৳{$subtotal} subtotal + ৳{$shippingFee} shipping - ৳{$discount} discount).",
+                        [
+                            'submitted_total' => $submittedTotal,
+                            'recalculated_total' => $recalculatedTotal,
+                            'subtotal' => $subtotal,
+                            'shipping_fee' => $shippingFee,
+                            'discount' => $discount,
+                        ],
+                        422
+                    );
+                }
+            }
+
+            // Advance & Remaining COD
+            $advanceAmount = isset($validated['advance_amount'])
+                ? (float) $validated['advance_amount']
+                : (float) ($order->advance_amount ?? 0);
+
+            if ($advanceAmount > $recalculatedTotal) {
+                DB::rollBack();
+                return $this->failed("Advance amount (৳{$advanceAmount}) cannot exceed total order amount (৳{$recalculatedTotal}).", null, 422);
+            }
+
+            $remainingCod = max(0, round($recalculatedTotal - $advanceAmount, 2));
+
+            // Validate paid and due amounts if submitted
+            if (isset($validated['paid_amount'])) {
+                $paid = (float) $validated['paid_amount'];
+                if ($paid > $recalculatedTotal) {
+                    DB::rollBack();
+                    return $this->failed("Paid amount cannot exceed total order amount.", null, 422);
+                }
+            }
+            if (isset($validated['due_amount'])) {
+                $due = (float) $validated['due_amount'];
+                if ($due < 0 || $due > $recalculatedTotal) {
+                    DB::rollBack();
+                    return $this->failed("Due amount is invalid.", null, 422);
+                }
+            }
+
+            // Assemble order update payload
+            $orderPayload = [
+                'subtotal' => round($subtotal, 2),
+                'reseller_price' => round($subtotal, 2),
+                'reseller_profit' => round($resellerProfit, 2),
+                'shipping_fee' => $shippingFee,
+                'discount' => $discount,
+                'total' => $recalculatedTotal,
+                'remaining_cod' => $remainingCod,
+            ];
+
+            foreach (['customer_name', 'customer_phone', 'shipping_address', 'zone', 'district', 'area', 'lat', 'lon', 'note'] as $k) {
+                if (array_key_exists($k, $validated)) {
+                    $orderPayload[$k] = $validated[$k];
+                }
+            }
+
+            foreach (['payment_status', 'advance_amount', 'advance_payment_method', 'advance_trx_id', 'advance_sender_phone', 'advance_status'] as $k) {
+                if (array_key_exists($k, $validated)) {
+                    $orderPayload[$k] = $validated[$k];
+                }
+            }
+
+            $order->update($orderPayload);
+
+            DB::commit();
+
+            $order->load([
+                'items.shop',
+                'items.product.productAttributes.attribute',
+                'items.product.productAttributes.value',
+                'items.productAttribute.attribute',
+                'items.productAttribute.value',
+                'deliveryInformation',
+            ]);
 
             return $this->success('Order updated successfully', $order);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
@@ -800,6 +1051,8 @@ class OrderController extends Controller
                 'vendor',
                 'status',
                 'items.shop',
+                'items.product.productAttributes.attribute',
+                'items.product.productAttributes.value',
                 'items.productAttribute.attribute', 
                 'items.productAttribute.value',
                 'deliveryMan.deliveryMan',
@@ -813,6 +1066,10 @@ class OrderController extends Controller
             if (!$order) {
                 return $this->failed('Order not found', null, 404);
             }
+
+            $order->has_consignment = $order->hasConsignment();
+            $order->is_editable = $order->isEditable();
+            $order->consignment_id = $order->getConsignmentId();
 
             return $this->success('Order fetched successfully', $order);
         } catch (\Throwable $e) {

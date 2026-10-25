@@ -73,6 +73,12 @@ class Order extends Model
         'lon' => 'float',
     ];
 
+    protected $appends = [
+        'has_consignment',
+        'is_editable',
+        'consignment_id',
+    ];
+
     /**
      * Order belongs to a customer
      */
@@ -128,5 +134,100 @@ class Order extends Model
     public function accountingLedgers()
     {
         return $this->hasMany(OrderAccountingLedger::class, 'order_id');
+    }
+
+    /**
+     * Determines whether an actual delivery consignment has been created or linked to this order.
+     */
+    public function hasConsignment(): bool
+    {
+        if (!empty($this->attributes['consignment_id'])) {
+            return true;
+        }
+
+        if ($this->relationLoaded('deliveryInformation') && !empty($this->deliveryInformation?->consignment_id)) {
+            return true;
+        }
+
+        $assignedExists = DeliveryAssignedInfo::where('order_id', $this->id)
+            ->whereNotNull('consignment_id')
+            ->where('consignment_id', '!=', '')
+            ->exists();
+
+        if ($assignedExists) {
+            return true;
+        }
+
+        if (class_exists(CarrybeeWebhookEvent::class)) {
+            $webhookExists = CarrybeeWebhookEvent::where('order_id', $this->id)
+                ->whereNotNull('consignment_id')
+                ->where('consignment_id', '!=', '')
+                ->exists();
+
+            if ($webhookExists) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * An order is editable only if no consignment has actually been created or linked to it.
+     */
+    public function isEditable(): bool
+    {
+        return !$this->hasConsignment();
+    }
+
+    /**
+     * Resolves the linked consignment ID if present.
+     */
+    public function getConsignmentId(): ?string
+    {
+        if (!empty($this->attributes['consignment_id'])) {
+            return (string) $this->attributes['consignment_id'];
+        }
+
+        if ($this->relationLoaded('deliveryInformation') && !empty($this->deliveryInformation?->consignment_id)) {
+            return (string) $this->deliveryInformation->consignment_id;
+        }
+
+        $consignmentId = DeliveryAssignedInfo::where('order_id', $this->id)
+            ->whereNotNull('consignment_id')
+            ->where('consignment_id', '!=', '')
+            ->value('consignment_id');
+
+        if ($consignmentId) {
+            return (string) $consignmentId;
+        }
+
+        if (class_exists(CarrybeeWebhookEvent::class)) {
+            $eventConsignment = CarrybeeWebhookEvent::where('order_id', $this->id)
+                ->whereNotNull('consignment_id')
+                ->where('consignment_id', '!=', '')
+                ->value('consignment_id');
+
+            if ($eventConsignment) {
+                return (string) $eventConsignment;
+            }
+        }
+
+        return null;
+    }
+
+    public function getHasConsignmentAttribute(): bool
+    {
+        return $this->hasConsignment();
+    }
+
+    public function getIsEditableAttribute(): bool
+    {
+        return $this->isEditable();
+    }
+
+    public function getConsignmentIdAttribute(): ?string
+    {
+        return $this->getConsignmentId();
     }
 }

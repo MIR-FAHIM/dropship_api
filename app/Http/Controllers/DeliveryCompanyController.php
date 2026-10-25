@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\DeliveryAssignedInfo;
 use App\Models\DeliveryCompany;
 use App\Models\CarryBeeOrderCreateForm;
+use App\Models\Order;
 use App\Models\Vendor;
 use App\Models\VendorCarryBeeCredintial;
 use App\Service\CarrybeeService;
@@ -401,17 +402,22 @@ class DeliveryCompanyController extends Controller
                 'own_note'                    => ['nullable', 'string'],
             ]);
 
+            $orderId = $validated['order_id'];
+            unset($validated['order_id']);
+
+            $orderModel = Order::find($orderId);
+            if ($orderModel && $orderModel->hasConsignment()) {
+                return $this->failed('A delivery order has already been created for this order', null, 409);
+            }
+
+            if (DeliveryAssignedInfo::where('order_id', $orderId)->exists()) {
+                return $this->failed('A delivery order has already been created for this order', null, 409);
+            }
+
             $service = $this->carrybeeService($vendorId);
 
             if (!$service instanceof CarrybeeService) {
                 return $service;
-            }
-
-            $orderId = $validated['order_id'];
-            unset($validated['order_id']);
-
-            if (DeliveryAssignedInfo::where('order_id', $orderId)->exists()) {
-                return $this->failed('A delivery order has already been created for this order', null, 409);
             }
 
             // Save full form data as a draft record
