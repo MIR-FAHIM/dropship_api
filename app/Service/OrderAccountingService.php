@@ -915,6 +915,22 @@ class OrderAccountingService
                 'note' => "Wallet balance recharge approved via {$topup->payment_method} (Trx: {$topup->trx_id})",
             ]);
 
+            // Record company cashbook credit (inflow)
+            Transaction::updateOrCreate(
+                [
+                    'ref_id' => $topup->id,
+                    'type' => 'wallet_topup',
+                ],
+                [
+                    'amount' => $topup->amount,
+                    'trx_id' => $topup->trx_id,
+                    'trx_type' => 'credit',
+                    'source' => $topup->payment_method,
+                    'status' => 'completed',
+                    'note' => "Credit transaction for wallet recharge #{$topup->id} via {$topup->payment_method} (Trx: {$topup->trx_id})",
+                ]
+            );
+
             return $topup;
         });
     }

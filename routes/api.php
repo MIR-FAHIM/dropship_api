@@ -9,6 +9,8 @@ use App\Http\Controllers\DeliveryCompanyController;
 use App\Http\Controllers\ShopController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\OrderController;
+use App\Http\Controllers\OrderHistoryController;
+use App\Http\Middleware\OrderHistoryAccess;
 use App\Http\Controllers\OrderSettlementController;
 use App\Http\Controllers\WalletTopupController;
 use App\Http\Controllers\DeliveryAddressController;
@@ -201,6 +203,16 @@ Route::prefix('carts')->group(function () {
 
 
 
+
+Route::prefix('admin/orders/history')->middleware(OrderHistoryAccess::class.':admin')->group(function () {
+    Route::get('/', [OrderHistoryController::class, 'admin']);
+    Route::get('/orders', [OrderHistoryController::class, 'adminOrders']);
+});
+
+Route::prefix('vendor/orders/history')->middleware(OrderHistoryAccess::class.':vendor')->group(function () {
+    Route::get('/', [OrderHistoryController::class, 'vendor']);
+    Route::get('/orders', [OrderHistoryController::class, 'vendorOrders']);
+});
 
 Route::prefix('orders')->group(function () {
     Route::post('/checkout', [OrderController::class, 'checkout']);

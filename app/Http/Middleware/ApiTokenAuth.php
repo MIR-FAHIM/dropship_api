@@ -42,6 +42,7 @@ public function handle(Request $request, Closure $next, $scope = null)
     // Attach user and token manually
     $request->attributes->set('api_user', $apiToken->user);
     $request->attributes->set('api_token', $apiToken);
+    $request->setUserResolver(fn () => $apiToken->user);
 
     // Update last used info
     $apiToken->update([

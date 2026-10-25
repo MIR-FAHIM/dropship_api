@@ -46,11 +46,11 @@ class TransactionController extends Controller
     {
         $this->applyDateFilters($query, $request);
 
-        if ($request->filled('type')) {
+        if ($request->filled('type') && $request->type !== 'all') {
             $query->where('type', $request->type);
         }
 
-        if ($request->filled('source')) {
+        if ($request->filled('source') && $request->source !== 'all') {
             $query->where('source', $request->source);
         }
 
@@ -58,8 +58,25 @@ class TransactionController extends Controller
             $query->where('order_id', $request->order_id);
         }
 
-        if ($request->filled('status')) {
+        if ($request->filled('status') && $request->status !== 'all') {
             $query->where('status', $request->status);
+        }
+
+        if ($request->filled('trx_type') && $request->trx_type !== 'all') {
+            $query->where('trx_type', $request->trx_type);
+        }
+
+        if ($request->filled('search')) {
+            $search = trim($request->search);
+            $query->where(function ($q) use ($search) {
+                $q->where('trx_id', 'like', "%{$search}%")
+                  ->orWhere('ref_id', 'like', "%{$search}%")
+                  ->orWhere('note', 'like', "%{$search}%")
+                  ->orWhereHas('order', function ($oq) use ($search) {
+                      $oq->where('order_number', 'like', "%{$search}%")
+                         ->orWhere('customer_name', 'like', "%{$search}%");
+                  });
+            });
         }
 
         return $query;
@@ -76,17 +93,16 @@ class TransactionController extends Controller
             $query = Transaction::query();
             $this->applyTransactionFilters($query, $request);
 
-            if (!$request->filled('status')) {
+            if (!$request->has('status') || $request->status === null) {
                 $query->where('status', 'completed');
-            }
-
-            if ($request->filled('trx_type')) {
-                $query->where('trx_type', $request->trx_type);
             }
 
             $totalCredit = (float) (clone $query)->where('trx_type', 'credit')->sum('amount');
             $totalDebit = (float) (clone $query)->where('trx_type', 'debit')->sum('amount');
-            $items = $query->with('order')->latest()->paginate($perPage);
+            $items = $query->with([
+                'order:id,order_number,customer_name,user_id',
+                'order.user:id,name,phone'
+            ])->latest()->paginate($perPage);
 
             return $this->success('Transactions fetched', [
                 'total_credit' => $totalCredit,
@@ -221,27 +237,69 @@ class TransactionController extends Controller
     {
         try {
             $perPage = (int) $request->get('per_page', 20);
-            $resellerId = $request->reseller_id ?: $request->user()?->id;
+            $authUser = $request->user();
+            $isAdmin = $authUser && in_array($authUser->user_type ?? $authUser->role, ['admin', 'superadmin']);
+            $resellerId = $request->filled('reseller_id') ? (int) $request->reseller_id : (!$isAdmin ? $authUser?->id : null);
 
             $accountingService = app(\App\Service\OrderAccountingService::class);
-            $balances = $resellerId ? $accountingService->calculateUserBalances((int) $resellerId) : [
-                'total_credit' => 0,
-                'total_debit' => 0,
-                'net_balance' => 0,
-                'pending_reserved' => 0,
-                'available_balance' => 0,
-            ];
+            $balances = $resellerId ? $accountingService->calculateUserBalances((int) $resellerId) : null;
 
-            $query = ResellerTransaction::with(['order:id,order_number']);
-            if ($request->filled('status')) {
+            $query = ResellerTransaction::with([
+                'order:id,order_number,customer_name',
+                'reseller:id,name,phone,email'
+            ]);
+
+            if ($request->filled('status') && $request->status !== 'all') {
                 $query->where('status', $request->status);
-            } else {
+            } elseif (!$request->has('status')) {
                 $query->whereIn('status', ['completed', 'pending']);
             }
+
             if ($resellerId) {
                 $query->where('reseller_id', $resellerId);
             }
+
+            if ($request->filled('trx_type') && $request->trx_type !== 'all') {
+                $query->where('trx_type', $request->trx_type);
+            }
+
+            if ($request->filled('type') && $request->type !== 'all') {
+                $query->where('type', $request->type);
+            }
+
+            if ($request->filled('search')) {
+                $search = trim($request->search);
+                $query->where(function ($q) use ($search) {
+                    $q->where('trx_id', 'like', "%{$search}%")
+                      ->orWhere('ref_id', 'like', "%{$search}%")
+                      ->orWhere('note', 'like', "%{$search}%")
+                      ->orWhereHas('order', function ($oq) use ($search) {
+                          $oq->where('order_number', 'like', "%{$search}%")
+                             ->orWhere('customer_name', 'like', "%{$search}%");
+                      })
+                      ->orWhereHas('reseller', function ($rq) use ($search) {
+                          $rq->where('name', 'like', "%{$search}%")
+                             ->orWhere('phone', 'like', "%{$search}%")
+                             ->orWhere('email', 'like', "%{$search}%");
+                      });
+                });
+            }
+
             $this->applyDateFilters($query, $request);
+
+            if (!$balances) {
+                $compQuery = (clone $query)->where('status', 'completed');
+                $totalCredit = (float) (clone $compQuery)->where('trx_type', 'credit')->sum('amount');
+                $totalDebit = (float) (clone $compQuery)->where('trx_type', 'debit')->sum('amount');
+                $pendingReserved = (float) (clone $query)->where('status', 'pending')->where('trx_type', 'debit')->sum('amount');
+                $balances = [
+                    'total_credit' => $totalCredit,
+                    'total_debit' => $totalDebit,
+                    'net_balance' => $totalCredit - $totalDebit,
+                    'pending_reserved' => $pendingReserved,
+                    'available_balance' => ($totalCredit - $totalDebit) - $pendingReserved,
+                ];
+            }
 
             $items = $query->latest()->paginate($perPage);
 
@@ -249,8 +307,8 @@ class TransactionController extends Controller
                 'debit' => $balances['total_debit'],
                 'credit' => $balances['total_credit'],
                 'balance' => $balances['net_balance'],
-                'pending_reserved' => $balances['pending_reserved'],
-                'available_balance' => $balances['available_balance'],
+                'pending_reserved' => $balances['pending_reserved'] ?? 0,
+                'available_balance' => $balances['available_balance'] ?? $balances['net_balance'],
                 'items' => $items,
             ]);
         } catch (\Throwable $e) {

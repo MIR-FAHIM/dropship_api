@@ -233,12 +233,17 @@ class VendorController extends Controller
             // Optional keyword search
             if ($request->filled('search')) {
                 $search = trim($request->search);
-                $query->where(function ($q) use ($search) {
+                $cleanId = ltrim(strtolower($search), 's');
+                $query->where(function ($q) use ($search, $cleanId) {
                     $q->where('shop_name', 'like', "%{$search}%")
                         ->orWhere('owner_name', 'like', "%{$search}%")
                         ->orWhere('contact_person', 'like', "%{$search}%")
                         ->orWhere('shop_type', 'like', "%{$search}%")
                         ->orWhere('zone', 'like', "%{$search}%");
+
+                    if (is_numeric($cleanId)) {
+                        $q->orWhere('id', (int) $cleanId);
+                    }
                 });
             }
 
@@ -280,11 +285,13 @@ class VendorController extends Controller
                     $districtName = $vendor->user->city;
                 }
 
+                $code = 's' . $vendor->id;
+
                 return [
                     'id'               => $vendor->id,
-                    'code'             => 's' . $vendor->id,
-                    'shop_name'        => $vendor->shop_name ?: ($vendor->owner_name ?: 'Store ' . $vendor->id),
-                    'name'             => $vendor->shop_name ?: ($vendor->owner_name ?: 'Store ' . $vendor->id),
+                    'code'             => $code,
+                    'shop_name'        => $code,
+                    'name'             => $code,
                     'vendortype'       => $vendor->vendortype,
                     'shop_type'        => $vendor->shop_type ?: $vendor->vendortype,
                     'logo'             => $vendor->logo_url,
@@ -292,10 +299,10 @@ class VendorController extends Controller
                     'is_active'        => (bool) $vendor->is_active,
                     'total_products'   => (int) ($vendor->total_products ?? 0),
                     'products_count'   => (int) ($vendor->total_products ?? 0),
-                    'owner_name'       => $vendor->owner_name,
-                    'contact_person'   => $vendor->contact_person,
-                    'phone'            => $vendor->user?->phone,
-                    'whatsapp'         => $vendor->whatsapp,
+                    'owner_name'       => $code,
+                    'contact_person'   => $code,
+                    'phone'            => null,
+                    'whatsapp'         => null,
                     'district'         => $districtName ?: 'N/A',
                     'zone'             => $vendor->zone ?: 'N/A',
                     'description'      => $vendor->description,

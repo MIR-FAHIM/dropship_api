@@ -235,15 +235,17 @@ class ResellerStoresApiTest extends TestCase
 
     public function test_reseller_stores_returns_vendortype_logo_and_banner_fields(): void
     {
-        $this->createStoreScenario();
+        $vendors = $this->createStoreScenario();
 
         $response = $this->getJson('/api/reseller/stores');
         $response->assertStatus(200);
 
         $data = $response->json('data');
-        $apexStore = collect($data)->firstWhere('shop_name', 'Apex Electronics');
+        $apexStore = collect($data)->firstWhere('code', 's' . $vendors['vendor1']->id);
 
         $this->assertNotNull($apexStore);
+        $this->assertEquals('s' . $vendors['vendor1']->id, $apexStore['shop_name']);
+        $this->assertEquals('s' . $vendors['vendor1']->id, $apexStore['name']);
         $this->assertEquals('Wholesaler', $apexStore['vendortype']);
         $this->assertStringContainsString('logos/apex.png', $apexStore['logo']);
         $this->assertStringContainsString('banners/apex_banner.jpg', $apexStore['banner']);
@@ -267,21 +269,23 @@ class ResellerStoresApiTest extends TestCase
 
     public function test_filtering_by_vendortype_and_search_works(): void
     {
-        $this->createStoreScenario();
+        $vendors = $this->createStoreScenario();
 
         // Filter by vendortype = Manufacturer
         $resFilter = $this->getJson('/api/reseller/stores?vendortype=Manufacturer');
         $resFilter->assertStatus(200);
         $dataFilter = $resFilter->json('data');
         $this->assertCount(1, $dataFilter);
-        $this->assertEquals('Fashion Hub BD', $dataFilter[0]['shop_name']);
+        $this->assertEquals('s' . $vendors['vendor6']->id, $dataFilter[0]['shop_name']);
+        $this->assertEquals('s' . $vendors['vendor6']->id, $dataFilter[0]['code']);
 
         // Search by keyword "Apex"
         $resSearch = $this->getJson('/api/reseller/stores?search=Apex');
         $resSearch->assertStatus(200);
         $dataSearch = $resSearch->json('data');
         $this->assertCount(1, $dataSearch);
-        $this->assertEquals('Apex Electronics', $dataSearch[0]['shop_name']);
+        $this->assertEquals('s' . $vendors['vendor1']->id, $dataSearch[0]['shop_name']);
+        $this->assertEquals('s' . $vendors['vendor1']->id, $dataSearch[0]['code']);
     }
 
     public function test_pagination_support(): void
