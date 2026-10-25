@@ -11,6 +11,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\WithdrawRequest;
+use App\Models\WalletTopup;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -22,9 +23,11 @@ class OrderAccountingService
     public function processOrderBooking(Order $order, array $advanceData = []): void
     {
         $advanceAmount = isset($advanceData['amount']) ? round((float) $advanceData['amount'], 2) : 0.00;
+        $advanceStatus = $advanceData['status'] ?? ($advanceAmount > 0 ? 'approved' : 'none');
         $advanceRecipient = $advanceData['recipient'] ?? ($advanceAmount > 0 ? 'platform' : 'none');
         $advancePaymentMethod = $advanceData['payment_method'] ?? null;
         $advanceTrxId = $advanceData['trx_id'] ?? null;
+        $advanceSenderPhone = $advanceData['sender_phone'] ?? null;
 
         $totalOrderAmount = round((float) $order->total, 2);
         $remainingCod = max(0.00, round($totalOrderAmount - $advanceAmount, 2));
@@ -42,16 +45,18 @@ class OrderAccountingService
 
         $order->update([
             'advance_amount' => $advanceAmount,
+            'advance_status' => $advanceStatus,
             'advance_recipient' => $advanceRecipient,
             'advance_payment_method' => $advancePaymentMethod,
             'advance_trx_id' => $advanceTrxId,
+            'advance_sender_phone' => $advanceSenderPhone,
             'remaining_cod' => $remainingCod,
             'courier_account_owner' => $courierOwner,
         ]);
 
         // Post Booking Ledger
-        DB::transaction(function () use ($order, $totalOrderAmount, $advanceAmount, $remainingCod, $advanceRecipient) {
-            if ($advanceAmount > 0) {
+        DB::transaction(function () use ($order, $totalOrderAmount, $advanceAmount, $remainingCod, $advanceRecipient, $advanceStatus) {
+            if ($advanceAmount > 0 && $advanceStatus === 'approved') {
                 // Platform holds advance taken from reseller/customer
                 OrderAccountingLedger::create([
                     'order_id' => $order->id,
@@ -644,6 +649,290 @@ class OrderAccountingService
             ]);
 
             return $withdraw;
+        });
+    }
+
+    /**
+     * Check if a dropshipper requires advance payment (< 5 completed orders).
+     */
+    public function checkAdvanceEligibility(int $userId): array
+    {
+        $completedCount = Order::where('user_id', $userId)
+            ->where(function ($q) {
+                $q->where('status', 9) // delivered/completed
+                  ->orWhereHas('orderStatus', function ($sub) {
+                      $sub->whereIn('type', ['delivered', 'completed']);
+                  });
+            })
+            ->count();
+
+        $requiresAdvance = ($completedCount < 5);
+        $defaultAdvanceAmount = 130.00;
+
+        return [
+            'requires_advance' => $requiresAdvance,
+            'completed_orders_count' => $completedCount,
+            'min_orders_threshold' => 5,
+            'default_advance_amount' => $defaultAdvanceAmount,
+        ];
+    }
+
+    /**
+     * Pay advance directly from dropshipper wallet balance.
+     */
+    public function payAdvanceFromWallet(Order $order, float $amount): bool
+    {
+        return DB::transaction(function () use ($order, $amount) {
+            $order = Order::lockForUpdate()->findOrFail($order->id);
+            $balances = $this->calculateUserBalances($order->user_id);
+
+            if ($amount > $balances['available_balance']) {
+                throw ValidationException::withMessages([
+                    'amount' => ["Insufficient available balance. You have ৳{$balances['available_balance']} available."],
+                ]);
+            }
+
+            $totalOrderAmount = round((float) $order->total, 2);
+            $remainingCod = max(0.00, round($totalOrderAmount - $amount, 2));
+
+            $trxId = 'WLT-ADV-' . $order->id . '-' . time();
+
+            $order->update([
+                'advance_amount' => $amount,
+                'advance_status' => 'approved',
+                'advance_recipient' => 'platform',
+                'advance_payment_method' => 'wallet',
+                'advance_trx_id' => $trxId,
+                'advance_verified_at' => now(),
+                'remaining_cod' => $remainingCod,
+            ]);
+
+            // Record completed debit in ResellerTransaction
+            ResellerTransaction::create([
+                'reseller_id' => $order->user_id,
+                'order_id' => $order->id,
+                'amount' => $amount,
+                'trx_type' => 'debit',
+                'type' => 'order_advance',
+                'source' => 'wallet',
+                'trx_id' => $trxId,
+                'status' => 'completed',
+                'note' => "Advance delivery fee for order #{$order->order_number} paid from wallet",
+            ]);
+
+            // Post to platform ledger
+            OrderAccountingLedger::create([
+                'order_id' => $order->id,
+                'entry_type' => 'booking',
+                'account_code' => 'cash_platform',
+                'party_type' => 'platform',
+                'party_id' => null,
+                'debit' => $amount,
+                'credit' => 0.00,
+                'currency' => 'BDT',
+                'reference_id' => $trxId,
+                'description' => "Advance received from reseller wallet for order #{$order->id}",
+            ]);
+
+            return true;
+        });
+    }
+
+    /**
+     * Submit advance via MFS (bKash/Nagad) pending Admin verification.
+     */
+    public function submitMfsAdvance(Order $order, float $amount, string $method, string $trxId, ?string $senderPhone = null): Order
+    {
+        return DB::transaction(function () use ($order, $amount, $method, $trxId, $senderPhone) {
+            $order = Order::lockForUpdate()->findOrFail($order->id);
+            $totalOrderAmount = round((float) $order->total, 2);
+            $remainingCod = max(0.00, round($totalOrderAmount - $amount, 2));
+
+            $order->update([
+                'advance_amount' => $amount,
+                'advance_status' => 'pending',
+                'advance_recipient' => 'platform',
+                'advance_payment_method' => $method,
+                'advance_trx_id' => $trxId,
+                'advance_sender_phone' => $senderPhone,
+                'remaining_cod' => $remainingCod,
+            ]);
+
+            ResellerTransaction::updateOrCreate(
+                [
+                    'order_id' => $order->id,
+                    'type' => 'order_advance',
+                ],
+                [
+                    'reseller_id' => $order->user_id,
+                    'amount' => $amount,
+                    'trx_type' => 'credit',
+                    'source' => $method,
+                    'trx_id' => $trxId,
+                    'status' => 'pending',
+                    'note' => "Advance payment via {$method} for order #{$order->order_number} (Awaiting Admin Verification)",
+                ]
+            );
+
+            return $order;
+        });
+    }
+
+    /**
+     * Admin Quick-Approve order advance payment.
+     */
+    public function approveOrderAdvance(Order $order, int $adminId, ?string $note = null): Order
+    {
+        return DB::transaction(function () use ($order, $adminId, $note) {
+            $order = Order::lockForUpdate()->findOrFail($order->id);
+            $advanceAmount = round((float) $order->advance_amount, 2);
+            $totalOrderAmount = round((float) $order->total, 2);
+            $remainingCod = max(0.00, round($totalOrderAmount - $advanceAmount, 2));
+
+            $order->update([
+                'advance_status' => 'approved',
+                'advance_verified_at' => now(),
+                'advance_verified_by' => $adminId,
+                'advance_admin_note' => $note,
+                'remaining_cod' => $remainingCod,
+            ]);
+
+            // Update ResellerTransaction to completed
+            ResellerTransaction::where('order_id', $order->id)
+                ->where('type', 'order_advance')
+                ->update([
+                    'status' => 'completed',
+                    'note' => "Advance payment via {$order->advance_payment_method} verified by Admin for order #{$order->order_number}",
+                ]);
+
+            // Post to platform ledger
+            if ($advanceAmount > 0) {
+                OrderAccountingLedger::create([
+                    'order_id' => $order->id,
+                    'entry_type' => 'booking',
+                    'account_code' => 'cash_platform',
+                    'party_type' => 'platform',
+                    'party_id' => null,
+                    'debit' => $advanceAmount,
+                    'credit' => 0.00,
+                    'currency' => 'BDT',
+                    'reference_id' => $order->advance_trx_id,
+                    'description' => "Customer advance verified via {$order->advance_payment_method} for order #{$order->id}",
+                ]);
+            }
+
+            return $order;
+        });
+    }
+
+    /**
+     * Admin Reject order advance payment.
+     */
+    public function rejectOrderAdvance(Order $order, int $adminId, string $reason): Order
+    {
+        return DB::transaction(function () use ($order, $adminId, $reason) {
+            $order = Order::lockForUpdate()->findOrFail($order->id);
+
+            $order->update([
+                'advance_status' => 'rejected',
+                'advance_verified_at' => now(),
+                'advance_verified_by' => $adminId,
+                'advance_admin_note' => $reason,
+                'remaining_cod' => $order->total,
+            ]);
+
+            ResellerTransaction::where('order_id', $order->id)
+                ->where('type', 'order_advance')
+                ->update([
+                    'status' => 'rejected',
+                    'note' => "Advance payment rejected: {$reason}",
+                ]);
+
+            return $order;
+        });
+    }
+
+    /**
+     * Refund order advance to dropshipper wallet if cancelled before shipment.
+     */
+    public function refundOrderAdvance(Order $order): void
+    {
+        DB::transaction(function () use ($order) {
+            if ($order->advance_status !== 'approved' || (float) $order->advance_amount <= 0) {
+                return;
+            }
+
+            $alreadyRefunded = ResellerTransaction::where('order_id', $order->id)
+                ->where('type', 'advance_refund')
+                ->exists();
+
+            if ($alreadyRefunded) {
+                return;
+            }
+
+            ResellerTransaction::create([
+                'reseller_id' => $order->user_id,
+                'order_id' => $order->id,
+                'amount' => $order->advance_amount,
+                'trx_type' => 'credit',
+                'type' => 'advance_refund',
+                'source' => 'wallet',
+                'status' => 'completed',
+                'trx_id' => 'REF-ADV-' . $order->id . '-' . time(),
+                'note' => "Refund of advance payment for cancelled order #{$order->order_number}",
+            ]);
+        });
+    }
+
+    /**
+     * Admin approve wallet topup request.
+     */
+    public function approveWalletTopup(WalletTopup $topup, int $adminId, ?string $note = null): WalletTopup
+    {
+        return DB::transaction(function () use ($topup, $adminId, $note) {
+            $topup = WalletTopup::lockForUpdate()->findOrFail($topup->id);
+            if ($topup->status === 'approved') {
+                return $topup;
+            }
+
+            $topup->update([
+                'status' => 'approved',
+                'approved_by' => $adminId,
+                'approved_at' => now(),
+                'admin_note' => $note,
+            ]);
+
+            // Credit reseller wallet balance!
+            ResellerTransaction::create([
+                'reseller_id' => $topup->user_id,
+                'amount' => $topup->amount,
+                'trx_type' => 'credit',
+                'type' => 'wallet_topup',
+                'source' => $topup->payment_method,
+                'trx_id' => $topup->trx_id,
+                'ref_id' => $topup->id,
+                'status' => 'completed',
+                'note' => "Wallet balance recharge approved via {$topup->payment_method} (Trx: {$topup->trx_id})",
+            ]);
+
+            return $topup;
+        });
+    }
+
+    /**
+     * Admin reject wallet topup request.
+     */
+    public function rejectWalletTopup(WalletTopup $topup, int $adminId, string $reason): WalletTopup
+    {
+        return DB::transaction(function () use ($topup, $adminId, $reason) {
+            $topup = WalletTopup::lockForUpdate()->findOrFail($topup->id);
+            $topup->update([
+                'status' => 'rejected',
+                'approved_by' => $adminId,
+                'approved_at' => now(),
+                'admin_note' => $reason,
+            ]);
+            return $topup;
         });
     }
 }

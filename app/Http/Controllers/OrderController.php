@@ -542,15 +542,43 @@ class OrderController extends Controller
             $cart->status = 'checked_out';
             $cart->save();
 
-            CartItem::where('cart_id', $cart->id)->delete();
+            // Check advance eligibility (< 5 completed orders rule)
+            $eligibility = $this->orderAccountingService->checkAdvanceEligibility($order->user_id);
+            $payFromWallet = filter_var($request->input('pay_from_wallet', false), FILTER_VALIDATE_BOOLEAN);
+            $advanceAmountInput = (float) $request->input('advance_amount', 0);
+            $defaultAmount = $eligibility['default_advance_amount'] ?? 130.00;
+            $advanceAmount = $advanceAmountInput > 0 ? $advanceAmountInput : ($eligibility['requires_advance'] ? $defaultAmount : 0.00);
 
-            $advanceData = [
-                'amount' => $request->input('advance_amount', 0),
-                'recipient' => $request->input('advance_recipient', 'platform'),
-                'payment_method' => $request->input('advance_payment_method', null),
-                'trx_id' => $request->input('advance_trx_id', null),
-            ];
-            $this->orderAccountingService->processOrderBooking($order, $advanceData);
+            if ($eligibility['requires_advance'] || $advanceAmountInput > 0) {
+                if ($payFromWallet) {
+                    $this->orderAccountingService->payAdvanceFromWallet($order, $advanceAmount);
+                } elseif ($request->filled('advance_trx_id')) {
+                    $this->orderAccountingService->submitMfsAdvance(
+                        $order,
+                        $advanceAmount,
+                        $request->input('advance_payment_method', 'bkash'),
+                        $request->input('advance_trx_id'),
+                        $request->input('advance_sender_phone')
+                    );
+                } else {
+                    // Pay later option: Order created with advance_status = 'pending'
+                    $this->orderAccountingService->processOrderBooking($order, [
+                        'amount' => $advanceAmount,
+                        'status' => 'pending',
+                        'recipient' => 'platform',
+                        'payment_method' => $request->input('advance_payment_method', null),
+                        'trx_id' => null,
+                        'sender_phone' => null,
+                    ]);
+                }
+            } else {
+                // No advance required
+                $this->orderAccountingService->processOrderBooking($order, [
+                    'amount' => 0.00,
+                    'status' => 'none',
+                    'recipient' => 'none',
+                ]);
+            }
 
             DB::commit();
 
@@ -1051,6 +1079,184 @@ class OrderController extends Controller
             ])->get();
 
             return $this->success('Order status summary fetched successfully', $statuses);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /orders/check-advance-requirement
+     * Checks if current dropshipper requires advance (< 5 orders) and available wallet balance.
+     */
+    public function checkAdvanceRequirement(Request $request)
+    {
+        try {
+            $userId = (int) ($request->user()?->id ?: $request->input('user_id'));
+            if (!$userId) {
+                return $this->failed('User ID is required', null, 400);
+            }
+
+            $eligibility = $this->orderAccountingService->checkAdvanceEligibility($userId);
+            $balances = $this->orderAccountingService->calculateUserBalances($userId);
+
+            return $this->success('Advance eligibility fetched successfully', [
+                'requires_advance' => $eligibility['requires_advance'],
+                'completed_orders_count' => $eligibility['completed_orders_count'],
+                'min_orders_threshold' => $eligibility['min_orders_threshold'],
+                'default_advance_amount' => $eligibility['default_advance_amount'],
+                'available_wallet_balance' => $balances['available_balance'],
+                'can_pay_from_wallet' => $balances['available_balance'] >= $eligibility['default_advance_amount'],
+            ]);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /orders/{id}/pay-advance
+     * Pay or submit advance payment for an existing pending order.
+     */
+    public function payAdvance(Request $request, $id)
+    {
+        try {
+            $order = Order::find($id);
+            if (!$order) {
+                return $this->failed('Order not found', null, 404);
+            }
+
+            if ($order->advance_status === 'approved') {
+                return $this->failed('Advance payment for this order is already approved.', null, 400);
+            }
+
+            $payFromWallet = filter_var($request->input('pay_from_wallet', false), FILTER_VALIDATE_BOOLEAN);
+            $amount = (float) $request->input('amount', 130.00);
+
+            if ($amount <= 0) {
+                return $this->failed('Advance amount must be greater than 0', null, 422);
+            }
+
+            if ($payFromWallet) {
+                $this->orderAccountingService->payAdvanceFromWallet($order, $amount);
+                $order->refresh();
+
+                return $this->success('Advance payment deducted from wallet successfully.', [
+                    'order' => $order,
+                    'advance_status' => 'approved',
+                ]);
+            }
+
+            $validated = $request->validate([
+                'payment_method' => ['required', 'string', 'max:50'],
+                'trx_id' => ['required', 'string', 'max:100'],
+                'sender_phone' => ['nullable', 'string', 'max:30'],
+            ]);
+
+            $order = $this->orderAccountingService->submitMfsAdvance(
+                $order,
+                $amount,
+                $validated['payment_method'],
+                $validated['trx_id'],
+                $validated['sender_phone'] ?? null
+            );
+
+            // Notify Admin of new advance payment submitted
+            $this->notificationService->createAdminNotifications([
+                'title'      => 'Order Advance Payment Submitted',
+                'subtitle'   => "Order {$order->order_number} advance of {$amount} BDT submitted via {$validated['payment_method']} (Trx: {$validated['trx_id']}).",
+                'created_by' => $order->user_id,
+                'is_seen'    => false,
+                'type'       => 'payment',
+                'is_active'  => true,
+                'image'      => null,
+                'module'     => 'order',
+            ]);
+
+            return $this->success('Advance payment submitted successfully. Awaiting admin verification.', [
+                'order' => $order,
+                'advance_status' => 'pending',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /orders/{id}/approve-advance
+     * Admin Quick-Approve order advance.
+     */
+    public function approveAdvance(Request $request, $id)
+    {
+        try {
+            $order = Order::find($id);
+            if (!$order) {
+                return $this->failed('Order not found', null, 404);
+            }
+
+            if ($order->advance_status === 'approved') {
+                return $this->failed('Advance payment is already approved.', null, 400);
+            }
+
+            $adminId = (int) ($request->user()?->id ?: 1);
+            $note = $request->input('admin_note', 'Approved by Admin');
+
+            $order = $this->orderAccountingService->approveOrderAdvance($order, $adminId, $note);
+
+            // Notify dropshipper
+            $this->notificationService->createNotificationSafely([
+                'title'      => 'Advance Payment Approved',
+                'subtitle'   => "Advance payment for Order {$order->order_number} has been verified and approved.",
+                'created_by' => $adminId,
+                'send_to'    => $order->user_id,
+                'is_seen'    => false,
+                'type'       => 'payment',
+                'is_active'  => true,
+                'image'      => null,
+                'module'     => 'order',
+            ]);
+
+            return $this->success('Order advance approved successfully', $order);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /orders/{id}/reject-advance
+     * Admin Reject order advance.
+     */
+    public function rejectAdvance(Request $request, $id)
+    {
+        try {
+            $order = Order::find($id);
+            if (!$order) {
+                return $this->failed('Order not found', null, 404);
+            }
+
+            $validated = $request->validate([
+                'reason' => ['required', 'string', 'max:255'],
+            ]);
+
+            $adminId = (int) ($request->user()?->id ?: 1);
+            $order = $this->orderAccountingService->rejectOrderAdvance($order, $adminId, $validated['reason']);
+
+            // Notify dropshipper
+            $this->notificationService->createNotificationSafely([
+                'title'      => 'Advance Payment Rejected',
+                'subtitle'   => "Advance payment for Order {$order->order_number} was rejected: {$validated['reason']}. Please submit a valid payment.",
+                'created_by' => $adminId,
+                'send_to'    => $order->user_id,
+                'is_seen'    => false,
+                'type'       => 'payment',
+                'is_active'  => true,
+                'image'      => null,
+                'module'     => 'order',
+            ]);
+
+            return $this->success('Order advance rejected successfully', $order);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

@@ -232,7 +232,12 @@ class TransactionController extends Controller
                 'available_balance' => 0,
             ];
 
-            $query = ResellerTransaction::where('status', 'completed');
+            $query = ResellerTransaction::with(['order:id,order_number']);
+            if ($request->filled('status')) {
+                $query->where('status', $request->status);
+            } else {
+                $query->whereIn('status', ['completed', 'pending']);
+            }
             if ($resellerId) {
                 $query->where('reseller_id', $resellerId);
             }

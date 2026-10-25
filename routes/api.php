@@ -10,6 +10,7 @@ use App\Http\Controllers\ShopController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\OrderSettlementController;
+use App\Http\Controllers\WalletTopupController;
 use App\Http\Controllers\DeliveryAddressController;
 use App\Http\Controllers\WishListController;
 use App\Http\Controllers\BannerController;
@@ -203,6 +204,10 @@ Route::prefix('carts')->group(function () {
 
 Route::prefix('orders')->group(function () {
     Route::post('/checkout', [OrderController::class, 'checkout']);
+    Route::get('/check-advance-requirement', [OrderController::class, 'checkAdvanceRequirement']);
+    Route::post('/{id}/pay-advance', [OrderController::class, 'payAdvance']);
+    Route::post('/{id}/approve-advance', [OrderController::class, 'approveAdvance']);
+    Route::post('/{id}/reject-advance', [OrderController::class, 'rejectAdvance']);
     Route::get('/list/{userId}', [OrderController::class, 'listOrdersByUser']);
     Route::get('/all/orders', [OrderController::class, 'allOrders']);
     Route::put('/update/{id}', [OrderController::class, 'updateOrder']);
@@ -216,6 +221,14 @@ Route::prefix('orders')->group(function () {
     Route::post('settle/reseller-profit/{id}', [OrderController::class, 'settleResellerProfit']);
     // Item status update (for vendor/admin workflows)
     Route::patch('/item/status/{id}', [OrderController::class, 'updateOrderItemStatus']);
+});
+
+Route::prefix('wallet')->group(function () {
+    Route::post('/topup', [WalletTopupController::class, 'requestTopup']);
+    Route::get('/topup/my-history', [WalletTopupController::class, 'myTopups']);
+    Route::get('/topup/all', [WalletTopupController::class, 'allTopups']);
+    Route::post('/topup/{id}/approve', [WalletTopupController::class, 'approveTopup']);
+    Route::post('/topup/{id}/reject', [WalletTopupController::class, 'rejectTopup']);
 });
 
 Route::prefix('order-settlements')->group(function () {
