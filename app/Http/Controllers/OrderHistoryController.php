@@ -34,6 +34,9 @@ class OrderHistoryController extends Controller
 
     private function respond(Request $request, ?int $vendorId = null, bool $ordersOnly = false): JsonResponse
     {
+        $isVendor = $vendorId !== null;
+        $groupByVendorProduct = $isVendor || $request->input('group_by') === 'vendor_product';
+
         // shop_id is the fulfillment vendor ID, as persisted by checkout, not shops.id.
         $shopExists = Rule::exists('vendors', 'id');
         if ($vendorId !== null) {
@@ -44,7 +47,8 @@ class OrderHistoryController extends Controller
             'product_id' => [Rule::requiredIf($ordersOnly && ! $request->boolean('unlinked_product')), 'nullable', 'integer', 'min:1', 'exists:products,id', 'prohibits:unlinked_product'],
             'unlinked_product' => ['sometimes', 'accepted', 'prohibits:product_id'],
             'shop_id' => ['nullable', 'integer', 'min:1', $shopExists],
-            'vendor_id' => ['prohibited'],
+            'vendor_id' => [$isVendor ? 'prohibited' : 'nullable', 'integer', 'min:1', Rule::exists('vendors', 'id')],
+            'group_by' => ['sometimes', 'string', Rule::in(['product', 'vendor_product'])],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d', Rule::when($request->filled('date_from'), ['after_or_equal:date_from'])],
             'status' => ['nullable', 'integer', 'min:1', 'exists:order_statuses,id'],
@@ -60,13 +64,17 @@ class OrderHistoryController extends Controller
         }
 
         $filters = $validator->validated();
+        if (isset($filters['vendor_id']) && ! isset($filters['shop_id'])) {
+            $filters['shop_id'] = $filters['vendor_id'];
+        }
+
         $data = [
-            'grouped_by' => $vendorId === null ? ['product_id'] : ['product_id', 'shop_id'],
+            'grouped_by' => $groupByVendorProduct ? ['product_id', 'shop_id'] : ['product_id'],
             'product_sales_basis' => 'stored_line_total_before_order_discount_and_shipping',
             'discount_allocation' => 'not_available',
         ];
         if (! $ordersOnly) {
-            $data['groups'] = $this->history->groups($filters, $vendorId)->withQueryString();
+            $data['groups'] = $this->history->groups($filters, $vendorId, $groupByVendorProduct)->withQueryString();
         }
         if ($ordersOnly || isset($filters['product_id']) || ! empty($filters['unlinked_product'])) {
             $data['orders'] = $this->history->orders($filters, $vendorId, ! $ordersOnly)->withQueryString();

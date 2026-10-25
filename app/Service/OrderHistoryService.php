@@ -41,17 +41,20 @@ class OrderHistoryService
         return $query;
     }
 
-    public function groups(array $filters, ?int $vendorId): LengthAwarePaginator
+    public function groups(array $filters, ?int $vendorId, bool $groupByVendorProduct = false): LengthAwarePaginator
     {
         $base = $this->items($filters, $vendorId);
         $query = (clone $base)->select('oi.product_id')
             ->selectRaw('MAX(oi.product_name) AS product_name, MAX(o.created_at) AS latest_order_at')
             ->selectRaw(self::TOTALS)->groupBy('oi.product_id');
-        if ($vendorId !== null) {
+        if ($vendorId !== null || $groupByVendorProduct) {
             $query->addSelect('oi.shop_id')->groupBy('oi.shop_id');
         }
-        $page = $query->orderByDesc('latest_order_at')->orderBy('oi.product_id')
-            ->paginate((int) ($filters['per_page'] ?? 20), ['*'], 'page', (int) ($filters['page'] ?? 1));
+        $query->orderByDesc('latest_order_at')->orderBy('oi.product_id');
+        if ($vendorId !== null || $groupByVendorProduct) {
+            $query->orderBy('oi.shop_id');
+        }
+        $page = $query->paginate((int) ($filters['per_page'] ?? 20), ['*'], 'page', (int) ($filters['page'] ?? 1));
         $rows = $page->getCollection();
         $productIds = $rows->pluck('product_id')->filter()->unique()->values();
         $products = Product::whereIn('id', $productIds)->get(['id', 'name', 'sku', 'slug'])->keyBy('id');
@@ -63,13 +66,18 @@ class OrderHistoryService
                     $query->orWhereNull('oi.product_id');
                 }
             })->select('oi.product_id', 'oi.shop_id')->distinct()->get()->groupBy('product_id');
-        $shops = $this->shops($pairs->flatten(1)->pluck('shop_id'));
+
+        $allShopIds = $pairs->flatten(1)->pluck('shop_id')->merge($rows->pluck('shop_id'))->filter()->unique();
+        $shops = $this->shops($allShopIds);
         $panel = $vendorId === null ? 'admin' : 'vendor';
 
-        $page->setCollection($rows->map(function ($row) use ($products, $pairs, $shops, $vendorId, $panel, $filters) {
+        $page->setCollection($rows->map(function ($row) use ($products, $pairs, $shops, $vendorId, $panel, $filters, $groupByVendorProduct) {
             $groupShops = $pairs->get($row->product_id ?? '', collect())->map(fn ($pair) => $shops->get($pair->shop_id))->filter()->values();
-            $historyFilters = array_intersect_key($filters, array_flip(['shop_id', 'date_from', 'date_to', 'status', 'payment_status']));
+            $historyFilters = array_intersect_key($filters, array_flip(['shop_id', 'vendor_id', 'date_from', 'date_to', 'status', 'payment_status']));
             $historyFilters += $row->product_id === null ? ['unlinked_product' => 1] : ['product_id' => $row->product_id];
+            if ($vendorId !== null || $groupByVendorProduct) {
+                $historyFilters['shop_id'] = (int) $row->shop_id;
+            }
             $data = [
                 'product_id' => $row->product_id === null ? null : (int) $row->product_id,
                 'product_name' => $row->product_name,
@@ -79,9 +87,11 @@ class OrderHistoryService
                 'shops' => $groupShops,
                 'history_url' => url('api/'.$panel.'/orders/history/orders').'?'.http_build_query($historyFilters),
             ];
-            if ($vendorId !== null) {
+            if ($vendorId !== null || $groupByVendorProduct) {
                 $data['shop_id'] = (int) $row->shop_id;
+                $data['vendor_id'] = (int) $row->shop_id;
                 $data['shop'] = $shops->get($row->shop_id);
+                $data['vendor'] = $shops->get($row->shop_id)['vendor'] ?? null;
             }
 
             return $data;

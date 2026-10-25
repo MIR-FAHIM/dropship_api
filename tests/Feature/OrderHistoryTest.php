@@ -314,4 +314,59 @@ class OrderHistoryTest extends TestCase
         ApiToken::where('user_id', $this->vendorUser->id)->update(['is_revoked' => true]);
         $this->getJson('/api/vendor/orders/history/orders?product_id='.$this->product->id, $headers)->assertUnauthorized();
     }
+
+    public function test_admin_group_wise_history_groups_by_both_vendor_and_product(): void
+    {
+        $headers = $this->headers($this->admin);
+
+        // 1. Group-wise order history groups across BOTH product_id and shop_id (vendor)
+        $response = $this->getJson('/api/admin/orders/history?group_by=vendor_product', $headers);
+        $response->assertOk()
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('data.grouped_by', ['product_id', 'shop_id'])
+            ->assertJsonCount(3, 'data.groups.data');
+
+        $groups = collect($response->json('data.groups.data'));
+
+        // Same product fulfilled by First Store
+        $firstStoreProduct = $groups->first(fn ($g) => $g['product_id'] === $this->product->id && $g['shop_id'] === $this->vendor->id);
+        $this->assertNotNull($firstStoreProduct);
+        $this->assertSame(5, $firstStoreProduct['totals']['total_quantity']);
+        $this->assertSame(2, $firstStoreProduct['totals']['order_count']);
+        $this->assertEquals(675, $firstStoreProduct['totals']['total_product_sales']);
+        $this->assertSame('First Store', $firstStoreProduct['shop']['name']);
+        $this->assertSame($this->vendor->id, $firstStoreProduct['vendor_id']);
+
+        // Same product fulfilled by Second Store
+        $secondStoreProduct = $groups->first(fn ($g) => $g['product_id'] === $this->product->id && $g['shop_id'] === $this->otherVendor->id);
+        $this->assertNotNull($secondStoreProduct);
+        $this->assertSame(1, $secondStoreProduct['totals']['total_quantity']);
+        $this->assertSame(1, $secondStoreProduct['totals']['order_count']);
+        $this->assertEquals(220, $secondStoreProduct['totals']['total_product_sales']);
+        $this->assertSame('Second Store', $secondStoreProduct['shop']['name']);
+
+        // Other product fulfilled by Second Store
+        $secondStoreOther = $groups->first(fn ($g) => $g['product_id'] === $this->otherProduct->id && $g['shop_id'] === $this->otherVendor->id);
+        $this->assertNotNull($secondStoreOther);
+        $this->assertSame(4, $secondStoreOther['totals']['total_quantity']);
+        $this->assertSame(1, $secondStoreOther['totals']['order_count']);
+        $this->assertEquals(4000, $secondStoreOther['totals']['total_product_sales']);
+
+        // 2. Filter by vendor_id directly works for admin
+        $filtered = $this->getJson('/api/admin/orders/history?group_by=vendor_product&vendor_id='.$this->vendor->id, $headers);
+        $filtered->assertOk()->assertJsonCount(1, 'data.groups.data')
+            ->assertJsonPath('data.groups.data.0.shop_id', $this->vendor->id)
+            ->assertJsonPath('data.groups.data.0.product_id', $this->product->id);
+
+        // 3. Expanding the First Store product group fetches only First Store orders
+        $ordersResponse = $this->getJson('/api/admin/orders/history/orders?product_id='.$this->product->id.'&shop_id='.$this->vendor->id, $headers);
+        $ordersResponse->assertOk()->assertJsonPath('data.orders.total', 2);
+        foreach ($ordersResponse->json('data.orders.data') as $order) {
+            foreach ($order['items'] as $item) {
+                $this->assertSame($this->vendor->id, $item['shop_id']);
+                $this->assertSame($this->product->id, $item['product_id']);
+            }
+        }
+    }
 }
+
