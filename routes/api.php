@@ -73,6 +73,7 @@ Route::post('/auth/reset-password-mobile', [AuthController::class, 'resetPasswor
 Route::post('/auth/logout', [AuthController::class, 'logout']);
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
+Route::get('/auth/check-admin', [AuthController::class, 'checkAdmin'])->middleware('admin');
 
 // Support Tickets
 Route::prefix('support-tickets')->group(function () {

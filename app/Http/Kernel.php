@@ -5,6 +5,7 @@ namespace App\Http;
 use Illuminate\Foundation\Http\Kernel as HttpKernel;
 use Illuminate\Auth\Middleware\Authenticate;
 use App\Http\Middleware\ApiTokenAuth;
+use App\Http\Middleware\AdminAccess;
 
 
 class Kernel extends HttpKernel
@@ -52,5 +53,6 @@ class Kernel extends HttpKernel
    //     'auth' => \App\Http\Middleware\Authenticate::class,
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'api_token' => ApiTokenAuth::class,
+        'admin' => AdminAccess::class,
     ];
 }

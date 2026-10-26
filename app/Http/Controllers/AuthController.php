@@ -608,4 +608,43 @@ class AuthController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * GET /auth/check-admin
+     * Verifies that the authenticated user has admin panel access.
+     */
+    public function checkAdmin(Request $request)
+    {
+        try {
+            $user = $request->attributes->get('api_user') ?? $request->user();
+
+            if (!$user) {
+                return $this->failed('Unauthenticated', null, 401);
+            }
+
+            if (isset($user->banned) && (int) $user->banned === 1) {
+                return $this->failed('Your account is deactivated or banned', null, 403);
+            }
+
+            $roles = array_filter([
+                strtolower((string) ($user->user_type ?? '')),
+                strtolower((string) ($user->role ?? '')),
+            ]);
+
+            $allowedAdminRoles = ['admin', 'superadmin', 'product manager'];
+
+            if (!array_intersect($roles, $allowedAdminRoles)) {
+                return $this->failed('Unauthorized: Admin access required', null, 403);
+            }
+
+            return $this->success('Admin access verified', [
+                'user' => $user,
+                'is_admin' => true,
+                'role' => $user->role,
+                'user_type' => $user->user_type,
+            ], 200);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
 }
