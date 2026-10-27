@@ -402,6 +402,7 @@ class OrderController extends Controller
                 'lat' => ['nullable', 'numeric'],
                 'lon' => ['nullable', 'numeric'],
 
+                'delivery_charge' => ['required', 'numeric', 'min:0'],
                 'note' => ['nullable', 'string'],
             ]);
 
@@ -548,8 +549,13 @@ class OrderController extends Controller
             $eligibility = $this->orderAccountingService->checkAdvanceEligibility($order->user_id);
             $payFromWallet = filter_var($request->input('pay_from_wallet', false), FILTER_VALIDATE_BOOLEAN);
             $advanceAmountInput = (float) $request->input('advance_amount', 0);
-            $defaultAmount = $eligibility['default_advance_amount'] ?? 130.00;
-            $advanceAmount = $advanceAmountInput > 0 ? $advanceAmountInput : ($eligibility['requires_advance'] ? $defaultAmount : 0.00);
+            
+            // Advance delivery charge reflects actual calculated delivery charge ($shippingFee)
+            if ($eligibility['requires_advance']) {
+                $advanceAmount = $advanceAmountInput > 0 ? $advanceAmountInput : (float) $shippingFee;
+            } else {
+                $advanceAmount = $advanceAmountInput > 0 ? $advanceAmountInput : 0.00;
+            }
 
             if ($eligibility['requires_advance'] || $advanceAmountInput > 0) {
                 if ($payFromWallet) {

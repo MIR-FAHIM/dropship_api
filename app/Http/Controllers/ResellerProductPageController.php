@@ -6,6 +6,7 @@ use App\Models\Product;
 use App\Models\ProductClicks;
 use App\Models\ResellerProductPage;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -57,6 +58,25 @@ class ResellerProductPageController extends Controller
                 ->exists()
         ) {
             $candidate = $slug . '-' . $counter;
+            $counter++;
+        }
+
+        return $candidate;
+    }
+
+    private function uniqueSlugWithId(string $base, int $id): string
+    {
+        $slug = Str::slug($base) ?: 'product-page';
+        $target = $slug . '-' . $id;
+        $candidate = $target;
+        $counter = 1;
+
+        while (
+            ResellerProductPage::where('slug', $candidate)
+                ->where('id', '!=', $id)
+                ->exists()
+        ) {
+            $candidate = $target . '-' . $counter;
             $counter++;
         }
 
@@ -314,7 +334,6 @@ class ResellerProductPageController extends Controller
                     Rule::unique('reseller_product_pages', 'product_id')
                         ->where(fn ($query) => $query->where('reseller_id', $request->reseller_id)),
                 ],
-                'slug' => ['nullable', 'string', 'max:255', 'unique:reseller_product_pages,slug'],
                 'selling_price' => ['required', 'numeric', 'min:0'],
                 'discount_price' => ['nullable', 'numeric', 'min:0'],
                 'custom_title' => ['nullable', 'string', 'max:255'],
@@ -322,6 +341,9 @@ class ResellerProductPageController extends Controller
                 'delivery_charge' => ['nullable', 'numeric', 'min:0'],
                 'published_status' => ['nullable', 'string', 'max:50'],
             ] + $this->designValidationRules());
+
+            // Do not take slug from frontend; always ignore if passed
+            unset($validated['slug']);
 
             $designError = $this->validateDesignSafety($validated['design_settings'] ?? null);
 
@@ -342,15 +364,27 @@ class ResellerProductPageController extends Controller
                 return $this->failed('Product page price can not be less than admin price', $priceError, 422);
             }
 
-            if (empty($validated['slug'])) {
-                $validated['slug'] = $this->uniqueSlug($validated['custom_title'] ?? $product?->name ?? 'product-page');
-            }
-
             $validated['template_id'] = $validated['template_id'] ?? 'default';
             $validated['design_version'] = 1;
             $validated['published_status'] = $validated['published_status'] ?? 'published';
 
-            $page = ResellerProductPage::create($validated);
+            $baseTitle = $validated['custom_title'] ?? $product?->name ?? 'product-page';
+            $baseSlug = Str::slug($baseTitle) ?: ($product?->slug ?: 'product-page');
+
+            $page = DB::transaction(function () use ($validated, $baseSlug) {
+                // Temporary unique slug to satisfy DB NOT NULL & UNIQUE constraints on insert
+                $validated['slug'] = $baseSlug . '-tmp-' . Str::lower(Str::random(12));
+
+                $page = ResellerProductPage::create($validated);
+
+                // Build unique slug with the record's primary id
+                $finalSlug = $this->uniqueSlugWithId($baseSlug, $page->id);
+
+                $page->slug = $finalSlug;
+                $page->save();
+
+                return $page;
+            });
 
             return $this->success('Reseller product page created successfully', $page->load($this->pageRelations()), 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -390,6 +424,11 @@ class ResellerProductPageController extends Controller
                         ->where('product_id', $product->id)
                         ->first();
                 }
+            }
+
+            // Fallback: If not found and $slug is numeric, find by page id
+            if (!$page && is_numeric($slug)) {
+                $page = ResellerProductPage::with($this->pageRelations())->find((int) $slug);
             }
 
             if (!$page) {
@@ -488,7 +527,7 @@ class ResellerProductPageController extends Controller
 
             if (array_key_exists('slug', $validated) && empty($validated['slug'])) {
                 $product = $product ?? Product::find($productId);
-                $validated['slug'] = $this->uniqueSlug($validated['custom_title'] ?? $product?->name ?? 'product-page', $page->id);
+                $validated['slug'] = $this->uniqueSlugWithId($validated['custom_title'] ?? $product?->name ?? 'product-page', $page->id);
             }
 
             if (array_key_exists('template_id', $validated) && is_null($validated['template_id'])) {

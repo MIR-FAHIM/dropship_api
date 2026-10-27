@@ -219,24 +219,49 @@ class DeliveryController extends Controller
     public function calculateDeliveryCharge(Request $request)
     {
         $request->validate([
-            'vendor_district_id'   => ['required', 'integer', 'exists:districts,id'],
-            'customer_district_id' => ['required', 'integer', 'exists:districts,id'],
+            'vendor_district_id'   => ['nullable', 'integer', 'exists:districts,id'],
+            'customer_district_id' => ['nullable', 'integer', 'exists:districts,id'],
+            'district_id'          => ['nullable', 'integer', 'exists:districts,id'],
+            'division_id'          => ['nullable', 'integer', 'exists:divisions,id'],
         ]);
 
         try {
-            $vendorDistrict   = District::find($request->vendor_district_id);
-            $customerDistrict = District::find($request->customer_district_id);
+            $customerDistrictId = $request->input('customer_district_id') ?? $request->input('district_id');
 
-            $sameDistrict = (int) $request->vendor_district_id === (int) $request->customer_district_id;
+            if (!$customerDistrictId) {
+                return $this->failed('Customer district is required', null, 422);
+            }
+
+            $customerDistrict = District::with('division')->find($customerDistrictId);
+            if (!$customerDistrict) {
+                return $this->failed('Customer district not found', null, 404);
+            }
+
+            $vendorDistrictId = $request->input('vendor_district_id');
+            $vendorDistrict = null;
+            if ($vendorDistrictId) {
+                $vendorDistrict = District::with('division')->find($vendorDistrictId);
+            }
+
+            if (!$vendorDistrict) {
+                // Default dispatch hub: Dhaka district if available, otherwise first district
+                $vendorDistrict = District::where('name', 'like', '%Dhaka%')->first() ?? District::first();
+            }
+
+            $sameDistrict = $vendorDistrict && ((int) $vendorDistrict->id === (int) $customerDistrict->id);
+            $sameDivision = $vendorDistrict && $vendorDistrict->division_id && ((int) $vendorDistrict->division_id === (int) $customerDistrict->division_id);
 
             $zone   = $sameDistrict ? 'Inside District' : 'Outside District';
             $charge = $sameDistrict ? 70 : 130;
 
             return $this->success('Delivery charge calculated', [
-                'vendor_district_id'     => $vendorDistrict->id,
-                'vendor_district_name'   => $vendorDistrict->name,
+                'vendor_district_id'     => $vendorDistrict?->id,
+                'vendor_district_name'   => $vendorDistrict?->name,
                 'customer_district_id'   => $customerDistrict->id,
                 'customer_district_name' => $customerDistrict->name,
+                'customer_division_id'   => $customerDistrict->division_id,
+                'same_district'          => $sameDistrict,
+                'same_division'          => $sameDivision,
                 'zone'                   => $zone,
                 'charge'                 => $charge,
             ]);
