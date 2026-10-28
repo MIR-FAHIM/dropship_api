@@ -996,7 +996,7 @@ class OrderController extends Controller
         try {
             $perPage = (int) $request->get('per_page', 20);
 
-            $query = Order::with(['status', 'user', 'vendor', 'items.shop']);
+            $query = Order::with(['status', 'user', 'vendor', 'items.shop', 'deliveryInformation']);
 
             // Vendor filter: support vendor_id or vendor
             $vendorId = $request->get('vendor_id') ?? $request->get('vendor');

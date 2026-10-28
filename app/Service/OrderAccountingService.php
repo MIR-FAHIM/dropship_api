@@ -981,20 +981,21 @@ class OrderAccountingService
             : ($deliveryInfo?->collectable_amount ? round((float) $deliveryInfo->collectable_amount, 2) : $orderTotal);
 
         // Courier Delivery Fee and COD Fee resolution
-        if ($order->courier_cost_confirmed && $order->actual_courier_fee !== null) {
-            $courierDeliveryFee = round((float) $order->actual_courier_fee, 2);
-        } elseif ($deliveryInfo?->delivery_fee !== null && (float) $deliveryInfo->delivery_fee > 0) {
+        // Highest priority: CarryBee Delivery Information from Consignment ID
+        if ($deliveryInfo?->delivery_fee !== null && (float) $deliveryInfo->delivery_fee > 0) {
             $courierDeliveryFee = round((float) $deliveryInfo->delivery_fee, 2);
+        } elseif ($order->courier_cost_confirmed && $order->actual_courier_fee !== null) {
+            $courierDeliveryFee = round((float) $order->actual_courier_fee, 2);
         } elseif ($order->actual_courier_fee !== null) {
             $courierDeliveryFee = round((float) $order->actual_courier_fee, 2);
         } else {
             $courierDeliveryFee = $customerShippingCharge;
         }
 
-        if ($order->courier_cost_confirmed && $order->actual_cod_fee !== null) {
-            $courierCodFee = round((float) $order->actual_cod_fee, 2);
-        } elseif ($deliveryInfo?->total_fee !== null && (float) $deliveryInfo->total_fee > $courierDeliveryFee) {
+        if ($deliveryInfo?->total_fee !== null && (float) $deliveryInfo->total_fee > $courierDeliveryFee) {
             $courierCodFee = round((float) $deliveryInfo->total_fee - $courierDeliveryFee, 2);
+        } elseif ($order->courier_cost_confirmed && $order->actual_cod_fee !== null) {
+            $courierCodFee = round((float) $order->actual_cod_fee, 2);
         } elseif ($order->actual_cod_fee !== null) {
             $courierCodFee = round((float) $order->actual_cod_fee, 2);
         } else {
