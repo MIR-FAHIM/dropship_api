@@ -21,12 +21,15 @@ class DeliveryAssignedInfo extends Model
         'delivery_fee',
         'total_fee',
         'transfer_status_id',
+        'carrybee_invoice_id',
+        'carrybee_paid_at',
     ];
 
     protected $casts = [
         'collectable_amount' => 'decimal:2',
         'delivery_fee'       => 'decimal:2',
         'total_fee'          => 'decimal:2',
+        'carrybee_paid_at'   => 'datetime',
     ];
 
     public function order()

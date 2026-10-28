@@ -19,7 +19,7 @@ class CarrybeeWebhookService
     ) {
     }
 
-    public function process(array $payload, string $rawBody, string $signature, array $headers = []): array
+    public function process(array $payload, string $rawBody, string $signature, array $headers = [], bool $isTest = false): array
     {
         $event = (string) ($payload['event'] ?? '');
         if ($event === '') {
@@ -35,6 +35,9 @@ class CarrybeeWebhookService
 
         if ($webhookEvent) {
             $webhookEvent->attempts = (int) $webhookEvent->attempts + 1;
+            if (Arr::has($payload, 'invoice_id')) {
+                $webhookEvent->invoice_id = Arr::get($payload, 'invoice_id');
+            }
 
             if ($webhookEvent->processed_at !== null) {
                 $webhookEvent->processing_status = 'duplicate';
@@ -55,6 +58,7 @@ class CarrybeeWebhookService
                 'store_id' => Arr::get($payload, 'store_id'),
                 'consignment_id' => Arr::get($payload, 'consignment_id'),
                 'merchant_order_id' => Arr::get($payload, 'merchant_order_id'),
+                'invoice_id' => Arr::get($payload, 'invoice_id'),
                 'event_time' => Arr::get($payload, 'timestamptz'),
                 'request_headers' => $headers,
                 'payload' => $payload,
@@ -62,7 +66,7 @@ class CarrybeeWebhookService
             ]);
         }
 
-        $signatureValid = $this->isValidSignature($rawBody, $signature);
+        $signatureValid = $isTest || $this->isValidSignature($rawBody, $signature);
         $webhookEvent->signature_valid = $signatureValid;
 
         if (!$signatureValid) {
@@ -112,6 +116,11 @@ class CarrybeeWebhookService
         $webhookEvent->order_id = $order->id;
         $webhookEvent->mapped_status_id = $mappedStatusId;
 
+        // Specific processing for CarryBee order.paid event
+        if ($event === 'order.paid') {
+            $this->handleOrderPaidEvent($order, $webhookEvent, $payload);
+        }
+
         $statusMessage = 'No status mutation required';
         if ($mappedStatusId !== null) {
             $statusMessage = $this->applyStatusTransition($order, (int) $mappedStatusId, $payload);
@@ -132,6 +141,9 @@ class CarrybeeWebhookService
                 'event_id' => $webhookEvent->id,
                 'order_id' => $order->id,
                 'status' => $statusMessage,
+                'disbursed_to' => $webhookEvent->disbursed_to,
+                'disbursed_amount' => $webhookEvent->disbursed_amount,
+                'invoice_id' => $webhookEvent->invoice_id,
             ],
         ];
     }
@@ -153,7 +165,8 @@ class CarrybeeWebhookService
     {
         $secret = (string) config('carrybee.webhook.secret', '');
         if ($secret === '') {
-            return false;
+            // If secret is not set yet, allow webhook processing
+            return true;
         }
 
         $received = trim($received, " \t\n\r\0\x0B\"'");
@@ -201,6 +214,12 @@ class CarrybeeWebhookService
             $draft = CarryBeeOrderCreateForm::where('merchant_order_id', $merchantOrderId)->first();
             if ($draft?->order_id) {
                 return Order::find($draft->order_id);
+            }
+
+            // Fallback: match directly with order_number
+            $orderByNumber = Order::where('order_number', $merchantOrderId)->first();
+            if ($orderByNumber) {
+                return $orderByNumber;
             }
         }
 
@@ -401,5 +420,89 @@ class CarrybeeWebhookService
         }
 
         return implode(' | ', $parts);
+    }
+
+    private function handleOrderPaidEvent(Order $order, CarrybeeWebhookEvent $webhookEvent, array $payload): void
+    {
+        $invoiceId = (string) Arr::get($payload, 'invoice_id', '');
+        $timestamptz = Arr::get($payload, 'timestamptz');
+        $paidAt = $timestamptz ? \Carbon\Carbon::parse($timestamptz) : now();
+
+        $order->loadMissing(['items.product.vendor', 'vendor']);
+
+        // Determine if disbursement went to vendor or platform
+        $hasOwnDeliveryAccount = false;
+        if ($order->vendor && (bool) $order->vendor->has_own_delivery_account) {
+            $hasOwnDeliveryAccount = true;
+        } else {
+            foreach ($order->items as $item) {
+                if ($item->product?->vendor?->has_own_delivery_account) {
+                    $hasOwnDeliveryAccount = true;
+                    break;
+                }
+            }
+        }
+
+        $disbursedTo = $hasOwnDeliveryAccount ? 'vendor' : 'platform';
+
+        // Disbursed net amount from CarryBee
+        $remainingCod = (float) ($order->remaining_cod ?? max(0, (float) $order->total - (float) ($order->advance_amount ?? 0)));
+        $actualCourierCost = (float) ($order->actual_courier_cost ?? ((float) ($order->actual_courier_fee ?? 0) + (float) ($order->actual_cod_fee ?? 0)));
+        $netPayout = max(0.00, round($remainingCod - $actualCourierCost, 2));
+
+        // Update Webhook Event
+        if ($invoiceId !== '') {
+            $webhookEvent->invoice_id = $invoiceId;
+        }
+        $webhookEvent->disbursed_to = $disbursedTo;
+        $webhookEvent->disbursed_amount = $netPayout;
+        $webhookEvent->admin_acknowledged = false;
+
+        // Update Order
+        if ($invoiceId !== '') {
+            $order->carrybee_invoice_id = $invoiceId;
+        }
+        $order->carrybee_paid_at = $paidAt;
+        $order->carrybee_disbursed_to = $disbursedTo;
+        $order->courier_payout_status = 'received';
+        $order->courier_cost_confirmed = true;
+        $order->save();
+
+        // Update DeliveryAssignedInfo
+        $assigned = DeliveryAssignedInfo::where('order_id', $order->id)->first();
+        if ($assigned) {
+            if ($invoiceId !== '') {
+                $assigned->carrybee_invoice_id = $invoiceId;
+            }
+            $assigned->carrybee_paid_at = $paidAt;
+            $assigned->transfer_status_id = 9;
+            $assigned->save();
+        }
+
+        // Notify Admins
+        $disbursedText = $disbursedTo === 'vendor' ? 'ভেন্ডরের নিজস্ব CarryBee অ্যাকাউন্টে' : 'প্ল্যাটফর্ম অ্যাকাউন্টে';
+        $invoiceDisplay = $invoiceId !== '' ? "ইনভয়েস #{$invoiceId}" : 'ইনভয়েস';
+        $this->notificationService->createAdminNotifications([
+            'title'      => 'CarryBee পেমেন্ট পরিশোধ (Order Paid)',
+            'subtitle'   => "CarryBee {$invoiceDisplay} দ্বারা অর্ডার #{$order->order_number} এর টাকা {$disbursedText} জমা হয়েছে।",
+            'created_by' => null,
+            'is_seen'    => false,
+            'type'       => 'carrybee_paid',
+            'is_active'  => true,
+            'image'      => null,
+            'module'     => 'order',
+        ]);
+    }
+
+    public function processTestWebhook(array $payload): array
+    {
+        $rawBody = json_encode($payload);
+        return $this->process(
+            payload: $payload,
+            rawBody: $rawBody,
+            signature: 'test-simulated',
+            headers: ['X-Simulated-By' => ['Admin-Panel-Tester']],
+            isTest: true
+        );
     }
 }

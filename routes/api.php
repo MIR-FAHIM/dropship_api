@@ -504,7 +504,12 @@ Route::prefix('delivery-companies')->group(function () {
     Route::post('/carrybee/{vendorId}/orders/{consignmentId}/cancel', [DeliveryCompanyController::class, 'carrybeeCancelOrder']);
     Route::get('/carrybee/{vendorId}/orders/{consignmentId}/details', [DeliveryCompanyController::class, 'carrybeeOrderDetails']);
     Route::post('/carrybee/{vendorId}/address-details', [DeliveryCompanyController::class, 'carrybeeAddressDetails']);
+    // Carrybee Webhook & Payment Notification Endpoints
     Route::post('/carrybee/webhook', [CarrybeeWebhookController::class, 'handle'])->withoutMiddleware('token');
+    Route::get('/carrybee/unacknowledged-paid-orders', [CarrybeeWebhookController::class, 'getUnacknowledgedPaidOrders']);
+    Route::post('/carrybee/acknowledge-paid-order/{id}', [CarrybeeWebhookController::class, 'acknowledgePaidOrder']);
+    Route::post('/carrybee/test-webhook', [CarrybeeWebhookController::class, 'testWebhook']);
+    Route::get('/carrybee/webhook-events', [CarrybeeWebhookController::class, 'getWebhookEvents']);
     // Order Drafts
     Route::post('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftSave']);
     Route::get('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftList']);
@@ -564,5 +569,9 @@ Route::prefix('webhooks/whatsapp')->group(function () {
     Route::get('/', [WhatsAppWebhookController::class, 'verify'])->withoutMiddleware('token');
     Route::post('/', [WhatsAppWebhookController::class, 'handle'])->withoutMiddleware('token');
 });
+
+// Alias for direct CarryBee Webhook URL
+Route::post('/carrybee/webhook', [CarrybeeWebhookController::class, 'handle'])->withoutMiddleware('token');
+
 
 

@@ -51,6 +51,9 @@ class Order extends Model
         'courier_cost_confirmed',
         'courier_net_payout',
         'courier_payout_status',
+        'carrybee_invoice_id',
+        'carrybee_paid_at',
+        'carrybee_disbursed_to',
 
         'note',
     ];
@@ -69,6 +72,7 @@ class Order extends Model
         'actual_courier_cost' => 'float',
         'courier_cost_confirmed' => 'boolean',
         'courier_net_payout' => 'float',
+        'carrybee_paid_at' => 'datetime',
         'lat' => 'float',
         'lon' => 'float',
     ];
