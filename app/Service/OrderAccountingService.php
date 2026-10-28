@@ -1254,14 +1254,21 @@ class OrderAccountingService
 
                 // Only if created directly as settled/paid, mark order settlement as settled
                 if ($isDirectlyPaid) {
-                    OrderSettlement::where('order_id', $order->id)
-                        ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
-                        ->update([
+                    OrderSettlement::updateOrCreate(
+                        [
+                            'order_id' => $order->id,
+                            'settlement_type' => OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE,
+                        ],
+                        [
+                            'vendor_id' => $vendorId,
+                            'user_type' => 'vendor',
                             'status' => OrderSettlement::STATUS_SETTLED,
+                            'settleable_amount' => $b['supplier']['vendor_price'],
                             'settled_trx_id' => $trxId ?: $invoiceNumber,
                             'settled_at' => now(),
                             'admin_note' => "Settled via Vendor Invoice {$invoiceNumber}. Trx ID: {$trxId}",
-                        ]);
+                        ]
+                    );
                 }
             }
 
@@ -1355,14 +1362,22 @@ class OrderAccountingService
 
             // Mark order settlements as settled
             if (!empty($invoice->order_ids)) {
-                OrderSettlement::whereIn('order_id', $invoice->order_ids)
-                    ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
-                    ->update([
-                        'status' => OrderSettlement::STATUS_SETTLED,
-                        'settled_trx_id' => $trxId,
-                        'settled_at' => now(),
-                        'admin_note' => "Settled via Vendor Invoice {$invoice->invoice_number}. Trx: {$trxId}",
-                    ]);
+                foreach ($invoice->order_ids as $orderId) {
+                    OrderSettlement::updateOrCreate(
+                        [
+                            'order_id' => $orderId,
+                            'settlement_type' => OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE,
+                        ],
+                        [
+                            'vendor_id' => $invoice->vendor_id,
+                            'user_type' => 'vendor',
+                            'status' => OrderSettlement::STATUS_SETTLED,
+                            'settled_trx_id' => $trxId,
+                            'settled_at' => now(),
+                            'admin_note' => "Settled via Vendor Invoice {$invoice->invoice_number}. Trx: {$trxId}",
+                        ]
+                    );
+                }
             }
 
             // Record transaction credit
@@ -1402,14 +1417,22 @@ class OrderAccountingService
             ]);
 
             if (!empty($invoice->order_ids)) {
-                OrderSettlement::whereIn('order_id', $invoice->order_ids)
-                    ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
-                    ->update([
-                        'status' => OrderSettlement::STATUS_SETTLED,
-                        'settled_trx_id' => $trxId,
-                        'settled_at' => now(),
-                        'admin_note' => "Approved via Vendor Invoice {$invoice->invoice_number}. Trx: {$trxId}",
-                    ]);
+                foreach ($invoice->order_ids as $orderId) {
+                    OrderSettlement::updateOrCreate(
+                        [
+                            'order_id' => $orderId,
+                            'settlement_type' => OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE,
+                        ],
+                        [
+                            'vendor_id' => $invoice->vendor_id,
+                            'user_type' => 'vendor',
+                            'status' => OrderSettlement::STATUS_SETTLED,
+                            'settled_trx_id' => $trxId,
+                            'settled_at' => now(),
+                            'admin_note' => "Approved via Vendor Invoice {$invoice->invoice_number}. Trx: {$trxId}",
+                        ]
+                    );
+                }
             }
 
             return $invoice;
