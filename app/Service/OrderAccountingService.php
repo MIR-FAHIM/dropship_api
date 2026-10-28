@@ -1079,7 +1079,10 @@ class OrderAccountingService
                 'delivery_fee' => $courierDeliveryFee,
                 'cod_fee' => $courierCodFee,
                 'total_courier_fee' => $totalCourierCost,
+                'fee_settlement_status' => 'settled_at_source',
+                'fee_settlement_note' => 'Delivery fee and COD fee automatically deducted and settled at source by delivery company prior to disbursement',
                 'net_received_by_supplier' => $courierNetToSupplier,
+                'net_disbursed' => $courierNetToSupplier,
             ],
             'supplier' => [
                 'vendor_price' => $supplierVendorPrice,
@@ -1255,6 +1258,10 @@ class OrderAccountingService
                     ]);
             }
 
+            $courierSettledTotal = round($totalDeliveryFee + $totalCodFee, 2);
+            $settlementAuditNote = "CarryBee delivery fee (৳{$totalDeliveryFee}) & COD fee (৳{$totalCodFee}) totaling ৳{$courierSettledTotal} were automatically deducted and settled at source by the delivery company. Net disbursed: ৳{$totalCourierNet}.";
+            $finalNote = $note ? ($note . " | " . $settlementAuditNote) : $settlementAuditNote;
+
             // Create SettlementInvoice record
             $invoice = SettlementInvoice::create([
                 'invoice_number' => $invoiceNumber,
@@ -1275,7 +1282,7 @@ class OrderAccountingService
                 'status' => 'settled',
                 'order_ids' => $orderIds,
                 'orders_breakdown' => $breakdownList,
-                'note' => $note,
+                'note' => $finalNote,
                 'settled_at' => now(),
             ]);
 
