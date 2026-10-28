@@ -4,10 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\Order;
 use App\Models\OrderSettlement;
+use App\Models\SettlementInvoice;
 use App\Models\ResellerTransaction;
 use App\Service\CompanyTransactionService;
 use App\Service\MuthobartaSmsService;
 use App\Service\NotificationService;
+use App\Service\OrderAccountingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -17,16 +19,19 @@ class OrderSettlementController extends Controller
     protected $smsService;
     protected $companyTransactions;
     protected $notificationService;
+    protected $accountingService;
 
     public function __construct(
         MuthobartaSmsService $smsService,
         CompanyTransactionService $companyTransactions,
-        NotificationService $notificationService
+        NotificationService $notificationService,
+        OrderAccountingService $accountingService
     )
     {
         $this->smsService = $smsService;
         $this->companyTransactions = $companyTransactions;
         $this->notificationService = $notificationService;
+        $this->accountingService = $accountingService;
     }
 
     private function success($message, $data = null, int $code = 200)
@@ -513,6 +518,161 @@ class OrderSettlementController extends Controller
             ]);
 
             return $this->success('Settled transaction id added successfully', $settlement->load(['order', 'payableUser', 'vendor', 'createdBy']));
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /order-settlements/orders/{orderId}/breakdown
+     */
+    public function getOrderBreakdown($orderId)
+    {
+        try {
+            $order = Order::find($orderId);
+            if (!$order) {
+                return $this->failed('Order not found', null, 404);
+            }
+
+            $breakdown = $this->accountingService->calculateOrderStakeBreakdown($order);
+            return $this->success('Order financial breakdown fetched successfully', $breakdown);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /order-settlements/orders/{orderId}/update-breakdown
+     */
+    public function updateOrderBreakdown(Request $request, $orderId)
+    {
+        try {
+            $order = Order::find($orderId);
+            if (!$order) {
+                return $this->failed('Order not found', null, 404);
+            }
+
+            $validated = $request->validate([
+                'courier_delivery_fee' => 'nullable|numeric|min:0',
+                'courier_cod_fee' => 'nullable|numeric|min:0',
+                'remaining_cod' => 'nullable|numeric|min:0',
+                'items' => 'nullable|array',
+                'items.*.id' => 'required|integer',
+                'items.*.unit_price' => 'nullable|numeric|min:0',
+                'items.*.admin_price' => 'nullable|numeric|min:0',
+                'items.*.reseller_price' => 'nullable|numeric|min:0',
+            ]);
+
+            $adminUserId = $request->user()?->id ?: (int) $request->input('created_by');
+            $updatedBreakdown = $this->accountingService->saveBreakdownAdjustments($order, $validated, $adminUserId);
+
+            return $this->success('Order breakdown adjusted successfully', $updatedBreakdown);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /order-settlements/vendor-invoice
+     */
+    public function createVendorInvoice(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'vendor_id' => 'required|integer|exists:vendors,id',
+                'order_ids' => 'required|array|min:1',
+                'order_ids.*' => 'integer|exists:orders,id',
+                'invoice_number' => 'nullable|string|max:50',
+                'payment_method' => 'nullable|string|max:50',
+                'trx_id' => 'nullable|string|max:100',
+                'note' => 'nullable|string',
+            ]);
+
+            $adminUserId = $request->user()?->id ?: (int) $request->input('created_by');
+            $invoice = $this->accountingService->createVendorSettlementInvoice($validated, $adminUserId);
+
+            return $this->success('Vendor settlement invoice created successfully', $invoice, 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /order-settlements/vendor-invoices
+     */
+    public function listVendorInvoices(Request $request)
+    {
+        try {
+            $query = SettlementInvoice::with(['vendor', 'creator'])->orderByDesc('id');
+
+            if ($request->filled('vendor_id')) {
+                $query->where('vendor_id', $request->vendor_id);
+            }
+            if ($request->filled('status')) {
+                $query->where('status', $request->status);
+            }
+            if ($request->filled('search')) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->where('invoice_number', 'like', "%{$search}%")
+                      ->orWhere('trx_id', 'like', "%{$search}%");
+                });
+            }
+
+            $perPage = (int) $request->get('per_page', 20);
+            $invoices = $query->paginate($perPage);
+
+            return $this->success('Vendor settlement invoices fetched successfully', $invoices);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /order-settlements/vendor-invoices/{id}
+     */
+    public function vendorInvoiceDetails($id)
+    {
+        try {
+            $invoice = SettlementInvoice::with(['vendor', 'creator'])->find($id);
+            if (!$invoice) {
+                return $this->failed('Settlement invoice not found', null, 404);
+            }
+
+            return $this->success('Settlement invoice details fetched successfully', $invoice);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /order-settlements/orders/{orderId}/disburse-reseller-profit
+     */
+    public function disburseDropshipperProfit(Request $request, $orderId)
+    {
+        try {
+            $order = Order::find($orderId);
+            if (!$order) {
+                return $this->failed('Order not found', null, 404);
+            }
+
+            $validated = $request->validate([
+                'amount' => 'nullable|numeric|min:0.01',
+                'payment_method' => 'nullable|string|in:wallet,bank,bkash,nagad,cash',
+                'trx_id' => 'nullable|string|max:100',
+                'note' => 'nullable|string',
+            ]);
+
+            $adminUserId = $request->user()?->id ?: (int) $request->input('created_by');
+            $result = $this->accountingService->disburseDropshipperProfitDirectly($order, $validated, $adminUserId);
+
+            return $this->success($result['message'], $result);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {

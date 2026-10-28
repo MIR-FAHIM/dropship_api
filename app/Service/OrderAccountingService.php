@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Models\WithdrawRequest;
 use App\Models\WalletTopup;
+use App\Models\SettlementInvoice;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -949,6 +950,470 @@ class OrderAccountingService
                 'admin_note' => $reason,
             ]);
             return $topup;
+        });
+    }
+
+    /**
+     * Calculate comprehensive financial stake breakdown for an order.
+     */
+    public function calculateOrderStakeBreakdown(Order $order): array
+    {
+        $order->loadMissing([
+            'items.shop',
+            'items.product.vendor',
+            'deliveryInformation',
+            'user'
+        ]);
+
+        $orderTotal = round((float) ($order->total ?? 0), 2);
+        $customerShippingCharge = round((float) ($order->shipping_fee ?? 0), 2);
+        $advanceAmount = round((float) ($order->advance_amount ?? 0), 2);
+        $advanceStatus = $order->advance_status ?: 'none';
+        $advanceRecipient = $order->advance_recipient ?: 'platform';
+
+        // Delivery info resolution (CarryBee)
+        $deliveryInfo = $order->deliveryInformation;
+        $consignmentId = $order->consignment_id ?: $deliveryInfo?->consignment_id;
+
+        // Courier collectable
+        $courierCollectable = $order->remaining_cod !== null && (float) $order->remaining_cod > 0
+            ? round((float) $order->remaining_cod, 2)
+            : ($deliveryInfo?->collectable_amount ? round((float) $deliveryInfo->collectable_amount, 2) : $orderTotal);
+
+        // Courier Delivery Fee and COD Fee resolution
+        if ($order->courier_cost_confirmed && $order->actual_courier_fee !== null) {
+            $courierDeliveryFee = round((float) $order->actual_courier_fee, 2);
+        } elseif ($deliveryInfo?->delivery_fee !== null && (float) $deliveryInfo->delivery_fee > 0) {
+            $courierDeliveryFee = round((float) $deliveryInfo->delivery_fee, 2);
+        } elseif ($order->actual_courier_fee !== null) {
+            $courierDeliveryFee = round((float) $order->actual_courier_fee, 2);
+        } else {
+            $courierDeliveryFee = $customerShippingCharge;
+        }
+
+        if ($order->courier_cost_confirmed && $order->actual_cod_fee !== null) {
+            $courierCodFee = round((float) $order->actual_cod_fee, 2);
+        } elseif ($deliveryInfo?->total_fee !== null && (float) $deliveryInfo->total_fee > $courierDeliveryFee) {
+            $courierCodFee = round((float) $deliveryInfo->total_fee - $courierDeliveryFee, 2);
+        } elseif ($order->actual_cod_fee !== null) {
+            $courierCodFee = round((float) $order->actual_cod_fee, 2);
+        } else {
+            // Default 1% COD fee on collectable
+            $courierCodFee = round($courierCollectable * 0.01, 2);
+        }
+
+        $totalCourierCost = round($courierDeliveryFee + $courierCodFee, 2);
+        $courierNetToSupplier = round($courierCollectable - $totalCourierCost, 2);
+
+        // Identify primary shop / vendor
+        $primaryItem = $order->items->first();
+        $vendor = $primaryItem?->shop ?: $primaryItem?->product?->vendor;
+        $hasOwnDeliveryAccount = (bool) ($vendor?->has_own_delivery_account || $order->courier_account_owner === 'vendor');
+
+        // Entitlements
+        $supplierVendorPrice = 0.00;
+        $adminBasePrice = 0.00;
+        $resellerSellingPrice = 0.00;
+
+        foreach ($order->items as $item) {
+            $qty = (int) ($item->qty ?? $item->quantity ?? 1);
+            $vPrice = round((float) ($item->unit_price ?? $item->product?->unit_price ?? 0), 2);
+            $aPrice = round((float) ($item->admin_price ?? $item->product?->admin_price ?? $vPrice), 2);
+            $sPrice = round((float) ($item->reseller_price ?? $item->price ?? $aPrice), 2);
+
+            $supplierVendorPrice += round($vPrice * $qty, 2);
+            $adminBasePrice += round($aPrice * $qty, 2);
+            $resellerSellingPrice += round($sPrice * $qty, 2);
+        }
+
+        $supplierVendorPrice = round($supplierVendorPrice, 2);
+        $adminBasePrice = round($adminBasePrice, 2);
+        $resellerSellingPrice = round($resellerSellingPrice, 2);
+
+        // Platform settlement breakdown
+        // When vendor has own delivery account: courier delivers all funds to vendor.
+        // Vendor owes Platform = Courier Net to Supplier - Supplier Vendor Price
+        if ($hasOwnDeliveryAccount) {
+            $supplierOwesPlatform = round($courierNetToSupplier - $supplierVendorPrice, 2);
+            $platformOwesSupplier = 0.00;
+        } else {
+            $supplierOwesPlatform = 0.00;
+            $platformOwesSupplier = $supplierVendorPrice;
+        }
+
+        // Dropshipper profit calculation:
+        // Formula: Customer collected - Admin Base Price - Customer Delivery Charge - Courier COD Fee
+        $customerCollected = $courierCollectable + ($advanceStatus === 'approved' ? $advanceAmount : 0.00);
+        $dropshipperProfit = round($customerCollected - $adminBasePrice - $customerShippingCharge - $courierCodFee, 2);
+
+        // Platform Net Profit calculation:
+        // Platform Commission on Product (admin_price - vendor_price) + Platform Delivery Margin (customer_shipping - courier_delivery_fee)
+        $platformProductCommission = round($adminBasePrice - $supplierVendorPrice, 2);
+        $platformDeliveryMargin = round($customerShippingCharge - $courierDeliveryFee, 2);
+        $platformNetProfit = round($platformProductCommission + $platformDeliveryMargin, 2);
+
+        // Balance check: Supplier Owes Platform == Dropshipper Profit + Platform Net Profit (for has_own_delivery_account)
+        $isBalanced = $hasOwnDeliveryAccount
+            ? (abs($supplierOwesPlatform - ($dropshipperProfit + $platformNetProfit)) < 0.05)
+            : true;
+
+        // Existing settlements check
+        $settlements = OrderSettlement::where('order_id', $order->id)->get();
+        $supplierSettlement = $settlements->firstWhere('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE);
+        $resellerSettlement = $settlements->firstWhere('settlement_type', OrderSettlement::TYPE_RESELLER_PROFIT);
+
+        return [
+            'order_id' => $order->id,
+            'order_number' => $order->order_number,
+            'status' => $order->status,
+            'customer_name' => $order->customer_name,
+            'customer_phone' => $order->customer_phone,
+            'vendor_id' => $vendor?->id,
+            'vendor_name' => $vendor?->shop_name ?: $vendor?->owner_name,
+            'vendor_phone' => $vendor?->emergency_contact ?: $vendor?->whatsapp,
+            'has_own_delivery_account' => $hasOwnDeliveryAccount,
+            'courier_account_owner' => $hasOwnDeliveryAccount ? 'vendor' : 'platform',
+            'consignment_id' => $consignmentId,
+            'courier' => [
+                'collectable_amount' => $courierCollectable,
+                'delivery_fee' => $courierDeliveryFee,
+                'cod_fee' => $courierCodFee,
+                'total_courier_fee' => $totalCourierCost,
+                'net_received_by_supplier' => $courierNetToSupplier,
+            ],
+            'supplier' => [
+                'vendor_price' => $supplierVendorPrice,
+                'supplier_owes_platform' => $supplierOwesPlatform,
+                'platform_owes_supplier' => $platformOwesSupplier,
+                'is_settled' => $supplierSettlement?->status === OrderSettlement::STATUS_SETTLED,
+                'settled_trx_id' => $supplierSettlement?->settled_trx_id,
+                'settled_at' => $supplierSettlement?->settled_at?->toIso8601String(),
+            ],
+            'dropshipper' => [
+                'user_id' => $order->user_id,
+                'user_name' => $order->user?->name,
+                'user_phone' => $order->user?->phone,
+                'customer_collected' => $customerCollected,
+                'admin_base_price' => $adminBasePrice,
+                'customer_delivery_charge' => $customerShippingCharge,
+                'cod_charge' => $courierCodFee,
+                'profit' => $dropshipperProfit,
+                'is_settled' => $resellerSettlement?->status === OrderSettlement::STATUS_SETTLED,
+                'settled_trx_id' => $resellerSettlement?->settled_trx_id,
+                'settled_at' => $resellerSettlement?->settled_at?->toIso8601String(),
+            ],
+            'platform' => [
+                'product_commission' => $platformProductCommission,
+                'delivery_margin' => $platformDeliveryMargin,
+                'net_profit' => $platformNetProfit,
+            ],
+            'advance' => [
+                'amount' => $advanceAmount,
+                'status' => $advanceStatus,
+                'recipient' => $advanceRecipient,
+                'payment_method' => $order->advance_payment_method,
+                'trx_id' => $order->advance_trx_id,
+                'sender_phone' => $order->advance_sender_phone,
+            ],
+            'balance' => [
+                'is_balanced' => $isBalanced,
+                'sum_difference' => round($supplierOwesPlatform - ($dropshipperProfit + $platformNetProfit), 2),
+            ],
+            'is_editable' => !($supplierSettlement?->status === OrderSettlement::STATUS_SETTLED && $resellerSettlement?->status === OrderSettlement::STATUS_SETTLED),
+        ];
+    }
+
+    /**
+     * Save admin breakdown adjustments prior to settlement.
+     */
+    public function saveBreakdownAdjustments(Order $order, array $adjusted, ?int $adminUserId = null): array
+    {
+        return DB::transaction(function () use ($order, $adjusted, $adminUserId) {
+            $lockedOrder = Order::lockForUpdate()->findOrFail($order->id);
+
+            // Update order courier fee attributes if provided
+            $updates = [];
+            if (array_key_exists('courier_delivery_fee', $adjusted)) {
+                $updates['actual_courier_fee'] = round((float) $adjusted['courier_delivery_fee'], 2);
+            }
+            if (array_key_exists('courier_cod_fee', $adjusted)) {
+                $updates['actual_cod_fee'] = round((float) $adjusted['courier_cod_fee'], 2);
+            }
+            if (isset($updates['actual_courier_fee']) || isset($updates['actual_cod_fee'])) {
+                $delFee = $updates['actual_courier_fee'] ?? (float) ($lockedOrder->actual_courier_fee ?? 0);
+                $codFee = $updates['actual_cod_fee'] ?? (float) ($lockedOrder->actual_cod_fee ?? 0);
+                $updates['actual_courier_cost'] = round($delFee + $codFee, 2);
+                $updates['courier_cost_confirmed'] = true;
+            }
+            if (array_key_exists('remaining_cod', $adjusted)) {
+                $updates['remaining_cod'] = round((float) $adjusted['remaining_cod'], 2);
+            }
+
+            if (!empty($updates)) {
+                $lockedOrder->update($updates);
+            }
+
+            // If item prices were adjusted
+            if (!empty($adjusted['items']) && is_array($adjusted['items'])) {
+                foreach ($adjusted['items'] as $itemData) {
+                    if (!empty($itemData['id'])) {
+                        $item = OrderItem::where('id', $itemData['id'])->where('order_id', $lockedOrder->id)->first();
+                        if ($item) {
+                            $itemUpdates = [];
+                            if (isset($itemData['unit_price'])) $itemUpdates['unit_price'] = (float) $itemData['unit_price'];
+                            if (isset($itemData['admin_price'])) $itemUpdates['admin_price'] = (float) $itemData['admin_price'];
+                            if (isset($itemData['reseller_price'])) $itemUpdates['reseller_price'] = (float) $itemData['reseller_price'];
+                            if (!empty($itemUpdates)) $item->update($itemUpdates);
+                        }
+                    }
+                }
+            }
+
+            // Recalculate fresh breakdown
+            $breakdown = $this->calculateOrderStakeBreakdown($lockedOrder);
+
+            // Update OrderSettlement rows
+            $supplierSettlement = OrderSettlement::where('order_id', $lockedOrder->id)
+                ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
+                ->first();
+            if ($supplierSettlement && $supplierSettlement->status !== OrderSettlement::STATUS_SETTLED) {
+                $supplierSettlement->update([
+                    'gross_entitlement' => $breakdown['supplier']['vendor_price'],
+                    'deducted_by_courier' => $breakdown['courier']['net_received_by_supplier'],
+                    'settleable_amount' => $breakdown['supplier']['supplier_owes_platform'],
+                    'net_payable_amount' => $breakdown['supplier']['supplier_owes_platform'],
+                    'admin_note' => "Supplier settlement adjusted by admin #{$adminUserId}. Supplier owes platform: ৳{$breakdown['supplier']['supplier_owes_platform']}",
+                ]);
+            }
+
+            $resellerSettlement = OrderSettlement::where('order_id', $lockedOrder->id)
+                ->where('settlement_type', OrderSettlement::TYPE_RESELLER_PROFIT)
+                ->first();
+            if ($resellerSettlement && $resellerSettlement->status !== OrderSettlement::STATUS_SETTLED) {
+                $resellerSettlement->update([
+                    'gross_entitlement' => $breakdown['dropshipper']['profit'],
+                    'settleable_amount' => $breakdown['dropshipper']['profit'],
+                    'net_payable_amount' => $breakdown['dropshipper']['profit'],
+                    'admin_note' => "Dropshipper profit adjusted by admin #{$adminUserId}: ৳{$breakdown['dropshipper']['profit']}",
+                ]);
+            }
+
+            return $breakdown;
+        });
+    }
+
+    /**
+     * Create multi-order vendor settlement transaction invoice.
+     */
+    public function createVendorSettlementInvoice(array $data, ?int $adminUserId = null): SettlementInvoice
+    {
+        return DB::transaction(function () use ($data, $adminUserId) {
+            $vendorId = (int) $data['vendor_id'];
+            $orderIds = array_map('intval', $data['order_ids'] ?? []);
+            if (empty($orderIds)) {
+                throw new \InvalidArgumentException("No order IDs provided for settlement invoice.");
+            }
+
+            $orders = Order::whereIn('id', $orderIds)->get();
+            $invoiceNumber = $data['invoice_number'] ?? ('INV-V' . $vendorId . '-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -4)));
+            $paymentMethod = $data['payment_method'] ?? 'bank';
+            $trxId = $data['trx_id'] ?? null;
+            $note = $data['note'] ?? null;
+
+            $totalCollectable = 0.00;
+            $totalDeliveryFee = 0.00;
+            $totalCodFee = 0.00;
+            $totalCourierNet = 0.00;
+            $totalSupplierPrice = 0.00;
+            $totalAmountOwed = 0.00;
+            $totalDropshipperPayout = 0.00;
+            $totalPlatformNetProfit = 0.00;
+
+            $breakdownList = [];
+
+            foreach ($orders as $order) {
+                $b = $this->calculateOrderStakeBreakdown($order);
+                $breakdownList[] = $b;
+
+                $totalCollectable += $b['courier']['collectable_amount'];
+                $totalDeliveryFee += $b['courier']['delivery_fee'];
+                $totalCodFee += $b['courier']['cod_fee'];
+                $totalCourierNet += $b['courier']['net_received_by_supplier'];
+                $totalSupplierPrice += $b['supplier']['vendor_price'];
+                $totalAmountOwed += $b['supplier']['supplier_owes_platform'];
+                $totalDropshipperPayout += $b['dropshipper']['profit'];
+                $totalPlatformNetProfit += $b['platform']['net_profit'];
+
+                // Mark supplier settlement as settled
+                OrderSettlement::where('order_id', $order->id)
+                    ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
+                    ->update([
+                        'status' => OrderSettlement::STATUS_SETTLED,
+                        'settled_trx_id' => $trxId ?: $invoiceNumber,
+                        'settled_at' => now(),
+                        'admin_note' => "Settled via Vendor Invoice {$invoiceNumber}. Trx ID: {$trxId}",
+                    ]);
+            }
+
+            // Create SettlementInvoice record
+            $invoice = SettlementInvoice::create([
+                'invoice_number' => $invoiceNumber,
+                'vendor_id' => $vendorId,
+                'user_id' => $adminUserId,
+                'type' => 'vendor_settlement',
+                'orders_count' => count($orders),
+                'total_collectable' => round($totalCollectable, 2),
+                'total_delivery_fee' => round($totalDeliveryFee, 2),
+                'total_cod_fee' => round($totalCodFee, 2),
+                'total_courier_net' => round($totalCourierNet, 2),
+                'total_supplier_price' => round($totalSupplierPrice, 2),
+                'total_amount_owed' => round($totalAmountOwed, 2),
+                'total_dropshipper_payout' => round($totalDropshipperPayout, 2),
+                'total_platform_net_profit' => round($totalPlatformNetProfit, 2),
+                'payment_method' => $paymentMethod,
+                'trx_id' => $trxId,
+                'status' => 'settled',
+                'order_ids' => $orderIds,
+                'orders_breakdown' => $breakdownList,
+                'note' => $note,
+                'settled_at' => now(),
+            ]);
+
+            // Record Company cash/bank transaction for funds collected from vendor
+            if ($totalAmountOwed > 0) {
+                Transaction::create([
+                    'ref_id' => $invoice->id,
+                    'type' => 'vendor_settlement_collection',
+                    'amount' => round($totalAmountOwed, 2),
+                    'trx_id' => $trxId ?: $invoiceNumber,
+                    'trx_type' => 'credit',
+                    'source' => $paymentMethod,
+                    'status' => 'completed',
+                    'note' => "Collected owed settlement of ৳{$totalAmountOwed} from Vendor #{$vendorId} via Invoice {$invoiceNumber} (Trx: {$trxId})",
+                ]);
+            }
+
+            return $invoice;
+        });
+    }
+
+    /**
+     * Admin direct disbursement to dropshipper without withdraw request.
+     */
+    public function disburseDropshipperProfitDirectly(Order $order, array $data, ?int $adminUserId = null): array
+    {
+        return DB::transaction(function () use ($order, $data, $adminUserId) {
+            $lockedOrder = Order::lockForUpdate()->findOrFail($order->id);
+            $breakdown = $this->calculateOrderStakeBreakdown($lockedOrder);
+
+            $payoutAmount = isset($data['amount']) ? round((float) $data['amount'], 2) : $breakdown['dropshipper']['profit'];
+            $paymentMethod = $data['payment_method'] ?? 'wallet'; // 'wallet', 'bank', 'bkash', 'nagad', 'cash'
+            $trxId = $data['trx_id'] ?? ('DIR-DISB-' . $lockedOrder->id . '-' . time());
+            $note = $data['note'] ?? "Direct disbursement by Admin #{$adminUserId} for order #{$lockedOrder->order_number}";
+
+            // Find or create reseller settlement
+            $resellerSettlement = OrderSettlement::firstOrCreate(
+                [
+                    'order_id' => $lockedOrder->id,
+                    'settlement_type' => OrderSettlement::TYPE_RESELLER_PROFIT,
+                ],
+                [
+                    'payable_user_id' => $lockedOrder->user_id,
+                    'user_type' => 'dropshipper',
+                    'gross_entitlement' => $payoutAmount,
+                    'settleable_amount' => $payoutAmount,
+                    'net_payable_amount' => $payoutAmount,
+                    'currency' => 'BDT',
+                    'status' => OrderSettlement::STATUS_PENDING,
+                    'trx_id' => 'SETTLE-R-' . $lockedOrder->id . '-' . time(),
+                ]
+            );
+
+            // Mark settlement settled
+            $resellerSettlement->update([
+                'settleable_amount' => $payoutAmount,
+                'net_payable_amount' => $payoutAmount,
+                'status' => OrderSettlement::STATUS_SETTLED,
+                'settled_trx_id' => $trxId,
+                'settled_at' => now(),
+                'admin_note' => $note,
+            ]);
+
+            if ($paymentMethod === 'wallet') {
+                // Credit to reseller wallet balance
+                ResellerTransaction::create([
+                    'reseller_id' => $lockedOrder->user_id,
+                    'amount' => $payoutAmount,
+                    'trx_id' => $trxId,
+                    'trx_type' => 'credit',
+                    'type' => 'order_settlement',
+                    'source' => 'wallet',
+                    'order_id' => $lockedOrder->id,
+                    'ref_id' => $resellerSettlement->id,
+                    'status' => 'completed',
+                    'note' => "Dropshipper profit credited to wallet for order #{$lockedOrder->order_number} (Trx: {$trxId})",
+                ]);
+            } else {
+                // Direct bank/MFS payout: create credit (earning) then direct transferred debit (payout)
+                ResellerTransaction::create([
+                    'reseller_id' => $lockedOrder->user_id,
+                    'amount' => $payoutAmount,
+                    'trx_id' => 'EARN-' . $trxId,
+                    'trx_type' => 'credit',
+                    'type' => 'order_settlement',
+                    'source' => 'order',
+                    'order_id' => $lockedOrder->id,
+                    'ref_id' => $resellerSettlement->id,
+                    'status' => 'completed',
+                    'note' => "Dropshipper profit entitlement for order #{$lockedOrder->order_number}",
+                ]);
+
+                // Create transferred withdraw request
+                $withdraw = WithdrawRequest::create([
+                    'user_id' => $lockedOrder->user_id,
+                    'amount' => $payoutAmount,
+                    'reserved_amount' => 0.00,
+                    'status' => 'transferred',
+                    'payment_method' => $paymentMethod,
+                    'bank_reference' => $trxId,
+                    'transferred_at' => now(),
+                    'note' => "Direct disbursement by Admin: {$note}",
+                    'type' => 'direct_disbursement',
+                ]);
+
+                // Record debit in reseller transactions
+                ResellerTransaction::create([
+                    'reseller_id' => $lockedOrder->user_id,
+                    'amount' => $payoutAmount,
+                    'trx_id' => $trxId,
+                    'trx_type' => 'debit',
+                    'type' => 'withdraw',
+                    'source' => $paymentMethod,
+                    'order_id' => $lockedOrder->id,
+                    'ref_id' => $withdraw->id,
+                    'status' => 'completed',
+                    'note' => "Direct payout transferred via {$paymentMethod} (Ref: {$trxId})",
+                ]);
+
+                // Record company cashbook debit
+                Transaction::create([
+                    'ref_id' => $withdraw->id,
+                    'type' => 'reseller_withdraw',
+                    'amount' => $payoutAmount,
+                    'trx_id' => $trxId,
+                    'trx_type' => 'debit',
+                    'source' => $paymentMethod,
+                    'status' => 'completed',
+                    'note' => "Direct payout for dropshipper profit on order #{$lockedOrder->order_number} via {$paymentMethod} (Ref: {$trxId})",
+                ]);
+            }
+
+            return [
+                'success' => true,
+                'message' => "Dropshipper profit of ৳{$payoutAmount} disbursed successfully via {$paymentMethod}.",
+                'settlement' => $resellerSettlement,
+                'breakdown' => $this->calculateOrderStakeBreakdown($lockedOrder),
+            ];
         });
     }
 }
