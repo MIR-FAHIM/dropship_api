@@ -6,6 +6,8 @@ use App\Models\Order;
 use App\Models\OrderSettlement;
 use App\Models\SettlementInvoice;
 use App\Models\ResellerTransaction;
+use App\Models\Vendor;
+use App\Models\User;
 use App\Service\CompanyTransactionService;
 use App\Service\MuthobartaSmsService;
 use App\Service\NotificationService;
@@ -589,6 +591,8 @@ class OrderSettlementController extends Controller
                 'invoice_number' => 'nullable|string|max:50',
                 'payment_method' => 'nullable|string|max:50',
                 'trx_id' => 'nullable|string|max:100',
+                'status' => 'nullable|string|in:pending,paid,approved,rejected',
+                'admin_payment_details' => 'nullable|array',
                 'note' => 'nullable|string',
             ]);
 
@@ -609,11 +613,21 @@ class OrderSettlementController extends Controller
     public function listVendorInvoices(Request $request)
     {
         try {
-            $query = SettlementInvoice::with(['vendor', 'creator'])->orderByDesc('id');
+            $query = SettlementInvoice::with(['vendor', 'creator', 'payer', 'approver', 'rejecter'])->orderByDesc('id');
 
-            if ($request->filled('vendor_id')) {
+            // If logged in user is a vendor, restrict to their vendor_id
+            $user = $request->user();
+            if ($user && ($user->user_type === 'vendor' || $user->role === 'vendor')) {
+                $vendor = Vendor::where('user_id', $user->id)->first();
+                if ($vendor) {
+                    $query->where('vendor_id', $vendor->id);
+                } else {
+                    return $this->success('Vendor settlement invoices fetched successfully', collect());
+                }
+            } elseif ($request->filled('vendor_id')) {
                 $query->where('vendor_id', $request->vendor_id);
             }
+
             if ($request->filled('status')) {
                 $query->where('status', $request->status);
             }
@@ -637,15 +651,104 @@ class OrderSettlementController extends Controller
     /**
      * GET /order-settlements/vendor-invoices/{id}
      */
-    public function vendorInvoiceDetails($id)
+    public function vendorInvoiceDetails(Request $request, $id)
     {
         try {
-            $invoice = SettlementInvoice::with(['vendor', 'creator'])->find($id);
+            $invoice = SettlementInvoice::with(['vendor', 'creator', 'payer', 'approver', 'rejecter'])->find($id);
             if (!$invoice) {
                 return $this->failed('Settlement invoice not found', null, 404);
             }
 
+            $user = $request->user();
+            if ($user && ($user->user_type === 'vendor' || $user->role === 'vendor')) {
+                $vendor = Vendor::where('user_id', $user->id)->first();
+                if ($vendor && (int) $invoice->vendor_id !== (int) $vendor->id) {
+                    return $this->failed('Unauthorized access to invoice', null, 403);
+                }
+            }
+
             return $this->success('Settlement invoice details fetched successfully', $invoice);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /order-settlements/vendor-invoices/{id}/pay
+     */
+    public function payVendorInvoice(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate([
+                'payment_method' => 'required|string|max:50',
+                'trx_id' => 'required|string|max:100',
+                'sender_account' => 'nullable|string|max:100',
+                'paid_amount' => 'nullable|numeric|min:0',
+                'note' => 'nullable|string',
+            ]);
+
+            $userId = $request->user()?->id ?: (int) $request->input('user_id');
+            $invoice = $this->accountingService->submitVendorInvoicePayment((int) $id, $validated, $userId);
+
+            return $this->success('Invoice payment submitted successfully', $invoice);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\InvalidArgumentException $e) {
+            return $this->failed($e->getMessage(), null, 400);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /order-settlements/vendor-invoices/{id}/approve
+     */
+    public function approveVendorInvoice(Request $request, $id)
+    {
+        try {
+            $adminUserId = $request->user()?->id ?: (int) $request->input('created_by');
+            $adminTrxId = $request->input('trx_id');
+            $invoice = $this->accountingService->approveVendorInvoice((int) $id, $adminTrxId, $adminUserId);
+
+            return $this->success('Vendor invoice approved and settled successfully', $invoice);
+        } catch (\InvalidArgumentException $e) {
+            return $this->failed($e->getMessage(), null, 400);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /order-settlements/vendor-invoices/{id}/reject
+     */
+    public function rejectVendorInvoice(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate([
+                'rejection_reason' => 'required|string|max:500',
+            ]);
+
+            $adminUserId = $request->user()?->id ?: (int) $request->input('created_by');
+            $invoice = $this->accountingService->rejectVendorInvoice((int) $id, $validated['rejection_reason'], $adminUserId);
+
+            return $this->success('Vendor invoice rejected successfully', $invoice);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\InvalidArgumentException $e) {
+            return $this->failed($e->getMessage(), null, 400);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /order-settlements/admin-payment-accounts
+     */
+    public function getAdminPaymentAccounts()
+    {
+        try {
+            $accounts = $this->accountingService->getAdminPaymentAccounts();
+            return $this->success('Admin payment accounts retrieved successfully', $accounts);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

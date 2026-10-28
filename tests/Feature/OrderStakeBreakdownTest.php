@@ -23,6 +23,7 @@ class OrderStakeBreakdownTest extends TestCase
     private array $adminHeaders;
     private User $dropshipper;
     private User $vendorUser;
+    private array $vendorHeaders;
     private Vendor $vendor;
     private Product $product;
     private OrderAccountingService $accountingService;
@@ -64,6 +65,8 @@ class OrderStakeBreakdownTest extends TestCase
             'user_type' => 'vendor',
             'banned' => 0,
         ]);
+        $vendorTokenData = ApiTokenService::create($this->vendorUser, ['basic', 'vendor'], 30, 'vendor-token');
+        $this->vendorHeaders = ['Authorization' => 'Bearer ' . $vendorTokenData['plain']];
 
         $this->vendor = Vendor::create([
             'user_id' => $this->vendorUser->id,
@@ -344,6 +347,87 @@ class OrderStakeBreakdownTest extends TestCase
             'status' => 'transferred',
             'bank_reference' => 'BK789456123',
             'payment_method' => 'bkash',
+        ]);
+    }
+
+    public function test_vendor_invoice_payment_and_approval_lifecycle()
+    {
+        $order = Order::create([
+            'order_number' => 'ORD-INV-LIFECYCLE',
+            'user_id' => $this->dropshipper->id,
+            'vendor_id' => $this->vendor->id,
+            'total' => 2630.00,
+            'shipping_fee' => 130.00,
+            'remaining_cod' => 2630.00,
+            'courier_account_owner' => 'vendor',
+            'status' => 'Delivered',
+            'actual_courier_fee' => 105.00,
+            'actual_cod_fee' => 26.30,
+        ]);
+
+        OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => $this->product->id,
+            'shop_id' => $this->vendor->id,
+            'unit_price' => 1750.00,
+            'admin_price' => 1838.00,
+            'reseller_price' => 2500.00,
+            'qty' => 1,
+        ]);
+
+        // 1. Admin creates invoice in pending status with admin payment accounts
+        $adminAccounts = [
+            [
+                'type' => 'MFS',
+                'provider' => 'bKash (Merchant)',
+                'account_number' => '01782084390',
+                'account_name' => 'ResellerBrain Admin',
+            ]
+        ];
+
+        $createRes = $this->withHeaders($this->adminHeaders)->postJson('/api/order-settlements/vendor-invoice', [
+            'vendor_id' => $this->vendor->id,
+            'order_ids' => [$order->id],
+            'status' => 'pending',
+            'admin_payment_details' => $adminAccounts,
+            'note' => 'Please disburse within 3 business days',
+        ]);
+
+        $createRes->assertStatus(201);
+        $invoiceId = $createRes->json('data.id');
+        $this->assertEquals('pending', $createRes->json('data.status'));
+        $this->assertEquals(748.70, (float) $createRes->json('data.total_amount_owed'));
+
+        // 2. Vendor lists invoices
+        $listRes = $this->withHeaders($this->vendorHeaders)->getJson('/api/order-settlements/vendor-invoices');
+        $listRes->assertStatus(200);
+        $this->assertNotEmpty($listRes->json('data.data'));
+
+        // 3. Vendor submits payment
+        $payRes = $this->withHeaders($this->vendorHeaders)->postJson("/api/order-settlements/vendor-invoices/{$invoiceId}/pay", [
+            'payment_method' => 'bkash',
+            'trx_id' => 'BKASH-V41-778899',
+            'sender_account' => '01911223344',
+            'note' => 'Paid from my personal bKash',
+        ]);
+
+        $payRes->assertStatus(200);
+        $this->assertEquals('paid', $payRes->json('data.status'));
+        $this->assertEquals('BKASH-V41-778899', $payRes->json('data.trx_id'));
+        $this->assertEquals('01911223344', $payRes->json('data.sender_account'));
+
+        // 4. Admin approves invoice
+        $approveRes = $this->withHeaders($this->adminHeaders)->postJson("/api/order-settlements/vendor-invoices/{$invoiceId}/approve", [
+            'trx_id' => 'BKASH-V41-778899',
+        ]);
+        $approveRes->assertStatus(200);
+        $this->assertEquals('approved', $approveRes->json('data.status'));
+
+        // 5. Check order settlement is marked settled
+        $this->assertDatabaseHas('order_settlements', [
+            'order_id' => $order->id,
+            'settlement_type' => OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE,
+            'status' => OrderSettlement::STATUS_SETTLED,
         ]);
     }
 }

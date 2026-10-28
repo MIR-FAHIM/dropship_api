@@ -1223,6 +1223,8 @@ class OrderAccountingService
             $paymentMethod = $data['payment_method'] ?? 'bank';
             $trxId = $data['trx_id'] ?? null;
             $note = $data['note'] ?? null;
+            $status = $data['status'] ?? SettlementInvoice::STATUS_PENDING;
+            $adminPaymentDetails = $data['admin_payment_details'] ?? null;
 
             $totalCollectable = 0.00;
             $totalDeliveryFee = 0.00;
@@ -1234,6 +1236,8 @@ class OrderAccountingService
             $totalPlatformNetProfit = 0.00;
 
             $breakdownList = [];
+
+            $isDirectlyPaid = in_array($status, [SettlementInvoice::STATUS_PAID, SettlementInvoice::STATUS_APPROVED, 'settled']);
 
             foreach ($orders as $order) {
                 $b = $this->calculateOrderStakeBreakdown($order);
@@ -1248,15 +1252,17 @@ class OrderAccountingService
                 $totalDropshipperPayout += $b['dropshipper']['profit'];
                 $totalPlatformNetProfit += $b['platform']['net_profit'];
 
-                // Mark supplier settlement as settled
-                OrderSettlement::where('order_id', $order->id)
-                    ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
-                    ->update([
-                        'status' => OrderSettlement::STATUS_SETTLED,
-                        'settled_trx_id' => $trxId ?: $invoiceNumber,
-                        'settled_at' => now(),
-                        'admin_note' => "Settled via Vendor Invoice {$invoiceNumber}. Trx ID: {$trxId}",
-                    ]);
+                // Only if created directly as settled/paid, mark order settlement as settled
+                if ($isDirectlyPaid) {
+                    OrderSettlement::where('order_id', $order->id)
+                        ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
+                        ->update([
+                            'status' => OrderSettlement::STATUS_SETTLED,
+                            'settled_trx_id' => $trxId ?: $invoiceNumber,
+                            'settled_at' => now(),
+                            'admin_note' => "Settled via Vendor Invoice {$invoiceNumber}. Trx ID: {$trxId}",
+                        ]);
+                }
             }
 
             $courierSettledTotal = round($totalDeliveryFee + $totalCodFee, 2);
@@ -1280,15 +1286,19 @@ class OrderAccountingService
                 'total_platform_net_profit' => round($totalPlatformNetProfit, 2),
                 'payment_method' => $paymentMethod,
                 'trx_id' => $trxId,
-                'status' => 'settled',
+                'status' => $status,
                 'order_ids' => $orderIds,
                 'orders_breakdown' => $breakdownList,
+                'admin_payment_details' => $adminPaymentDetails,
                 'note' => $finalNote,
-                'settled_at' => now(),
+                'settled_at' => $isDirectlyPaid ? now() : null,
+                'paid_at' => $isDirectlyPaid ? now() : null,
+                'approved_at' => $isDirectlyPaid ? now() : null,
+                'approved_by' => $isDirectlyPaid ? $adminUserId : null,
             ]);
 
-            // Record Company cash/bank transaction for funds collected from vendor
-            if ($totalAmountOwed > 0) {
+            // Record Company cash/bank transaction if paid directly
+            if ($isDirectlyPaid && $totalAmountOwed > 0) {
                 Transaction::create([
                     'ref_id' => $invoice->id,
                     'type' => 'vendor_settlement_collection',
@@ -1303,6 +1313,184 @@ class OrderAccountingService
 
             return $invoice;
         });
+    }
+
+    /**
+     * Vendor submits payment for an invoice with payment_method, trx_id, and sender account.
+     */
+    public function submitVendorInvoicePayment(int $invoiceId, array $data, int $userId): SettlementInvoice
+    {
+        return DB::transaction(function () use ($invoiceId, $data, $userId) {
+            $invoice = SettlementInvoice::lockForUpdate()->findOrFail($invoiceId);
+
+            if ($invoice->status === SettlementInvoice::STATUS_PAID || $invoice->status === SettlementInvoice::STATUS_APPROVED) {
+                throw new \InvalidArgumentException("This invoice is already paid and settled.");
+            }
+
+            $paymentMethod = $data['payment_method'] ?? $invoice->payment_method ?? 'bkash';
+            $trxId = $data['trx_id'] ?? null;
+            if (empty($trxId)) {
+                throw new \InvalidArgumentException("Transaction ID (Trx ID) is required.");
+            }
+            $senderAccount = $data['sender_account'] ?? null;
+            $paidAmount = isset($data['paid_amount']) ? round((float) $data['paid_amount'], 2) : $invoice->total_amount_owed;
+            $vendorNote = $data['note'] ?? null;
+
+            $updatedNote = $invoice->note;
+            if ($vendorNote) {
+                $updatedNote .= " | Vendor Note: {$vendorNote}";
+            }
+
+            $invoice->update([
+                'status' => SettlementInvoice::STATUS_PAID,
+                'payment_method' => $paymentMethod,
+                'trx_id' => $trxId,
+                'sender_account' => $senderAccount,
+                'paid_amount' => $paidAmount,
+                'paid_by' => $userId,
+                'paid_at' => now(),
+                'settled_at' => now(),
+                'note' => $updatedNote,
+            ]);
+
+            // Mark order settlements as settled
+            if (!empty($invoice->order_ids)) {
+                OrderSettlement::whereIn('order_id', $invoice->order_ids)
+                    ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
+                    ->update([
+                        'status' => OrderSettlement::STATUS_SETTLED,
+                        'settled_trx_id' => $trxId,
+                        'settled_at' => now(),
+                        'admin_note' => "Settled via Vendor Invoice {$invoice->invoice_number}. Trx: {$trxId}",
+                    ]);
+            }
+
+            // Record transaction credit
+            if ($paidAmount > 0) {
+                Transaction::create([
+                    'ref_id' => $invoice->id,
+                    'type' => 'vendor_settlement_collection',
+                    'amount' => $paidAmount,
+                    'trx_id' => $trxId,
+                    'trx_type' => 'credit',
+                    'source' => $paymentMethod,
+                    'status' => 'completed',
+                    'note' => "Collected owed settlement of ৳{$paidAmount} from Vendor #{$invoice->vendor_id} via Invoice {$invoice->invoice_number} (Trx: {$trxId})",
+                ]);
+            }
+
+            return $invoice;
+        });
+    }
+
+    /**
+     * Admin approves a vendor invoice.
+     */
+    public function approveVendorInvoice(int $invoiceId, ?string $adminTrxId = null, ?int $adminUserId = null): SettlementInvoice
+    {
+        return DB::transaction(function () use ($invoiceId, $adminTrxId, $adminUserId) {
+            $invoice = SettlementInvoice::lockForUpdate()->findOrFail($invoiceId);
+
+            $trxId = $adminTrxId ?: ($invoice->trx_id ?: $invoice->invoice_number);
+
+            $invoice->update([
+                'status' => SettlementInvoice::STATUS_APPROVED,
+                'trx_id' => $trxId,
+                'approved_by' => $adminUserId,
+                'approved_at' => now(),
+                'settled_at' => now(),
+            ]);
+
+            if (!empty($invoice->order_ids)) {
+                OrderSettlement::whereIn('order_id', $invoice->order_ids)
+                    ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
+                    ->update([
+                        'status' => OrderSettlement::STATUS_SETTLED,
+                        'settled_trx_id' => $trxId,
+                        'settled_at' => now(),
+                        'admin_note' => "Approved via Vendor Invoice {$invoice->invoice_number}. Trx: {$trxId}",
+                    ]);
+            }
+
+            return $invoice;
+        });
+    }
+
+    /**
+     * Reject a vendor invoice.
+     */
+    public function rejectVendorInvoice(int $invoiceId, string $reason, ?int $adminUserId = null): SettlementInvoice
+    {
+        return DB::transaction(function () use ($invoiceId, $reason, $adminUserId) {
+            $invoice = SettlementInvoice::lockForUpdate()->findOrFail($invoiceId);
+
+            $invoice->update([
+                'status' => SettlementInvoice::STATUS_REJECTED,
+                'rejected_by' => $adminUserId,
+                'rejected_at' => now(),
+                'rejection_reason' => $reason,
+            ]);
+
+            return $invoice;
+        });
+    }
+
+    /**
+     * Get Admin Payment Accounts (Bank, bKash, Nagad) to show on invoices.
+     */
+    public function getAdminPaymentAccounts(): array
+    {
+        $adminUserIds = User::where('role', 'admin')->orWhere('user_type', 'admin')->pluck('id');
+        $bankAccounts = UserBankAccount::whereIn('user_id', $adminUserIds)
+            ->where('is_active', 1)
+            ->get();
+
+        $accounts = [];
+        foreach ($bankAccounts as $acc) {
+            $accounts[] = [
+                'id' => $acc->id,
+                'type' => $acc->type,
+                'provider' => $acc->bank_name,
+                'account_number' => $acc->account_no,
+                'account_name' => $acc->acc_name,
+                'branch' => $acc->branch,
+                'routing' => $acc->route,
+            ];
+        }
+
+        if (empty($accounts)) {
+            $accounts = [
+                [
+                    'id' => 1,
+                    'type' => 'MFS',
+                    'provider' => 'bKash (Merchant / Personal)',
+                    'account_number' => '01782084390',
+                    'account_name' => 'ResellerBrain Admin (Mir Fahim)',
+                    'branch' => null,
+                    'routing' => null,
+                ],
+                [
+                    'id' => 2,
+                    'type' => 'MFS',
+                    'provider' => 'Nagad (Personal)',
+                    'account_number' => '01782084390',
+                    'account_name' => 'ResellerBrain Admin (Mir Fahim)',
+                    'branch' => null,
+                    'routing' => null,
+                ],
+                [
+                    'id' => 3,
+                    'type' => 'Bank',
+                    'provider' => 'UCB (United Commercial Bank)',
+                    'account_number' => '4534563001',
+                    'account_name' => 'ResellerBrain Technologies Ltd.',
+                    'branch' => 'Bongshal Branch, Dhaka',
+                    'routing' => '5636501',
+                ],
+            ];
+        }
+
+        return $accounts;
     }
 
     /**
