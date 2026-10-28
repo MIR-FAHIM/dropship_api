@@ -388,6 +388,7 @@ class OrderController extends Controller
      */
     public function checkout(Request $request)
     {
+        $transactionStarted = false;
         try {
             $validated = $request->validate([
                 'user_id' => ['required', 'integer', 'exists:users,id'],
@@ -470,6 +471,7 @@ class OrderController extends Controller
             }
 
             DB::beginTransaction();
+            $transactionStarted = true;
 
             // For now: shipping_fee & discount are kept null (or 0) until you add those modules
             $shippingFee = $request->input('delivery_charge', 0);
@@ -589,6 +591,7 @@ class OrderController extends Controller
             }
 
             DB::commit();
+            $transactionStarted = false;
 
             $order->load(['items', 'vendor.user']);
             $formattedTotal = number_format((float) $order->total, 2, '.', '');
@@ -641,13 +644,13 @@ class OrderController extends Controller
 
             return $this->success('Checkout successful. Order created.', $order, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            if (DB::transactionLevel() > 0) {
+            if ($transactionStarted && DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
             $this->storeOrderError($request, 'Checkout validation failed', $this->resolveCheckoutUser($request), 'warning', $e);
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
-            if (DB::transactionLevel() > 0) {
+            if ($transactionStarted && DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
             $this->storeOrderError($request, 'Checkout failed with server error', $this->resolveCheckoutUser($request), 'error', $e);
@@ -993,11 +996,43 @@ class OrderController extends Controller
         try {
             $perPage = (int) $request->get('per_page', 20);
 
-            $orders = Order::with(['status', 'user', 'vendor', 'items.shop'])
-                ->latest()
-                ->paginate($perPage);
+            $query = Order::with(['status', 'user', 'vendor', 'items.shop']);
 
-        
+            // Vendor filter: support vendor_id or vendor
+            $vendorId = $request->get('vendor_id') ?? $request->get('vendor');
+            if (!empty($vendorId) && $vendorId !== 'all') {
+                $vendorId = (int) $vendorId;
+                $query->where(function ($q) use ($vendorId) {
+                    $q->where('vendor_id', $vendorId)
+                      ->orWhereHas('items', function ($itemQuery) use ($vendorId) {
+                          $itemQuery->where('shop_id', $vendorId);
+                      });
+                });
+            }
+
+            // Status filter
+            if ($request->filled('status') && $request->get('status') !== 'all') {
+                $query->where('status', $request->get('status'));
+            }
+
+            // Search filter across order_number, customer, and dropshipper
+            if ($request->filled('search')) {
+                $search = trim($request->get('search'));
+                if ($search !== '') {
+                    $query->where(function ($q) use ($search) {
+                        $q->where('order_number', 'like', "%{$search}%")
+                          ->orWhere('customer_name', 'like', "%{$search}%")
+                          ->orWhere('customer_phone', 'like', "%{$search}%")
+                          ->orWhereHas('user', function ($uq) use ($search) {
+                              $uq->where('name', 'like', "%{$search}%")
+                                 ->orWhere('phone', 'like', "%{$search}%")
+                                 ->orWhere('email', 'like', "%{$search}%");
+                          });
+                    });
+                }
+            }
+
+            $orders = $query->latest()->paginate($perPage);
 
             return $this->success('Orders fetched successfully', $orders);
         } catch (\Throwable $e) {

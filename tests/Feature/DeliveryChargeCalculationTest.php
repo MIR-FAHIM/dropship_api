@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\District;
 use App\Models\Division;
 use App\Models\Order;
+use App\Models\OrderStatus;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\Vendor;
@@ -92,6 +93,8 @@ class DeliveryChargeCalculationTest extends TestCase
 
     public function test_checkout_requires_delivery_charge_and_sets_dynamic_advance_amount(): void
     {
+        OrderStatus::create(['name' => 'Pending', 'type' => 'order', 'is_active' => true]);
+
         [$dhakaDist, $ctgDist] = $this->setupLocations();
 
         $user = User::create([
@@ -160,9 +163,6 @@ class DeliveryChargeCalculationTest extends TestCase
         $failResponse->assertStatus(422)
             ->assertJsonValidationErrors(['delivery_charge']);
 
-        $dbToken = \App\Models\ApiToken::find($tokenData['token']->id);
-        dump('Token after failResponse:', $dbToken?->toArray(), 'isValid:', $dbToken?->isValid(), 'isExpired:', $dbToken?->isExpired());
-
         // Successful checkout with dynamic 70 BDT delivery charge
         $successResponse = $this->withHeader('Authorization', 'Bearer ' . $tokenData['plain'])
             ->postJson('/api/orders/checkout', [
@@ -178,8 +178,7 @@ class DeliveryChargeCalculationTest extends TestCase
                 'advance_amount'         => 70,
             ]);
 
-        dump($successResponse->status(), $successResponse->getContent());
-        $successResponse->assertStatus(200);
+        $successResponse->assertStatus(201);
 
         $order = Order::latest('id')->first();
         $this->assertNotNull($order);
