@@ -9,11 +9,12 @@ class OrderStatus extends Model
 {
     use HasFactory;
 
-        protected $fillable = [
+    protected $fillable = [
+        'id',
         'name',
         'is_active',
         'type',
-        ];
+    ];
 
     public function orders()
     {

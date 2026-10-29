@@ -35,17 +35,19 @@ class CarrybeePaidWebhookTest extends TestCase
             7 => 'Cancelled',
             8 => 'Returned',
             9 => 'Completed',
-            10 => 'Failed',
+            10 => 'Carrybee Paid',
             11 => 'Lost',
         ];
 
         foreach ($statuses as $id => $name) {
-            OrderStatus::create([
-                'id'        => $id,
-                'name'      => $name,
-                'type'      => 'delivery',
-                'is_active' => true,
-            ]);
+            OrderStatus::updateOrCreate(
+                ['id' => $id],
+                [
+                    'name'      => $name,
+                    'type'      => 'delivery',
+                    'is_active' => true,
+                ]
+            );
         }
 
         // Create Admin and token
@@ -136,7 +138,7 @@ class CarrybeePaidWebhookTest extends TestCase
 
         // Verify Order updated
         $freshOrder = $order->fresh();
-        $this->assertEquals(9, $freshOrder->status);
+        $this->assertEquals(10, $freshOrder->status); // Status 10: Carrybee Paid
         $this->assertEquals('paid', $freshOrder->payment_status);
         $this->assertEquals('IX212124433', $freshOrder->carrybee_invoice_id);
         $this->assertEquals('vendor', $freshOrder->carrybee_disbursed_to);
@@ -145,7 +147,7 @@ class CarrybeePaidWebhookTest extends TestCase
         // Verify DeliveryAssignedInfo updated
         $freshAssigned = DeliveryAssignedInfo::where('order_id', $order->id)->first();
         $this->assertEquals('IX212124433', $freshAssigned->carrybee_invoice_id);
-        $this->assertEquals(9, $freshAssigned->transfer_status_id);
+        $this->assertEquals(10, $freshAssigned->transfer_status_id); // Carrybee Paid status 10
 
         // Verify unacknowledged event query (Admin Authenticated)
         $unackResponse = $this->withHeaders($this->adminHeaders)

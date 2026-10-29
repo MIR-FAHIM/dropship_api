@@ -34,6 +34,29 @@ class OrderStakeBreakdownTest extends TestCase
 
         $this->accountingService = app(OrderAccountingService::class);
 
+        $statuses = [
+            1 => 'Pending',
+            2 => 'Confirmed',
+            3 => 'Pickup Requested',
+            4 => 'In Transit',
+            5 => 'Assigned for Delivery',
+            6 => 'Delivered',
+            7 => 'Cancelled',
+            8 => 'Returned',
+            9 => 'Completed',
+            10 => 'Carrybee Paid',
+        ];
+        foreach ($statuses as $id => $name) {
+            \App\Models\OrderStatus::updateOrCreate(
+                ['id' => $id],
+                [
+                    'name' => $name,
+                    'type' => 'delivery',
+                    'is_active' => true,
+                ]
+            );
+        }
+
         // 1. Admin + Token
         $this->admin = User::create([
             'name' => 'Admin User',
@@ -592,5 +615,59 @@ class OrderStakeBreakdownTest extends TestCase
         $this->assertEquals('Legacy Watch Item', $hydrated[0]['items'][0]['product_name']);
         $this->assertEquals(2, $hydrated[0]['items'][0]['qty']);
     }
+
+    public function test_order_automatically_transitions_to_completed_when_all_settlements_are_done()
+    {
+        // 1. Order at Carrybee Paid (10)
+        $order = Order::create([
+            'order_number' => 'ORD-AUTO-COMPLETE-1',
+            'user_id' => $this->dropshipper->id,
+            'vendor_id' => $this->vendor->id,
+            'total' => 2630.00,
+            'shipping_fee' => 130.00,
+            'remaining_cod' => 2630.00,
+            'courier_account_owner' => 'vendor',
+            'status' => 10, // Carrybee Paid
+            'payment_status' => 'paid',
+            'is_carrybee_paid' => true,
+            'carrybee_paid_at' => now(),
+            'carrybee_invoice_id' => 'IX-AUTO-COMPLETE',
+        ]);
+        OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => $this->product->id,
+            'shop_id' => $this->vendor->id,
+            'unit_price' => 1750.00,
+            'admin_price' => 1838.00,
+            'reseller_price' => 2500.00,
+            'qty' => 1,
+        ]);
+
+        // Disburse Dropshipper Profit
+        $this->accountingService->disburseDropshipperProfitDirectly($order, [
+            'payment_method' => 'wallet',
+        ], $this->admin->id);
+
+        // Status should still be 10 because Supplier settlement is not settled yet
+        $this->assertEquals(10, $order->fresh()->status);
+
+        // Create directly paid vendor invoice
+        $this->accountingService->createVendorSettlementInvoice([
+            'vendor_id' => $this->vendor->id,
+            'order_ids' => [$order->id],
+            'status' => SettlementInvoice::STATUS_PAID,
+            'payment_method' => 'bank',
+            'trx_id' => 'TRX-FULL-SETTLE',
+        ], $this->admin->id);
+
+        // Now both courier, dropshipper, and supplier are settled!
+        // Order must automatically be marked Completed (Status 9)!
+        $this->assertEquals(9, $order->fresh()->status);
+        $this->assertDatabaseHas('order_status_histories', [
+            'order_id' => $order->id,
+            'status_id' => 9,
+        ]);
+    }
 }
+
 

@@ -242,7 +242,7 @@ class CarrybeeWebhookService
             $order->status = $targetStatusId;
         }
 
-        if (in_array($targetStatusId, [6, 9])) {
+        if (in_array($targetStatusId, [6, 10, 9])) {
             $order->payment_status = 'paid';
             $courierFeeData = [
                 'actual_courier_fee' => Arr::get($payload, 'delivery_fee', null),
@@ -251,7 +251,7 @@ class CarrybeeWebhookService
                 'payout_status' => 'received',
             ];
             $this->orderAccountingService->processOrderDelivery($order, $courierFeeData);
-        } elseif (in_array($targetStatusId, [7, 8, 10, 11])) {
+        } elseif (in_array($targetStatusId, [7, 8])) {
             $this->orderAccountingService->processOrderReversal($order, 'CarryBee delivery returned/cancelled');
         }
 
@@ -268,7 +268,7 @@ class CarrybeeWebhookService
             $this->notifyWebhookOrderStatusUpdated($order, $targetStatusId);
         }
 
-        if ($targetStatusId === 9 && $previousPaymentStatus !== 'paid') {
+        if (in_array($targetStatusId, [10, 9]) && $previousPaymentStatus !== 'paid') {
             $this->notifyWebhookPaymentCompleted($order);
         }
 
@@ -475,9 +475,12 @@ class CarrybeeWebhookService
                 $assigned->carrybee_invoice_id = $invoiceId;
             }
             $assigned->carrybee_paid_at = $paidAt;
-            $assigned->transfer_status_id = 9;
+            $assigned->transfer_status_id = 10;
             $assigned->save();
         }
+
+        // Check if all settlements are now fulfilled to mark order Completed (9)
+        $this->orderAccountingService->checkAndMarkOrderCompleted($order);
 
         // Notify Admins
         $disbursedText = $disbursedTo === 'vendor' ? 'ভেন্ডরের নিজস্ব CarryBee অ্যাকাউন্টে' : 'প্ল্যাটফর্ম অ্যাকাউন্টে';

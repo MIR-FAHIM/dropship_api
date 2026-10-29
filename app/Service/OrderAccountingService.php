@@ -13,6 +13,7 @@ use App\Models\Vendor;
 use App\Models\WithdrawRequest;
 use App\Models\WalletTopup;
 use App\Models\SettlementInvoice;
+use App\Models\OrderStatusHistory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -1382,6 +1383,10 @@ class OrderAccountingService
                             : "Invoice {$invoiceNumber} issued (Pending Payment). Owed: ৳{$b['supplier']['supplier_owes_platform']}",
                     ]
                 );
+
+                if ($isDirectlyPaid) {
+                    $this->checkAndMarkOrderCompleted($order);
+                }
             }
 
             $courierSettledTotal = round($totalDeliveryFee + $totalCodFee, 2);
@@ -1544,6 +1549,11 @@ class OrderAccountingService
                             'admin_note' => "Approved via Vendor Invoice {$invoice->invoice_number}. Trx: {$trxId}",
                         ]
                     );
+
+                    $order = Order::find($orderId);
+                    if ($order) {
+                        $this->checkAndMarkOrderCompleted($order);
+                    }
                 }
             }
 
@@ -1739,12 +1749,67 @@ class OrderAccountingService
                 ]);
             }
 
-            return [
+            $result = [
                 'success' => true,
                 'message' => "Dropshipper profit of ৳{$payoutAmount} disbursed successfully via {$paymentMethod}.",
                 'settlement' => $resellerSettlement,
                 'breakdown' => $this->calculateOrderStakeBreakdown($lockedOrder),
             ];
+
+            // Check if order can now transition to Completed (Status 9)
+            $this->checkAndMarkOrderCompleted($lockedOrder);
+
+            return $result;
         });
+    }
+
+    /**
+     * Checks if all stakeholder settlements (CarryBee Courier, Dropshipper Profit, Supplier Product Price)
+     * are completely settled, and if so, automatically transitions the order to Completed (Status 9).
+     */
+    public function checkAndMarkOrderCompleted(Order $order): bool
+    {
+        $currentStatus = (int) $order->status;
+        // Only orders that are Delivered (6) or Carrybee Paid (10) can transition to Completed (9)
+        if (!in_array($currentStatus, [6, 10])) {
+            return false;
+        }
+
+        // Must be CarryBee paid if consignment exists
+        $hasConsignment = (bool) ($order->has_consignment || !empty($order->consignment_id));
+        if ($hasConsignment && !$order->is_carrybee_paid) {
+            return false;
+        }
+
+        // Check Dropshipper settlement (if dropshipper is attached, settlement must exist and be settled)
+        $hasReseller = !empty($order->user_id);
+        $resellerSettlement = OrderSettlement::where('order_id', $order->id)
+            ->where('settlement_type', OrderSettlement::TYPE_RESELLER_PROFIT)
+            ->first();
+        if ($hasReseller && (!$resellerSettlement || $resellerSettlement->status !== OrderSettlement::STATUS_SETTLED)) {
+            return false;
+        }
+
+        // Check Supplier settlement (if vendor is attached, settlement must exist and be settled)
+        $hasVendor = !empty($order->vendor_id);
+        $supplierSettlement = OrderSettlement::where('order_id', $order->id)
+            ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
+            ->first();
+        if ($hasVendor && (!$supplierSettlement || $supplierSettlement->status !== OrderSettlement::STATUS_SETTLED)) {
+            return false;
+        }
+
+        // All 3 stakeholder settlements are cleared! Transition to Completed (9)
+        $order->status = 9;
+        $order->save();
+
+        OrderStatusHistory::create([
+            'order_id' => $order->id,
+            'status_id' => 9,
+            'note' => 'All stakeholder settlements completed (CarryBee Courier, Dropshipper & Supplier). Order marked as Completed.',
+            'changed_by' => null,
+        ]);
+
+        return true;
     }
 }
