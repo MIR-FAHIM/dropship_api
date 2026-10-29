@@ -503,7 +503,7 @@ Route::prefix('delivery-companies')->group(function () {
     Route::get('/assigned-orders/{vendorId}', [DeliveryCompanyController::class, 'getAssinedDeliveryOrderList']);
     Route::post('/carrybee/{vendorId}/orders', [DeliveryCompanyController::class, 'carrybeeCreateOrder']);
     Route::post('/carrybee/{vendorId}/orders/{consignmentId}/cancel', [DeliveryCompanyController::class, 'carrybeeCancelOrder']);
-    Route::get('/carrybee/{vendorId}/orders/{consignmentId}/details', [DeliveryCompanyController::class, 'carrybeeOrderDetails']);
+    Route::get('/carrybee/{vendorId}/orders/{consignmentId}/details', [DeliveryCompanyController::class, 'carrybeeOrderDetails'])->withoutMiddleware('token');
     Route::post('/carrybee/{vendorId}/address-details', [DeliveryCompanyController::class, 'carrybeeAddressDetails']);
     // Carrybee Webhook & Payment Notification Endpoints
     Route::post('/carrybee/webhook', [CarrybeeWebhookController::class, 'handle'])->withoutMiddleware('token');

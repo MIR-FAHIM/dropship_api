@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CarrybeeWebhookEvent;
 use App\Models\DeliveryAssignedInfo;
 use App\Models\DeliveryCompany;
 use App\Models\CarryBeeOrderCreateForm;
@@ -9,6 +10,7 @@ use App\Models\Order;
 use App\Models\Vendor;
 use App\Models\VendorCarryBeeCredintial;
 use App\Service\CarrybeeService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -515,7 +517,12 @@ class DeliveryCompanyController extends Controller
                 return $this->failed('Carrybee API error', $result['body'], $result['status']);
             }
 
-            return $this->success('Order details fetched successfully', $result['body']);
+            $responseBody = $result['body'] ?? [];
+            if (is_array($responseBody)) {
+                $responseBody = $this->enrichWithCarrybeePaymentInfo($responseBody, $consignmentId);
+            }
+
+            return $this->success('Order details fetched successfully', $responseBody);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
@@ -528,7 +535,7 @@ class DeliveryCompanyController extends Controller
     public function carrybeeTrackOrder(Request $request, string $consignmentId)
     {
         try {
-            $deliveryInfo = DeliveryAssignedInfo::with('order')
+            $deliveryInfo = DeliveryAssignedInfo::with(['order.vendor', 'order.items.product.vendor'])
                 ->where('consignment_id', $consignmentId)
                 ->first();
 
@@ -549,36 +556,169 @@ class DeliveryCompanyController extends Controller
                 return $this->failed('Carrybee API error', $result['body'], $result['status']);
             }
 
-            // Sync transfer_status_id if provided by Carrybee
-            $body = $result['body'] ?? [];
-            $details = $body['data']['data'] ?? $body['data'] ?? [];
-            if ($deliveryInfo && is_array($details) && !empty($details['transfer_status_id'])) {
-                $deliveryInfo->update([
-                    'transfer_status_id' => $details['transfer_status_id'],
-                ]);
+            $responseBody = $result['body'] ?? [];
+            if (is_array($responseBody)) {
+                $responseBody = $this->enrichWithCarrybeePaymentInfo($responseBody, $consignmentId, $deliveryInfo);
             }
 
-            $response = $result['body'];
-            if (is_array($response)) {
-                $response['local_delivery_info'] = $deliveryInfo ? [
-                    'order_id'           => $deliveryInfo->order_id,
-                    'order_number'       => $deliveryInfo->order?->order_number,
-                    'merchant_order_id'  => $deliveryInfo->merchant_order_id,
-                    'recipient_name'     => $deliveryInfo->recipient_name,
-                    'recipient_phone'    => $deliveryInfo->recipient_phone,
-                    'recipient_address'  => $deliveryInfo->recipient_address,
-                    'collectable_amount' => $deliveryInfo->collectable_amount,
-                    'delivery_fee'       => $deliveryInfo->delivery_fee,
-                    'total_fee'          => $deliveryInfo->total_fee,
-                    'transfer_status_id' => $deliveryInfo->transfer_status_id,
-                    'created_at'         => $deliveryInfo->created_at,
-                ] : null;
-            }
-
-            return $this->success('Order tracking details fetched successfully', $response);
+            return $this->success('Order tracking details fetched successfully', $responseBody);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Enrich Carrybee API response body with local CarryBee payment, settlement, and webhook event status.
+     */
+    private function enrichWithCarrybeePaymentInfo(array $responseBody, string $consignmentId, ?DeliveryAssignedInfo $deliveryInfo = null): array
+    {
+        if (!$deliveryInfo) {
+            $deliveryInfo = DeliveryAssignedInfo::with(['order.vendor', 'order.items.product.vendor'])
+                ->where('consignment_id', $consignmentId)
+                ->first();
+        }
+
+        $details = $responseBody['data']['data'] ?? $responseBody['data'] ?? [];
+        $merchantOrderId = $details['merchant_order_id'] ?? $responseBody['merchant_order_id'] ?? null;
+
+        if (!$deliveryInfo && !empty($merchantOrderId)) {
+            $deliveryInfo = DeliveryAssignedInfo::with(['order.vendor', 'order.items.product.vendor'])
+                ->where('merchant_order_id', $merchantOrderId)
+                ->first();
+        }
+
+        $order = $deliveryInfo?->order;
+        if (!$order && !empty($merchantOrderId)) {
+            $order = Order::with(['vendor', 'items.product.vendor'])->where('order_number', $merchantOrderId)->first();
+        }
+        if (!$order) {
+            $order = Order::with(['vendor', 'items.product.vendor'])->where('consignment_id', $consignmentId)->first();
+        }
+
+        // Sync transfer_status_id if provided by Carrybee
+        if ($deliveryInfo && is_array($details) && !empty($details['transfer_status_id'])) {
+            $deliveryInfo->update([
+                'transfer_status_id' => $details['transfer_status_id'],
+            ]);
+        }
+
+        // Query Webhook Event
+        $latestPaidEvent = CarrybeeWebhookEvent::where(function ($q) use ($consignmentId, $order) {
+                $q->where('consignment_id', $consignmentId);
+                if ($order) {
+                    $q->orWhere('order_id', $order->id);
+                }
+            })
+            ->where('event', 'order.paid')
+            ->latest()
+            ->first();
+
+        $isCancelledOrReturned = $order && in_array((int) ($order->status?->id ?? $order->status), [7, 8, 10, 11]);
+
+        $isCarrybeePaid = false;
+        $carrybeeInvoiceId = null;
+        $carrybeePaidAt = null;
+        $carrybeeDisbursedTo = null;
+        $carrybeeDisbursedAmount = null;
+
+        if (!$isCancelledOrReturned) {
+            if ($order && ($order->is_carrybee_paid || !empty($order->carrybee_paid_at) || !empty($order->carrybee_invoice_id))) {
+                $isCarrybeePaid = true;
+                $carrybeeInvoiceId = $order->carrybee_invoice_id;
+                $carrybeePaidAt = $order->carrybee_paid_at;
+                $carrybeeDisbursedTo = $order->carrybee_disbursed_to;
+            } elseif ($deliveryInfo && (!empty($deliveryInfo->carrybee_paid_at) || !empty($deliveryInfo->carrybee_invoice_id))) {
+                $isCarrybeePaid = true;
+                $carrybeeInvoiceId = $deliveryInfo->carrybee_invoice_id;
+                $carrybeePaidAt = $deliveryInfo->carrybee_paid_at;
+            }
+
+            if ($latestPaidEvent) {
+                $isCarrybeePaid = true;
+                $carrybeeInvoiceId = $carrybeeInvoiceId ?: $latestPaidEvent->invoice_id;
+                $carrybeePaidAt = $carrybeePaidAt ?: ($latestPaidEvent->event_time ?: $latestPaidEvent->created_at);
+                $carrybeeDisbursedTo = $carrybeeDisbursedTo ?: $latestPaidEvent->disbursed_to;
+                $carrybeeDisbursedAmount = $latestPaidEvent->disbursed_amount;
+            }
+
+            // Sync order / delivery info if paid in webhook but not yet flagged
+            if ($isCarrybeePaid && $order) {
+                $orderDirty = false;
+                if ($carrybeeInvoiceId && empty($order->carrybee_invoice_id)) {
+                    $order->carrybee_invoice_id = $carrybeeInvoiceId;
+                    $orderDirty = true;
+                }
+                if ($carrybeePaidAt && empty($order->carrybee_paid_at)) {
+                    $order->carrybee_paid_at = $carrybeePaidAt;
+                    $orderDirty = true;
+                }
+                if ($carrybeeDisbursedTo && empty($order->carrybee_disbursed_to)) {
+                    $order->carrybee_disbursed_to = $carrybeeDisbursedTo;
+                    $orderDirty = true;
+                }
+                if ($orderDirty) {
+                    $order->save();
+                }
+            }
+
+            if ($isCarrybeePaid && $deliveryInfo) {
+                $infoDirty = false;
+                if ($carrybeeInvoiceId && empty($deliveryInfo->carrybee_invoice_id)) {
+                    $deliveryInfo->carrybee_invoice_id = $carrybeeInvoiceId;
+                    $infoDirty = true;
+                }
+                if ($carrybeePaidAt && empty($deliveryInfo->carrybee_paid_at)) {
+                    $deliveryInfo->carrybee_paid_at = $carrybeePaidAt;
+                    $infoDirty = true;
+                }
+                if ($infoDirty) {
+                    $deliveryInfo->save();
+                }
+            }
+        }
+
+        $vendor = $order?->vendor ?: $order?->items?->first()?->product?->vendor;
+        $hasOwnDeliveryAccount = (bool) ($vendor?->has_own_delivery_account ?? false);
+
+        $paymentMeta = [
+            'is_carrybee_paid'          => (bool) $isCarrybeePaid,
+            'carrybee_paid_status'      => $isCarrybeePaid ? 'paid' : 'pending',
+            'carrybee_invoice_id'       => $carrybeeInvoiceId,
+            'carrybee_paid_at'          => $carrybeePaidAt ? Carbon::parse($carrybeePaidAt)->toIso8601String() : null,
+            'carrybee_disbursed_to'     => $carrybeeDisbursedTo ?: ($hasOwnDeliveryAccount ? 'vendor' : 'platform'),
+            'carrybee_disbursed_amount' => $carrybeeDisbursedAmount !== null ? (float) $carrybeeDisbursedAmount : (float) ($order?->courier_net_payout ?? 0),
+            'webhook_event_found'       => !is_null($latestPaidEvent),
+            'local_order_id'            => $order?->id,
+            'local_order_number'        => $order?->order_number,
+            'local_payment_status'      => $order?->payment_status,
+        ];
+
+        // Merge into nested structures so callers accessing at any level get the fields
+        if (isset($responseBody['data']['data']) && is_array($responseBody['data']['data'])) {
+            $responseBody['data']['data'] = array_merge($responseBody['data']['data'], $paymentMeta);
+        }
+        if (isset($responseBody['data']) && is_array($responseBody['data'])) {
+            $responseBody['data'] = array_merge($responseBody['data'], $paymentMeta);
+        }
+        $responseBody = array_merge($responseBody, $paymentMeta);
+
+        if ($deliveryInfo && !isset($responseBody['local_delivery_info'])) {
+            $responseBody['local_delivery_info'] = [
+                'order_id'           => $deliveryInfo->order_id,
+                'order_number'       => $deliveryInfo->order?->order_number,
+                'merchant_order_id'  => $deliveryInfo->merchant_order_id,
+                'recipient_name'     => $deliveryInfo->recipient_name,
+                'recipient_phone'    => $deliveryInfo->recipient_phone,
+                'recipient_address'  => $deliveryInfo->recipient_address,
+                'collectable_amount' => $deliveryInfo->collectable_amount,
+                'delivery_fee'       => $deliveryInfo->delivery_fee,
+                'total_fee'          => $deliveryInfo->total_fee,
+                'transfer_status_id' => $deliveryInfo->transfer_status_id,
+                'created_at'         => $deliveryInfo->created_at,
+            ];
+        }
+
+        return $responseBody;
     }
 
     /**

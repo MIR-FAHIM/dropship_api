@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\OrderStatus;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Models\VendorCarryBeeCredintial;
 use App\Service\ApiTokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -371,4 +372,96 @@ class CarrybeePaidWebhookTest extends TestCase
 
         $this->assertFalse($order->fresh()->is_carrybee_paid);
     }
+
+    public function test_carrybee_order_details_and_track_includes_carrybee_paid_status(): void
+    {
+        \Illuminate\Support\Facades\Http::fake([
+            'https://developers.carrybee.com/api/v2/*' => \Illuminate\Support\Facades\Http::response([
+                'error' => false,
+                'message' => 'Order details',
+                'data' => [
+                    'transfer_status' => 'Delivered',
+                    'consignment_id' => 'CB-DETAILS-999',
+                    'merchant_order_id' => 'ORD-CB-999',
+                    'recipient_name' => 'John Doe',
+                    'recipient_phone' => '01700000000',
+                    'collectable_amount' => '500',
+                    'collected_amount' => '500',
+                    'delivery_fee' => '60',
+                    'cod_fee' => 5,
+                ],
+            ], 200),
+        ]);
+
+        $vendorUser = User::create([
+            'name' => 'Test Vendor',
+            'email' => 'vendor_details@example.com',
+            'password' => bcrypt('password'),
+            'role' => 'vendor',
+            'user_type' => 'vendor',
+            'banned' => 0,
+        ]);
+
+        $vendor = Vendor::create([
+            'user_id' => $vendorUser->id,
+            'shop_name' => 'Details Vendor Shop',
+            'has_own_delivery_account' => true,
+        ]);
+
+        VendorCarryBeeCredintial::create([
+            'vendor_id' => $vendorUser->id,
+            'client_id' => 'cid_test',
+            'client_secret' => 'csec_test',
+            'client_context' => 'cctx_test',
+            'is_active' => true,
+        ]);
+
+        $order = Order::create([
+            'user_id' => $this->admin->id,
+            'vendor_id' => $vendor->id,
+            'order_number' => 'ORD-CB-999',
+            'status' => 6, // Delivered
+            'payment_status' => 'paid',
+            'total' => 650,
+            'remaining_cod' => 500,
+            'is_carrybee_paid' => true,
+            'carrybee_invoice_id' => 'INV-CB-PAID-777',
+            'carrybee_paid_at' => now(),
+            'carrybee_disbursed_to' => 'vendor',
+        ]);
+
+        $deliveryInfo = DeliveryAssignedInfo::create([
+            'order_id' => $order->id,
+            'consignment_id' => 'CB-DETAILS-999',
+            'delivery_company_id' => $vendor->id,
+            'merchant_order_id' => 'ORD-CB-999',
+            'recipient_name' => 'John Doe',
+            'recipient_phone' => '01700000000',
+            'recipient_address' => 'Dhaka',
+            'collectable_amount' => 500,
+            'delivery_fee' => 60,
+            'total_fee' => 65,
+            'carrybee_invoice_id' => 'INV-CB-PAID-777',
+            'carrybee_paid_at' => now(),
+        ]);
+
+        // 1. Call carrybeeOrderDetails without token (public endpoint)
+        $detailsRes = $this->getJson("/api/delivery-companies/carrybee/{$vendor->id}/orders/CB-DETAILS-999/details");
+        $detailsRes->assertStatus(200)
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('data.is_carrybee_paid', true)
+            ->assertJsonPath('data.carrybee_paid_status', 'paid')
+            ->assertJsonPath('data.carrybee_invoice_id', 'INV-CB-PAID-777')
+            ->assertJsonPath('data.carrybee_disbursed_to', 'vendor')
+            ->assertJsonPath('data.data.is_carrybee_paid', true)
+            ->assertJsonPath('data.data.carrybee_invoice_id', 'INV-CB-PAID-777');
+
+        // 2. Call carrybeeTrackOrder without token (public endpoint)
+        $trackRes = $this->getJson("/api/delivery-companies/carrybee/track/CB-DETAILS-999");
+        $trackRes->assertStatus(200)
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('data.is_carrybee_paid', true)
+            ->assertJsonPath('data.carrybee_invoice_id', 'INV-CB-PAID-777');
+    }
 }
+
