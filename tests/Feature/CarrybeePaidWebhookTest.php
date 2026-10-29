@@ -346,5 +346,29 @@ class CarrybeePaidWebhookTest extends TestCase
         $this->assertNull($freshReset->carrybee_invoice_id);
         $this->assertNull($freshReset->carrybee_paid_at);
         $this->assertFalse($freshReset->is_carrybee_paid);
+
+        // 3. Manually mark without note or invoice_id (empty optional fields)
+        $markWithoutNoteRes = $this->withHeaders($this->adminHeaders)
+            ->postJson("/api/delivery-companies/carrybee/manual-order-payment/{$order->id}", [
+                'action' => 'mark_paid',
+            ]);
+
+        $markWithoutNoteRes->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+
+        $fresh2 = $order->fresh();
+        $this->assertTrue($fresh2->is_carrybee_paid);
+        $this->assertStringStartsWith('MANUAL-', $fresh2->carrybee_invoice_id);
+
+        // 4. Manually reset without note
+        $resetWithoutNoteRes = $this->withHeaders($this->adminHeaders)
+            ->postJson("/api/delivery-companies/carrybee/manual-order-payment/{$order->id}", [
+                'action' => 'reset',
+            ]);
+
+        $resetWithoutNoteRes->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+
+        $this->assertFalse($order->fresh()->is_carrybee_paid);
     }
 }

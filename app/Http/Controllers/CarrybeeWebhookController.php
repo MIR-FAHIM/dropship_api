@@ -231,7 +231,7 @@ class CarrybeeWebhookController extends Controller
             CarrybeeWebhookEvent::create([
                 'order_id' => $order->id,
                 'event' => 'order.paid',
-                'fingerprint' => 'manual-' . $order->id . '-' . time(),
+                'fingerprint' => substr('manual-' . $order->id . '-' . uniqid() . '-' . bin2hex(random_bytes(4)), 0, 64),
                 'consignment_id' => $order->consignment_id ?: ($order->deliveryInformation?->consignment_id ?: 'MANUAL-' . $order->order_number),
                 'invoice_id' => $invoiceId,
                 'disbursed_to' => $disbursedTo,
@@ -249,7 +249,7 @@ class CarrybeeWebhookController extends Controller
             OrderStatusHistory::create([
                 'order_id' => $order->id,
                 'status_id' => (int) $order->status,
-                'note' => 'Manual Action: Marked as CarryBee Paid (Invoice: ' . $invoiceId . ', Disbursed To: ' . $disbursedTo . ')' . ($validated['note'] ? ' - ' . $validated['note'] : ''),
+                'note' => 'Manual Action: Marked as CarryBee Paid (Invoice: ' . $invoiceId . ', Disbursed To: ' . $disbursedTo . ')' . (!empty($validated['note']) ? ' - ' . $validated['note'] : ''),
                 'changed_by' => $adminUser?->id,
             ]);
 
@@ -282,7 +282,7 @@ class CarrybeeWebhookController extends Controller
             OrderStatusHistory::create([
                 'order_id' => $order->id,
                 'status_id' => (int) $order->status,
-                'note' => 'Manual Action: Reset CarryBee Paid status back to unpaid/pending' . ($validated['note'] ? ' - ' . $validated['note'] : ''),
+                'note' => 'Manual Action: Reset CarryBee Paid status back to unpaid/pending' . (!empty($validated['note']) ? ' - ' . $validated['note'] : ''),
                 'changed_by' => $adminUser?->id,
             ]);
 
