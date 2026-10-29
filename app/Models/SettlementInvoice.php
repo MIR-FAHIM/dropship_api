@@ -91,4 +91,50 @@ class SettlementInvoice extends Model
     {
         return $this->belongsTo(User::class, 'rejected_by');
     }
+
+    /**
+     * Backward-compatible accessor: ensures orders_breakdown entries have 'items' with product details and thumbnail.
+     */
+    public function getOrdersBreakdownAttribute($value)
+    {
+        $breakdown = is_string($value) ? json_decode($value, true) : $value;
+        if (!is_array($breakdown)) {
+            return [];
+        }
+
+        $needsItems = false;
+        $orderIds = [];
+        foreach ($breakdown as $b) {
+            if (empty($b['items']) && !empty($b['order_id'])) {
+                $needsItems = true;
+                $orderIds[] = (int) $b['order_id'];
+            }
+        }
+
+        if ($needsItems && !empty($orderIds)) {
+            $orders = Order::with(['items.product.primaryImage'])->whereIn('id', $orderIds)->get()->keyBy('id');
+            foreach ($breakdown as &$b) {
+                if (empty($b['items']) && !empty($b['order_id']) && isset($orders[$b['order_id']])) {
+                    $order = $orders[$b['order_id']];
+                    $itemsData = [];
+                    foreach ($order->items as $item) {
+                        $product = $item->product;
+                        $itemsData[] = [
+                            'id' => $item->id,
+                            'product_id' => $item->product_id,
+                            'product_name' => $item->product_name ?: ($product?->name ?? ('Product #' . $item->product_id)),
+                            'qty' => (int) ($item->qty ?? $item->quantity ?? 1),
+                            'unit_price' => round((float) ($item->unit_price ?? $product?->unit_price ?? 0), 2),
+                            'sku' => $item->sku ?: $product?->sku,
+                            'product_thumbnail' => $product?->primaryImage?->file_name ?: ($product?->primaryImage?->url ?: $product?->thumbnail_img),
+                        ];
+                    }
+                    $b['items'] = $itemsData;
+                }
+            }
+            unset($b);
+        }
+
+        return $breakdown;
+    }
 }

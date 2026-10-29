@@ -967,6 +967,7 @@ class OrderAccountingService
         $order->loadMissing([
             'items.shop',
             'items.product.vendor',
+            'items.product.primaryImage',
             'deliveryInformation',
             'user'
         ]);
@@ -1026,6 +1027,7 @@ class OrderAccountingService
         $adminBasePrice = 0.00;
         $resellerSellingPrice = 0.00;
 
+        $itemsData = [];
         foreach ($order->items as $item) {
             $qty = (int) ($item->qty ?? $item->quantity ?? 1);
             $vPrice = round((float) ($item->unit_price ?? $item->product?->unit_price ?? 0), 2);
@@ -1035,6 +1037,21 @@ class OrderAccountingService
             $supplierVendorPrice += round($vPrice * $qty, 2);
             $adminBasePrice += round($aPrice * $qty, 2);
             $resellerSellingPrice += round($sPrice * $qty, 2);
+
+            $product = $item->product;
+            $thumbnail = $product?->primaryImage?->file_name
+                ?: ($product?->primaryImage?->url
+                ?: $product?->thumbnail_img);
+
+            $itemsData[] = [
+                'id' => $item->id,
+                'product_id' => $item->product_id,
+                'product_name' => $item->product_name ?: ($product?->name ?? ('Product #' . $item->product_id)),
+                'qty' => $qty,
+                'unit_price' => $vPrice,
+                'sku' => $item->sku ?: $product?->sku,
+                'product_thumbnail' => $thumbnail,
+            ];
         }
 
         $supplierVendorPrice = round($supplierVendorPrice, 2);
@@ -1144,6 +1161,7 @@ class OrderAccountingService
                 'sum_difference' => ($courierCollectable <= 0) ? 0.00 : round($supplierOwesPlatform - ($dropshipperProfit + $platformNetProfit), 2),
             ],
             'is_editable' => !($supplierSettlement?->status === OrderSettlement::STATUS_SETTLED && $resellerSettlement?->status === OrderSettlement::STATUS_SETTLED),
+            'items' => $itemsData,
         ];
     }
 

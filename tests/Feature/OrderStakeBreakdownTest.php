@@ -400,6 +400,13 @@ class OrderStakeBreakdownTest extends TestCase
         $this->assertEquals(650.00, $invoice['total_dropshipper_payout']);
         $this->assertEquals(164.00, $invoice['total_platform_net_profit']);
         $this->assertEquals('BRAC-TRX-998877', $invoice['trx_id']);
+
+        // Assert items with product details exist in orders breakdown
+        $this->assertNotEmpty($invoice['orders_breakdown']);
+        $this->assertNotEmpty($invoice['orders_breakdown'][0]['items']);
+        $this->assertEquals($this->product->id, $invoice['orders_breakdown'][0]['items'][0]['product_id']);
+        $this->assertEquals('Test Premium Watch', $invoice['orders_breakdown'][0]['items'][0]['product_name']);
+        $this->assertEquals(1, $invoice['orders_breakdown'][0]['items'][0]['qty']);
     }
 
     public function test_admin_can_disburse_dropshipper_profit_directly()
@@ -534,4 +541,56 @@ class OrderStakeBreakdownTest extends TestCase
             'status' => OrderSettlement::STATUS_SETTLED,
         ]);
     }
+
+    public function test_legacy_invoice_orders_breakdown_hydrates_items_automatically()
+    {
+        $order = Order::create([
+            'order_number' => 'ORD-LEGACY-001',
+            'user_id' => $this->dropshipper->id,
+            'vendor_id' => $this->vendor->id,
+            'total' => 2630.00,
+            'shipping_fee' => 130.00,
+            'remaining_cod' => 2630.00,
+            'courier_account_owner' => 'vendor',
+            'status' => 'Delivered',
+        ]);
+        OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => $this->product->id,
+            'shop_id' => $this->vendor->id,
+            'product_name' => 'Legacy Watch Item',
+            'unit_price' => 1750.00,
+            'admin_price' => 1838.00,
+            'reseller_price' => 2500.00,
+            'qty' => 2,
+        ]);
+
+        // Invoice created with legacy breakdown (no 'items' key)
+        $legacyBreakdown = [
+            [
+                'order_id' => $order->id,
+                'order_number' => 'ORD-LEGACY-001',
+                'supplier' => ['vendor_price' => 3500.00, 'supplier_owes_platform' => 1000.00],
+            ]
+        ];
+
+        $invoice = SettlementInvoice::create([
+            'invoice_number' => 'INV-LEGACY-001',
+            'vendor_id' => $this->vendor->id,
+            'orders_count' => 1,
+            'total_amount_owed' => 1000.00,
+            'status' => 'pending',
+            'order_ids' => [$order->id],
+            'orders_breakdown' => $legacyBreakdown,
+        ]);
+
+        // Access via model attribute
+        $hydrated = $invoice->orders_breakdown;
+        $this->assertNotEmpty($hydrated);
+        $this->assertNotEmpty($hydrated[0]['items']);
+        $this->assertEquals($this->product->id, $hydrated[0]['items'][0]['product_id']);
+        $this->assertEquals('Legacy Watch Item', $hydrated[0]['items'][0]['product_name']);
+        $this->assertEquals(2, $hydrated[0]['items'][0]['qty']);
+    }
 }
+
