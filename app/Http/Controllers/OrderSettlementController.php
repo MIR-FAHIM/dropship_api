@@ -673,7 +673,13 @@ class OrderSettlementController extends Controller
     public function vendorInvoiceDetails(Request $request, $id)
     {
         try {
-            $invoice = SettlementInvoice::with(['vendor', 'creator', 'payer', 'approver', 'rejecter'])->find($id);
+            $query = SettlementInvoice::with(['vendor', 'creator', 'payer', 'approver', 'rejecter']);
+            if (is_numeric($id)) {
+                $invoice = $query->find($id);
+            } else {
+                $invoice = $query->where('invoice_number', $id)->first();
+            }
+
             if (!$invoice) {
                 return $this->failed('Settlement invoice not found', null, 404);
             }
