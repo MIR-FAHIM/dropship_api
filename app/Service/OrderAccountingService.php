@@ -976,9 +976,13 @@ class OrderAccountingService
         $consignmentId = $order->consignment_id ?: $deliveryInfo?->consignment_id;
 
         // Courier collectable
-        $courierCollectable = $order->remaining_cod !== null && (float) $order->remaining_cod > 0
-            ? round((float) $order->remaining_cod, 2)
-            : ($deliveryInfo?->collectable_amount ? round((float) $deliveryInfo->collectable_amount, 2) : $orderTotal);
+        if ($order->remaining_cod !== null) {
+            $courierCollectable = round((float) $order->remaining_cod, 2);
+        } elseif ($deliveryInfo?->collectable_amount !== null) {
+            $courierCollectable = round((float) $deliveryInfo->collectable_amount, 2);
+        } else {
+            $courierCollectable = $orderTotal;
+        }
 
         // Courier Delivery Fee and COD Fee resolution
         // Highest priority: CarryBee Delivery Information from Consignment ID
@@ -1000,7 +1004,7 @@ class OrderAccountingService
             $courierCodFee = round((float) $order->actual_cod_fee, 2);
         } else {
             // Default 1% COD fee on collectable
-            $courierCodFee = round($courierCollectable * 0.01, 2);
+            $courierCodFee = $courierCollectable > 0 ? round($courierCollectable * 0.01, 2) : 0.00;
         }
 
         $totalCourierCost = round($courierDeliveryFee + $courierCodFee, 2);
@@ -1035,8 +1039,13 @@ class OrderAccountingService
         // When vendor has own delivery account: courier delivers all funds to vendor.
         // Vendor owes Platform = Courier Net to Supplier - Supplier Vendor Price
         if ($hasOwnDeliveryAccount) {
-            $supplierOwesPlatform = round($courierNetToSupplier - $supplierVendorPrice, 2);
-            $platformOwesSupplier = 0.00;
+            if ($courierCollectable <= 0 && $supplierVendorPrice <= 0) {
+                $supplierOwesPlatform = 0.00;
+                $platformOwesSupplier = 0.00;
+            } else {
+                $supplierOwesPlatform = round($courierNetToSupplier - $supplierVendorPrice, 2);
+                $platformOwesSupplier = 0.00;
+            }
         } else {
             $supplierOwesPlatform = 0.00;
             $platformOwesSupplier = $supplierVendorPrice;
@@ -1045,18 +1054,23 @@ class OrderAccountingService
         // Dropshipper profit calculation:
         // Formula: Customer collected - Admin Base Price - Customer Delivery Charge - Courier COD Fee
         $customerCollected = $courierCollectable + ($advanceStatus === 'approved' ? $advanceAmount : 0.00);
-        $dropshipperProfit = round($customerCollected - $adminBasePrice - $customerShippingCharge - $courierCodFee, 2);
+        if ($courierCollectable <= 0 && ($advanceStatus !== 'approved' || $advanceAmount <= 0)) {
+            $dropshipperProfit = 0.00;
+        } else {
+            $dropshipperProfit = max(0.00, round($customerCollected - $adminBasePrice - $customerShippingCharge - $courierCodFee, 2));
+        }
 
         // Platform Net Profit calculation:
-        // Platform Commission on Product (admin_price - vendor_price) + Platform Delivery Margin (customer_shipping - courier_delivery_fee)
         $platformProductCommission = round($adminBasePrice - $supplierVendorPrice, 2);
         $platformDeliveryMargin = round($customerShippingCharge - $courierDeliveryFee, 2);
         $platformNetProfit = round($platformProductCommission + $platformDeliveryMargin, 2);
 
         // Balance check: Supplier Owes Platform == Dropshipper Profit + Platform Net Profit (for has_own_delivery_account)
-        $isBalanced = $hasOwnDeliveryAccount
-            ? (abs($supplierOwesPlatform - ($dropshipperProfit + $platformNetProfit)) < 0.05)
-            : true;
+        $isBalanced = ($courierCollectable <= 0)
+            ? true
+            : ($hasOwnDeliveryAccount
+                ? (abs($supplierOwesPlatform - ($dropshipperProfit + $platformNetProfit)) < 0.05)
+                : true);
 
         // Existing settlements check
         $settlements = OrderSettlement::where('order_id', $order->id)->get();
@@ -1121,7 +1135,7 @@ class OrderAccountingService
             ],
             'balance' => [
                 'is_balanced' => $isBalanced,
-                'sum_difference' => round($supplierOwesPlatform - ($dropshipperProfit + $platformNetProfit), 2),
+                'sum_difference' => ($courierCollectable <= 0) ? 0.00 : round($supplierOwesPlatform - ($dropshipperProfit + $platformNetProfit), 2),
             ],
             'is_editable' => !($supplierSettlement?->status === OrderSettlement::STATUS_SETTLED && $resellerSettlement?->status === OrderSettlement::STATUS_SETTLED),
         ];
@@ -1152,12 +1166,41 @@ class OrderAccountingService
             if (array_key_exists('remaining_cod', $adjusted)) {
                 $updates['remaining_cod'] = round((float) $adjusted['remaining_cod'], 2);
             }
+            if (array_key_exists('collectable_amount', $adjusted)) {
+                $updates['remaining_cod'] = round((float) $adjusted['collectable_amount'], 2);
+            }
 
             if (!empty($updates)) {
                 $lockedOrder->update($updates);
             }
 
-            // If item prices were adjusted
+            // Also update DeliveryAssignedInfo if exists
+            $deliveryInfo = $lockedOrder->deliveryInformation;
+            if ($deliveryInfo) {
+                $dUpdates = [];
+                if (array_key_exists('collectable_amount', $adjusted)) {
+                    $dUpdates['collectable_amount'] = round((float) $adjusted['collectable_amount'], 2);
+                }
+                if (array_key_exists('courier_delivery_fee', $adjusted)) {
+                    $dUpdates['delivery_fee'] = round((float) $adjusted['courier_delivery_fee'], 2);
+                }
+                if (isset($dUpdates['delivery_fee']) || array_key_exists('courier_cod_fee', $adjusted) || (isset($dUpdates['collectable_amount']) && $dUpdates['collectable_amount'] <= 0)) {
+                    $delFee = $dUpdates['delivery_fee'] ?? (float) ($deliveryInfo->delivery_fee ?? 0);
+                    if (array_key_exists('courier_cod_fee', $adjusted)) {
+                        $codFee = (float) $adjusted['courier_cod_fee'];
+                    } elseif (isset($dUpdates['collectable_amount']) && $dUpdates['collectable_amount'] <= 0) {
+                        $codFee = 0.0;
+                    } else {
+                        $codFee = max(0, (float) (($deliveryInfo->total_fee ?? 0) - $delFee));
+                    }
+                    $dUpdates['total_fee'] = round($delFee + $codFee, 2);
+                }
+                if (!empty($dUpdates)) {
+                    $deliveryInfo->update($dUpdates);
+                }
+            }
+
+            // If item prices were adjusted via items array
             if (!empty($adjusted['items']) && is_array($adjusted['items'])) {
                 foreach ($adjusted['items'] as $itemData) {
                     if (!empty($itemData['id'])) {
@@ -1171,7 +1214,30 @@ class OrderAccountingService
                         }
                     }
                 }
+            } elseif (array_key_exists('supplier_vendor_price', $adjusted) || array_key_exists('admin_base_price', $adjusted) || array_key_exists('reseller_price', $adjusted)) {
+                // If top-level stake prices are sent directly from the breakdown modal
+                $firstItem = $lockedOrder->items()->first();
+                if ($firstItem) {
+                    $qty = (int) ($firstItem->qty ?? 1);
+                    if ($qty <= 0) $qty = 1;
+                    $itemUpdates = [];
+                    if (array_key_exists('supplier_vendor_price', $adjusted)) {
+                        $itemUpdates['unit_price'] = round((float) $adjusted['supplier_vendor_price'] / $qty, 2);
+                    }
+                    if (array_key_exists('admin_base_price', $adjusted)) {
+                        $itemUpdates['admin_price'] = round((float) $adjusted['admin_base_price'] / $qty, 2);
+                    }
+                    if (array_key_exists('reseller_price', $adjusted)) {
+                        $itemUpdates['reseller_price'] = round((float) $adjusted['reseller_price'] / $qty, 2);
+                    }
+                    if (!empty($itemUpdates)) {
+                        $firstItem->update($itemUpdates);
+                    }
+                }
             }
+
+            // Reload relationships
+            $lockedOrder->load(['items', 'deliveryInformation']);
 
             // Recalculate fresh breakdown
             $breakdown = $this->calculateOrderStakeBreakdown($lockedOrder);
@@ -1181,12 +1247,24 @@ class OrderAccountingService
                 ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
                 ->first();
             if ($supplierSettlement && $supplierSettlement->status !== OrderSettlement::STATUS_SETTLED) {
+                $vendorPrice = $breakdown['supplier']['vendor_price'];
+                $courierNet = $breakdown['courier']['net_received_by_supplier'];
+                $supplierOwes = $breakdown['supplier']['supplier_owes_platform'];
+
+                if (isset($adjusted['collectable_amount']) && (float)$adjusted['collectable_amount'] <= 0 && $vendorPrice <= 0) {
+                    $supplierOwes = 0.00;
+                }
+
+                $adminNote = !empty($adjusted['admin_note'])
+                    ? $adjusted['admin_note']
+                    : "Supplier settlement adjusted by admin #{$adminUserId}. Supplier owes platform: ৳{$supplierOwes}";
+
                 $supplierSettlement->update([
-                    'gross_entitlement' => $breakdown['supplier']['vendor_price'],
-                    'deducted_by_courier' => $breakdown['courier']['net_received_by_supplier'],
-                    'settleable_amount' => $breakdown['supplier']['supplier_owes_platform'],
-                    'net_payable_amount' => $breakdown['supplier']['supplier_owes_platform'],
-                    'admin_note' => "Supplier settlement adjusted by admin #{$adminUserId}. Supplier owes platform: ৳{$breakdown['supplier']['supplier_owes_platform']}",
+                    'gross_entitlement' => $vendorPrice,
+                    'deducted_by_courier' => $courierNet,
+                    'settleable_amount' => $supplierOwes,
+                    'net_payable_amount' => $supplierOwes,
+                    'admin_note' => $adminNote,
                 ]);
             }
 
@@ -1194,11 +1272,19 @@ class OrderAccountingService
                 ->where('settlement_type', OrderSettlement::TYPE_RESELLER_PROFIT)
                 ->first();
             if ($resellerSettlement && $resellerSettlement->status !== OrderSettlement::STATUS_SETTLED) {
+                $dropshipperProfit = array_key_exists('dropshipper_profit', $adjusted)
+                    ? round((float) $adjusted['dropshipper_profit'], 2)
+                    : $breakdown['dropshipper']['profit'];
+
+                $adminNote = !empty($adjusted['admin_note'])
+                    ? $adjusted['admin_note']
+                    : "Dropshipper profit adjusted by admin #{$adminUserId}: ৳{$dropshipperProfit}";
+
                 $resellerSettlement->update([
-                    'gross_entitlement' => $breakdown['dropshipper']['profit'],
-                    'settleable_amount' => $breakdown['dropshipper']['profit'],
-                    'net_payable_amount' => $breakdown['dropshipper']['profit'],
-                    'admin_note' => "Dropshipper profit adjusted by admin #{$adminUserId}: ৳{$breakdown['dropshipper']['profit']}",
+                    'gross_entitlement' => $dropshipperProfit,
+                    'settleable_amount' => $dropshipperProfit,
+                    'net_payable_amount' => $dropshipperProfit,
+                    'admin_note' => $adminNote,
                 ]);
             }
 

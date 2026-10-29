@@ -207,6 +207,110 @@ class OrderStakeBreakdownTest extends TestCase
         $this->assertTrue($data['balance']['is_balanced']);
     }
 
+    public function test_admin_can_adjust_breakdown_for_cancelled_order_with_zero_cod_and_stakes()
+    {
+        $order = Order::create([
+            'order_number' => 'ORD-CANCEL-TEST',
+            'user_id' => $this->dropshipper->id,
+            'vendor_id' => $this->vendor->id,
+            'total' => 2630.00,
+            'shipping_fee' => 130.00,
+            'remaining_cod' => 2630.00,
+            'courier_account_owner' => 'vendor',
+            'status' => 'Cancelled',
+        ]);
+
+        $item = OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => $this->product->id,
+            'shop_id' => $this->vendor->id,
+            'unit_price' => 1750.00,
+            'admin_price' => 1838.00,
+            'reseller_price' => 2500.00,
+            'qty' => 1,
+        ]);
+
+        $deliveryInfo = DeliveryAssignedInfo::create([
+            'order_id' => $order->id,
+            'consignment_id' => 'CAN123456',
+            'recipient_name' => 'Cancel Customer',
+            'recipient_phone' => '01700000000',
+            'recipient_address' => 'Test Address',
+            'collectable_amount' => 2630.00,
+            'delivery_fee' => 105.00,
+            'total_fee' => 131.30,
+        ]);
+
+        // Create settlement records
+        OrderSettlement::create([
+            'order_id' => $order->id,
+            'vendor_id' => $this->vendor->id,
+            'user_type' => 'vendor',
+            'settlement_type' => OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE,
+            'gross_entitlement' => 1750.00,
+            'settleable_amount' => 748.70,
+            'net_payable_amount' => 748.70,
+            'status' => OrderSettlement::STATUS_PENDING,
+        ]);
+
+        OrderSettlement::create([
+            'order_id' => $order->id,
+            'payable_user_id' => $this->dropshipper->id,
+            'user_type' => 'dropshipper',
+            'settlement_type' => OrderSettlement::TYPE_RESELLER_PROFIT,
+            'gross_entitlement' => 635.70,
+            'settleable_amount' => 635.70,
+            'net_payable_amount' => 635.70,
+            'status' => OrderSettlement::STATUS_PENDING,
+        ]);
+
+        // Admin zeroes out COD, COD fee, product stakes, and dropshipper profit
+        $response = $this->withHeaders($this->adminHeaders)->postJson("/api/order-settlements/orders/{$order->id}/update-breakdown", [
+            'collectable_amount' => 0.00,
+            'courier_delivery_fee' => 105.00,
+            'courier_cod_fee' => 0.00,
+            'supplier_vendor_price' => 0.00,
+            'admin_base_price' => 0.00,
+            'reseller_price' => 0.00,
+            'dropshipper_profit' => 0.00,
+            'admin_note' => 'Order cancelled - COD and product stakes set to 0',
+        ]);
+
+        $response->assertStatus(200);
+        $data = $response->json('data');
+
+        $this->assertEquals(0.00, (float) $data['courier']['collectable_amount']);
+        $this->assertEquals(105.00, (float) $data['courier']['delivery_fee']);
+        $this->assertEquals(0.00, (float) $data['courier']['cod_fee']);
+        $this->assertEquals(-105.00, (float) $data['courier']['net_received_by_supplier']);
+        $this->assertEquals(0.00, (float) $data['supplier']['vendor_price']);
+        $this->assertEquals(0.00, (float) $data['supplier']['supplier_owes_platform']);
+        $this->assertEquals(0.00, (float) $data['dropshipper']['profit']);
+        $this->assertTrue($data['balance']['is_balanced']);
+        $this->assertEquals(0.00, (float) $data['balance']['sum_difference']);
+
+        // Check DeliveryAssignedInfo was updated
+        $deliveryInfo->refresh();
+        $this->assertEquals(0.00, (float) $deliveryInfo->collectable_amount);
+        $this->assertEquals(105.00, (float) $deliveryInfo->total_fee);
+
+        // Check Order was updated
+        $order->refresh();
+        $this->assertEquals(0.00, (float) $order->remaining_cod);
+
+        // Check OrderSettlements were adjusted
+        $supplierSettlement = OrderSettlement::where('order_id', $order->id)
+            ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
+            ->first();
+        $this->assertEquals(0.00, (float) $supplierSettlement->settleable_amount);
+        $this->assertEquals('Order cancelled - COD and product stakes set to 0', $supplierSettlement->admin_note);
+
+        $resellerSettlement = OrderSettlement::where('order_id', $order->id)
+            ->where('settlement_type', OrderSettlement::TYPE_RESELLER_PROFIT)
+            ->first();
+        $this->assertEquals(0.00, (float) $resellerSettlement->settleable_amount);
+    }
+
     public function test_multi_order_vendor_settlement_invoice_creation()
     {
         // Create 2 orders for Vendor V41 (matching Alamgir & Emon)

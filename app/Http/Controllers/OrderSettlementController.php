@@ -557,9 +557,15 @@ class OrderSettlementController extends Controller
             }
 
             $validated = $request->validate([
+                'collectable_amount' => 'nullable|numeric|min:0',
                 'courier_delivery_fee' => 'nullable|numeric|min:0',
                 'courier_cod_fee' => 'nullable|numeric|min:0',
                 'remaining_cod' => 'nullable|numeric|min:0',
+                'supplier_vendor_price' => 'nullable|numeric|min:0',
+                'admin_base_price' => 'nullable|numeric|min:0',
+                'reseller_price' => 'nullable|numeric|min:0',
+                'dropshipper_profit' => 'nullable|numeric|min:0',
+                'admin_note' => 'nullable|string',
                 'items' => 'nullable|array',
                 'items.*.id' => 'required|integer',
                 'items.*.unit_price' => 'nullable|numeric|min:0',
