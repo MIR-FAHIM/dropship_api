@@ -81,6 +81,7 @@ class Order extends Model
         'has_consignment',
         'is_editable',
         'consignment_id',
+        'is_carrybee_paid',
     ];
 
     /**
@@ -238,5 +239,40 @@ class Order extends Model
     public function getConsignmentIdAttribute(): ?string
     {
         return $this->getConsignmentId();
+    }
+
+    public function getIsCarrybeePaidAttribute(): bool
+    {
+        // Cancelled or returned orders can never be CarryBee paid
+        if (in_array((int) $this->status, [7, 8, 10, 11])) {
+            return false;
+        }
+
+        // Must have an actual CarryBee consignment / delivery assignment
+        if (!$this->hasConsignment()) {
+            return false;
+        }
+
+        // Must have an actual CarryBee invoice ID or webhook paid_at timestamp
+        $hasCarrybeeInvoice = !empty($this->attributes['carrybee_invoice_id'])
+            || ($this->relationLoaded('deliveryInformation') && !empty($this->deliveryInformation?->carrybee_invoice_id));
+
+        $hasCarrybeePaidAt = !empty($this->carrybee_paid_at)
+            || ($this->relationLoaded('deliveryInformation') && !empty($this->deliveryInformation?->carrybee_paid_at));
+
+        return $hasCarrybeeInvoice || $hasCarrybeePaidAt;
+    }
+
+    public function getCarrybeeInvoiceIdAttribute(): ?string
+    {
+        if (!empty($this->attributes['carrybee_invoice_id'])) {
+            return (string) $this->attributes['carrybee_invoice_id'];
+        }
+
+        if ($this->relationLoaded('deliveryInformation') && !empty($this->deliveryInformation?->carrybee_invoice_id)) {
+            return (string) $this->deliveryInformation->carrybee_invoice_id;
+        }
+
+        return null;
     }
 }

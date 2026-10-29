@@ -1224,6 +1224,10 @@ class OrderController extends Controller
                     ]);
                 }
             } elseif (in_array($statusId, [7, 8, 10, 11])) {
+                $order->payment_status = 'unpaid';
+                $order->courier_payout_status = 'pending';
+                $order->save();
+
                 $this->orderAccountingService->processOrderReversal($order, "Order status changed to {$statusName}");
             }
 

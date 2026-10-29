@@ -278,4 +278,73 @@ class CarrybeePaidWebhookTest extends TestCase
 
         $this->assertGreaterThanOrEqual(1, count($listResponse->json('data.data')));
     }
+
+    public function test_admin_can_manually_mark_and_reset_carrybee_payment(): void
+    {
+        $vendorUser = User::create([
+            'name'      => 'Supplier Ripon',
+            'email'     => 'ripon_manual@example.com',
+            'password'  => bcrypt('password123'),
+            'user_type' => 'vendor',
+        ]);
+
+        $vendor = Vendor::create([
+            'user_id'                  => $vendorUser->id,
+            'shop_name'                => 'Manual BD',
+            'carryb_store_id'          => 44444,
+            'has_own_delivery_account' => true,
+        ]);
+
+        $order = Order::create([
+            'order_number'   => 'ORD-MANUAL-1',
+            'vendor_id'      => $vendor->id,
+            'status'         => 6,
+            'payment_status' => 'unpaid',
+            'total'          => 1500,
+        ]);
+
+        DeliveryAssignedInfo::create([
+            'order_id'           => $order->id,
+            'consignment_id'     => 'FX-MANUAL-1',
+            'recipient_name'     => 'Manual Customer',
+            'recipient_phone'    => '01700000000',
+            'recipient_address'  => 'Dhaka',
+            'collectable_amount' => 1500,
+            'delivery_fee'       => 70,
+            'total_fee'          => 70,
+        ]);
+
+        // 1. Manually mark as paid
+        $markRes = $this->withHeaders($this->adminHeaders)
+            ->postJson("/api/delivery-companies/carrybee/manual-order-payment/{$order->id}", [
+                'action'       => 'mark_paid',
+                'invoice_id'   => 'IX-MANUAL-888',
+                'disbursed_to' => 'vendor',
+                'note'         => 'Marked by admin',
+            ]);
+
+        $markRes->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+
+        $fresh = $order->fresh(['deliveryInformation']);
+        $this->assertEquals('IX-MANUAL-888', $fresh->carrybee_invoice_id);
+        $this->assertEquals('paid', $fresh->payment_status);
+        $this->assertEquals('vendor', $fresh->carrybee_disbursed_to);
+        $this->assertTrue($fresh->is_carrybee_paid);
+
+        // 2. Manually reset
+        $resetRes = $this->withHeaders($this->adminHeaders)
+            ->postJson("/api/delivery-companies/carrybee/manual-order-payment/{$order->id}", [
+                'action' => 'reset',
+                'note'   => 'Reset by admin',
+            ]);
+
+        $resetRes->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+
+        $freshReset = $order->fresh(['deliveryInformation']);
+        $this->assertNull($freshReset->carrybee_invoice_id);
+        $this->assertNull($freshReset->carrybee_paid_at);
+        $this->assertFalse($freshReset->is_carrybee_paid);
+    }
 }

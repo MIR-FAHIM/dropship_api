@@ -508,6 +508,12 @@ class OrderAccountingService
             Transaction::where('order_id', $order->id)->where('type', 'platform_order_margin')->update([
                 'status' => 'reversed',
             ]);
+
+            // Reset order payment and courier payout status on reversal
+            Order::where('id', $order->id)->update([
+                'payment_status' => 'unpaid',
+                'courier_payout_status' => 'pending',
+            ]);
         });
     }
 

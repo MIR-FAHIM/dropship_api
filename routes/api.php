@@ -232,6 +232,7 @@ Route::prefix('orders')->group(function () {
     Route::get('/status-summary', [OrderController::class, 'orderStatusSummary']);
     Route::post('update/status/{id}', [OrderController::class, 'updateOrderStatus']);
     Route::post('settle/reseller-profit/{id}', [OrderController::class, 'settleResellerProfit']);
+    Route::post('/{id}/manual-carrybee-payment', [CarrybeeWebhookController::class, 'manualOrderPayment']);
     // Item status update (for vendor/admin workflows)
     Route::patch('/item/status/{id}', [OrderController::class, 'updateOrderItemStatus']);
 });
@@ -510,6 +511,7 @@ Route::prefix('delivery-companies')->group(function () {
     Route::post('/carrybee/acknowledge-paid-order/{id}', [CarrybeeWebhookController::class, 'acknowledgePaidOrder']);
     Route::post('/carrybee/test-webhook', [CarrybeeWebhookController::class, 'testWebhook']);
     Route::get('/carrybee/webhook-events', [CarrybeeWebhookController::class, 'getWebhookEvents']);
+    Route::post('/carrybee/manual-order-payment/{id}', [CarrybeeWebhookController::class, 'manualOrderPayment']);
     // Order Drafts
     Route::post('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftSave']);
     Route::get('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftList']);

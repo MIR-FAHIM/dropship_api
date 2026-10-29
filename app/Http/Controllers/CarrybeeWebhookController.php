@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\CarrybeeWebhookEvent;
+use App\Models\Order;
+use App\Models\OrderStatusHistory;
 use App\Service\CarrybeeWebhookService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -164,5 +167,132 @@ class CarrybeeWebhookController extends Controller
             'status' => 'success',
             'data'   => $events,
         ]);
+    }
+
+    /**
+     * Manually mark or reset an order's CarryBee payment status.
+     * POST /api/delivery-companies/carrybee/manual-order-payment/{id}
+     */
+    public function manualOrderPayment(Request $request, int $id): JsonResponse
+    {
+        $order = Order::with(['deliveryInformation', 'vendor', 'items.product.vendor'])->find($id);
+        if (!$order) {
+            return response()->json([
+                'status' => 'failed',
+                'message' => 'Order not found.',
+            ], 404);
+        }
+
+        $validated = $request->validate([
+            'action' => ['required', 'string', 'in:mark_paid,reset'],
+            'invoice_id' => ['nullable', 'string', 'max:100'],
+            'disbursed_to' => ['nullable', 'string', 'in:vendor,platform'],
+            'paid_at' => ['nullable', 'date'],
+            'note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $action = $validated['action'];
+
+        if ($action === 'mark_paid') {
+            $hasOwnDeliveryAccount = false;
+            if ($order->vendor && (bool) $order->vendor->has_own_delivery_account) {
+                $hasOwnDeliveryAccount = true;
+            } else {
+                foreach ($order->items as $item) {
+                    if ($item->product?->vendor?->has_own_delivery_account) {
+                        $hasOwnDeliveryAccount = true;
+                        break;
+                    }
+                }
+            }
+
+            $disbursedTo = $validated['disbursed_to'] ?? ($hasOwnDeliveryAccount ? 'vendor' : 'platform');
+            $paidAt = !empty($validated['paid_at']) ? Carbon::parse($validated['paid_at']) : now();
+            $invoiceId = !empty($validated['invoice_id']) ? trim($validated['invoice_id']) : ($order->carrybee_invoice_id ?: 'MANUAL-' . strtoupper(uniqid()));
+
+            $order->carrybee_invoice_id = $invoiceId;
+            $order->carrybee_paid_at = $paidAt;
+            $order->carrybee_disbursed_to = $disbursedTo;
+            $order->courier_payout_status = 'received';
+            $order->payment_status = 'paid';
+            $order->save();
+
+            // Sync deliveryInformation if present
+            if ($order->deliveryInformation) {
+                $order->deliveryInformation->carrybee_invoice_id = $invoiceId;
+                $order->deliveryInformation->carrybee_paid_at = $paidAt;
+                $order->deliveryInformation->save();
+            }
+
+            // Status history log
+            $adminUser = $request->user() ?: $request->attributes->get('api_user');
+
+            // Create/update a webhook event record so it shows in testing & webhook logs
+            CarrybeeWebhookEvent::create([
+                'order_id' => $order->id,
+                'event' => 'order.paid',
+                'fingerprint' => 'manual-' . $order->id . '-' . time(),
+                'consignment_id' => $order->consignment_id ?: ($order->deliveryInformation?->consignment_id ?: 'MANUAL-' . $order->order_number),
+                'invoice_id' => $invoiceId,
+                'disbursed_to' => $disbursedTo,
+                'disbursed_amount' => (float) ($order->courier_net_payout ?? 0),
+                'payload' => [
+                    'source' => 'manual_admin_action',
+                    'note' => $validated['note'] ?? null,
+                    'marked_by' => $adminUser?->id,
+                ],
+                'processing_status' => 'processed',
+                'admin_acknowledged' => true,
+                'admin_acknowledged_at' => now(),
+            ]);
+
+            OrderStatusHistory::create([
+                'order_id' => $order->id,
+                'status_id' => (int) $order->status,
+                'note' => 'Manual Action: Marked as CarryBee Paid (Invoice: ' . $invoiceId . ', Disbursed To: ' . $disbursedTo . ')' . ($validated['note'] ? ' - ' . $validated['note'] : ''),
+                'changed_by' => $adminUser?->id,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Order #{$order->order_number} successfully marked as CarryBee Paid.",
+                'data' => $order->fresh(['deliveryInformation', 'orderStatus']),
+            ]);
+        }
+
+        if ($action === 'reset') {
+            $order->carrybee_invoice_id = null;
+            $order->carrybee_paid_at = null;
+            $order->carrybee_disbursed_to = null;
+            $order->courier_payout_status = 'pending';
+
+            // If the order is cancelled/returned, ensure payment_status is unpaid
+            if (in_array((int) $order->status, [7, 8, 10, 11])) {
+                $order->payment_status = 'unpaid';
+            }
+            $order->save();
+
+            if ($order->deliveryInformation) {
+                $order->deliveryInformation->carrybee_invoice_id = null;
+                $order->deliveryInformation->carrybee_paid_at = null;
+                $order->deliveryInformation->save();
+            }
+
+            $adminUser = $request->user() ?: $request->attributes->get('api_user');
+            OrderStatusHistory::create([
+                'order_id' => $order->id,
+                'status_id' => (int) $order->status,
+                'note' => 'Manual Action: Reset CarryBee Paid status back to unpaid/pending' . ($validated['note'] ? ' - ' . $validated['note'] : ''),
+                'changed_by' => $adminUser?->id,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "CarryBee payment status for Order #{$order->order_number} has been reset.",
+                'data' => $order->fresh(['deliveryInformation', 'orderStatus']),
+            ]);
+        }
+
+        return response()->json(['status' => 'failed', 'message' => 'Invalid action.'], 400);
     }
 }
