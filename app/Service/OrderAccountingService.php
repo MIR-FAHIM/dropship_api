@@ -1338,24 +1338,26 @@ class OrderAccountingService
                 $totalDropshipperPayout += $b['dropshipper']['profit'];
                 $totalPlatformNetProfit += $b['platform']['net_profit'];
 
-                // Only if created directly as settled/paid, mark order settlement as settled
-                if ($isDirectlyPaid) {
-                    OrderSettlement::updateOrCreate(
-                        [
-                            'order_id' => $order->id,
-                            'settlement_type' => OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE,
-                        ],
-                        [
-                            'vendor_id' => $vendorId,
-                            'user_type' => 'vendor',
-                            'status' => OrderSettlement::STATUS_SETTLED,
-                            'settleable_amount' => $b['supplier']['vendor_price'],
-                            'settled_trx_id' => $trxId ?: $invoiceNumber,
-                            'settled_at' => now(),
-                            'admin_note' => "Settled via Vendor Invoice {$invoiceNumber}. Trx ID: {$trxId}",
-                        ]
-                    );
-                }
+                // Update or create order settlement for supplier
+                OrderSettlement::updateOrCreate(
+                    [
+                        'order_id' => $order->id,
+                        'settlement_type' => OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE,
+                    ],
+                    [
+                        'vendor_id' => $vendorId,
+                        'user_type' => 'vendor',
+                        'status' => $isDirectlyPaid ? OrderSettlement::STATUS_SETTLED : OrderSettlement::STATUS_PENDING,
+                        'settleable_amount' => $b['supplier']['supplier_owes_platform'],
+                        'gross_entitlement' => $b['supplier']['vendor_price'],
+                        'deducted_by_courier' => $b['courier']['net_received_by_supplier'],
+                        'settled_trx_id' => $isDirectlyPaid ? ($trxId ?: $invoiceNumber) : null,
+                        'settled_at' => $isDirectlyPaid ? now() : null,
+                        'admin_note' => $isDirectlyPaid
+                            ? "Settled via Vendor Invoice {$invoiceNumber}. Trx ID: {$trxId}"
+                            : "Invoice {$invoiceNumber} issued (Pending Payment). Owed: ৳{$b['supplier']['supplier_owes_platform']}",
+                    ]
+                );
             }
 
             $courierSettledTotal = round($totalDeliveryFee + $totalCodFee, 2);

@@ -621,17 +621,30 @@ class OrderSettlementController extends Controller
         try {
             $query = SettlementInvoice::with(['vendor', 'creator', 'payer', 'approver', 'rejecter'])->orderByDesc('id');
 
-            // If logged in user is a vendor, restrict to their vendor_id
-            $user = $request->user();
-            if ($user && ($user->user_type === 'vendor' || $user->role === 'vendor')) {
+            $user = $request->attributes->get('api_user') ?? $request->user();
+            $resolvedVendorId = null;
+
+            if ($request->filled('vendor_id')) {
+                $resolvedVendorId = (int) $request->vendor_id;
+            } elseif ($user && ($user->user_type === 'vendor' || $user->role === 'vendor' || $user->role === 'seller' || $user->user_type === 'seller')) {
                 $vendor = Vendor::where('user_id', $user->id)->first();
-                if ($vendor) {
-                    $query->where('vendor_id', $vendor->id);
-                } else {
-                    return $this->success('Vendor settlement invoices fetched successfully', collect());
+                if (!$vendor && !empty($user->vendor_id)) {
+                    $vendor = Vendor::find($user->vendor_id);
                 }
-            } elseif ($request->filled('vendor_id')) {
-                $query->where('vendor_id', $request->vendor_id);
+                if ($vendor) {
+                    $resolvedVendorId = (int) $vendor->id;
+                }
+            }
+
+            if ($resolvedVendorId) {
+                $query->where('vendor_id', $resolvedVendorId);
+            } elseif ($user && ($user->user_type === 'vendor' || $user->role === 'vendor')) {
+                return $this->success('Vendor settlement invoices fetched successfully', [
+                    'data' => [],
+                    'total' => 0,
+                    'current_page' => 1,
+                    'last_page' => 1,
+                ]);
             }
 
             if ($request->filled('status')) {
@@ -665,9 +678,12 @@ class OrderSettlementController extends Controller
                 return $this->failed('Settlement invoice not found', null, 404);
             }
 
-            $user = $request->user();
+            $user = $request->attributes->get('api_user') ?? $request->user();
             if ($user && ($user->user_type === 'vendor' || $user->role === 'vendor')) {
                 $vendor = Vendor::where('user_id', $user->id)->first();
+                if (!$vendor && !empty($user->vendor_id)) {
+                    $vendor = Vendor::find($user->vendor_id);
+                }
                 if ($vendor && (int) $invoice->vendor_id !== (int) $vendor->id) {
                     return $this->failed('Unauthorized access to invoice', null, 403);
                 }
