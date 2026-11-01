@@ -11,10 +11,12 @@ return new class extends Migration
      */
     public function up(): void
     {
+        Schema::dropIfExists('feed_posts');
+
         Schema::create('feed_posts', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('admin_id')->constrained('users')->cascadeOnDelete();
-            $table->foreignId('product_id')->nullable()->constrained('products')->nullOnDelete();
+            $table->unsignedInteger('admin_id');
+            $table->unsignedBigInteger('product_id')->nullable();
             $table->string('title')->nullable();
             $table->longText('content');
             $table->json('images')->nullable();
@@ -25,8 +27,9 @@ return new class extends Migration
             $table->json('metadata')->nullable();
             $table->timestamps();
 
-            $table->index(['status', 'created_at']);
+            $table->index('admin_id');
             $table->index('product_id');
+            $table->index(['status', 'created_at']);
         });
     }
 

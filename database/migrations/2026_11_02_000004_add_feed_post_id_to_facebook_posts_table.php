@@ -14,7 +14,8 @@ return new class extends Migration
         if (Schema::hasTable('facebook_posts')) {
             Schema::table('facebook_posts', function (Blueprint $table) {
                 if (!Schema::hasColumn('facebook_posts', 'feed_post_id')) {
-                    $table->foreignId('feed_post_id')->nullable()->after('id')->constrained('feed_posts')->nullOnDelete();
+                    $table->unsignedBigInteger('feed_post_id')->nullable()->after('id');
+                    $table->index('feed_post_id');
                 }
             });
         }
@@ -28,7 +29,7 @@ return new class extends Migration
         if (Schema::hasTable('facebook_posts')) {
             Schema::table('facebook_posts', function (Blueprint $table) {
                 if (Schema::hasColumn('facebook_posts', 'feed_post_id')) {
-                    $table->dropForeign(['feed_post_id']);
+                    $table->dropIndex(['feed_post_id']);
                     $table->dropColumn('feed_post_id');
                 }
             });
