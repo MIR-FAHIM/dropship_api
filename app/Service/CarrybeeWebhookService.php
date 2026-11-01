@@ -446,7 +446,7 @@ class CarrybeeWebhookService
         $disbursedTo = $hasOwnDeliveryAccount ? 'vendor' : 'platform';
 
         // Disbursed net amount from CarryBee
-        $remainingCod = (float) ($order->remaining_cod ?? max(0, (float) $order->total - (float) ($order->advance_amount ?? 0)));
+        $remainingCod = (float) ($order->remaining_cod ?? $order->total);
         $actualCourierCost = (float) ($order->actual_courier_cost ?? ((float) ($order->actual_courier_fee ?? 0) + (float) ($order->actual_cod_fee ?? 0)));
         $netPayout = max(0.00, round($remainingCod - $actualCourierCost, 2));
 

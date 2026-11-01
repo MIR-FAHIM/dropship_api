@@ -32,7 +32,12 @@ class OrderAccountingService
         $advanceSenderPhone = $advanceData['sender_phone'] ?? null;
 
         $totalOrderAmount = round((float) $order->total, 2);
-        $remainingCod = max(0.00, round($totalOrderAmount - $advanceAmount, 2));
+        // In dropshipping, the courier collectable amount (remaining_cod) is the full customer collection amount ($order->total).
+        // The dropshipper's reliability balance / advance charge does NOT deduct from customer COD.
+        $deductFromCod = (bool) ($advanceData['deduct_from_cod'] ?? false);
+        $remainingCod = isset($advanceData['remaining_cod'])
+            ? round((float) $advanceData['remaining_cod'], 2)
+            : ($deductFromCod ? max(0.00, round($totalOrderAmount - $advanceAmount, 2)) : $totalOrderAmount);
 
         // Determine if vendor has own delivery account
         $courierOwner = 'platform';
@@ -140,7 +145,7 @@ class OrderAccountingService
             $actualCourierCost = round($actualDeliveryFee + $actualCodFee, 2);
             $isConfirmedCost = isset($courierFeeData['confirmed']) ? (bool) $courierFeeData['confirmed'] : true;
 
-            $remainingCod = round((float) ($lockedOrder->remaining_cod ?? max(0, $lockedOrder->total - ($lockedOrder->advance_amount ?? 0))), 2);
+            $remainingCod = round((float) ($lockedOrder->remaining_cod ?? $lockedOrder->total), 2);
             $courierNetPayout = max(0.00, round($remainingCod - $actualCourierCost, 2));
 
             // Courier account owner
@@ -263,6 +268,12 @@ class OrderAccountingService
                 ]
             );
             $createdSettlements[] = $resellerSettlement;
+
+            // If reseller had an approved reliability balance / advance for this order,
+            // release it back to their wallet balance since full COD was collected from customer.
+            if ($lockedOrder->advance_status === 'approved' && (float) $lockedOrder->advance_amount > 0) {
+                $this->refundOrderAdvance($lockedOrder, 'delivered');
+            }
 
             // 6. Platform Logistic Earning (Shipping Margin)
             $createdSettlements[] = OrderSettlement::updateOrCreate(
@@ -701,7 +712,8 @@ class OrderAccountingService
             }
 
             $totalOrderAmount = round((float) $order->total, 2);
-            $remainingCod = max(0.00, round($totalOrderAmount - $amount, 2));
+            // Reliability balance paid by reseller does not deduct from customer collection amount (COD)
+            $remainingCod = $totalOrderAmount;
 
             $trxId = 'WLT-ADV-' . $order->id . '-' . time();
 
@@ -754,7 +766,8 @@ class OrderAccountingService
         return DB::transaction(function () use ($order, $amount, $method, $trxId, $senderPhone) {
             $order = Order::lockForUpdate()->findOrFail($order->id);
             $totalOrderAmount = round((float) $order->total, 2);
-            $remainingCod = max(0.00, round($totalOrderAmount - $amount, 2));
+            // Reliability balance submitted by reseller does not deduct from customer collection amount (COD)
+            $remainingCod = $totalOrderAmount;
 
             $order->update([
                 'advance_amount' => $amount,
@@ -795,7 +808,8 @@ class OrderAccountingService
             $order = Order::lockForUpdate()->findOrFail($order->id);
             $advanceAmount = round((float) $order->advance_amount, 2);
             $totalOrderAmount = round((float) $order->total, 2);
-            $remainingCod = max(0.00, round($totalOrderAmount - $advanceAmount, 2));
+            // Reliability balance verified does not deduct from customer collection amount (COD)
+            $remainingCod = $totalOrderAmount;
 
             $order->update([
                 'advance_status' => 'approved',
@@ -861,11 +875,11 @@ class OrderAccountingService
     }
 
     /**
-     * Refund order advance to dropshipper wallet if cancelled before shipment.
+     * Refund/Release order advance to dropshipper wallet if cancelled or delivered.
      */
-    public function refundOrderAdvance(Order $order): void
+    public function refundOrderAdvance(Order $order, string $reason = 'cancelled'): void
     {
-        DB::transaction(function () use ($order) {
+        DB::transaction(function () use ($order, $reason) {
             if ($order->advance_status !== 'approved' || (float) $order->advance_amount <= 0) {
                 return;
             }
@@ -878,6 +892,10 @@ class OrderAccountingService
                 return;
             }
 
+            $note = $reason === 'delivered'
+                ? "Release of reliability balance for completed order #{$order->order_number}"
+                : "Refund of advance payment for cancelled order #{$order->order_number}";
+
             ResellerTransaction::create([
                 'reseller_id' => $order->user_id,
                 'order_id' => $order->id,
@@ -887,7 +905,7 @@ class OrderAccountingService
                 'source' => 'wallet',
                 'status' => 'completed',
                 'trx_id' => 'REF-ADV-' . $order->id . '-' . time(),
-                'note' => "Refund of advance payment for cancelled order #{$order->order_number}",
+                'note' => $note,
             ]);
         });
     }
@@ -983,13 +1001,20 @@ class OrderAccountingService
         $deliveryInfo = $order->deliveryInformation;
         $consignmentId = $order->consignment_id ?: $deliveryInfo?->consignment_id;
 
-        // Courier collectable
-        if ($order->remaining_cod !== null) {
+        // Courier collectable (Customer COD is always the full order total entered by dropshipper)
+        // Advance charge / reliability balance is separate and must NEVER deduct from customer COD.
+        if ($order->remaining_cod !== null && (float) $order->remaining_cod === 0.00) {
+            $courierCollectable = 0.00;
+        } elseif ($deliveryInfo?->collectable_amount !== null && (float) $deliveryInfo->collectable_amount === 0.00) {
+            $courierCollectable = 0.00;
+        } elseif ($orderTotal > 0) {
+            $courierCollectable = $orderTotal;
+        } elseif ($order->remaining_cod !== null) {
             $courierCollectable = round((float) $order->remaining_cod, 2);
         } elseif ($deliveryInfo?->collectable_amount !== null) {
             $courierCollectable = round((float) $deliveryInfo->collectable_amount, 2);
         } else {
-            $courierCollectable = $orderTotal;
+            $courierCollectable = 0.00;
         }
 
         // Courier Delivery Fee and COD Fee resolution
@@ -1076,8 +1101,8 @@ class OrderAccountingService
         }
 
         // Dropshipper profit calculation:
-        // Formula: Customer collected - Admin Base Price - Customer Delivery Charge - Courier COD Fee
-        $customerCollected = $courierCollectable + ($advanceStatus === 'approved' ? $advanceAmount : 0.00);
+        // Formula: Customer collected ($orderTotal) - Admin Base Price - Customer Delivery Charge - Courier COD Fee
+        $customerCollected = $courierCollectable;
         if ($courierCollectable <= 0 && ($advanceStatus !== 'approved' || $advanceAmount <= 0)) {
             $dropshipperProfit = 0.00;
         } else {

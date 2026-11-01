@@ -168,7 +168,7 @@ class OrderAdvanceAndTopupTest extends TestCase
         $this->assertEquals(130.00, $order->advance_amount);
         $this->assertEquals('approved', $order->advance_status);
         $this->assertEquals('wallet', $order->advance_payment_method);
-        $this->assertEquals(1000.00, $order->remaining_cod);
+        $this->assertEquals(1130.00, $order->remaining_cod);
 
         // Check Reseller Transaction debit
         $this->assertDatabaseHas('reseller_transactions', [
@@ -211,7 +211,7 @@ class OrderAdvanceAndTopupTest extends TestCase
         $this->assertEquals('bkash', $order->advance_payment_method);
         $this->assertEquals('BKASH-TRX-9988', $order->advance_trx_id);
         $this->assertEquals('01711223344', $order->advance_sender_phone);
-        $this->assertEquals(1000.00, $order->remaining_cod);
+        $this->assertEquals(1130.00, $order->remaining_cod);
 
         // Check Reseller Transaction is pending
         $this->assertDatabaseHas('reseller_transactions', [
@@ -360,5 +360,66 @@ class OrderAdvanceAndTopupTest extends TestCase
             ],
         ]);
         $this->assertNotEmpty($response->json('data.items.data'));
+    }
+
+    public function test_customer_cod_amount_is_full_order_total_and_advance_released_to_dropshipper_on_delivery(): void
+    {
+        // Reseller initial wallet has ৳270
+        ResellerTransaction::create([
+            'reseller_id' => $this->reseller->id,
+            'amount' => 270.00,
+            'trx_type' => 'credit',
+            'type' => 'wallet_topup',
+            'status' => 'completed',
+            'trx_id' => 'INIT-270',
+        ]);
+
+        $initialBalance = $this->accountingService->calculateUserBalances($this->reseller->id);
+        $this->assertEquals(270.00, $initialBalance['available_balance']);
+
+        // Reseller places order with Customer COD Collection Amount = ৳1,000
+        $order = Order::create([
+            'user_id' => $this->reseller->id,
+            'order_number' => 'ORD-COD-1000',
+            'status' => 1,
+            'total' => 1000.00,
+            'subtotal' => 870.00,
+            'shipping_fee' => 130.00,
+        ]);
+
+        // Reseller pays advance from wallet
+        $this->accountingService->payAdvanceFromWallet($order, 130.00);
+
+        $order->refresh();
+        $this->assertEquals(130.00, $order->advance_amount);
+        $this->assertEquals('approved', $order->advance_status);
+        // CRITICAL: Customer COD amount is the FULL ৳1,000. It must NOT subtract 130 to become 870!
+        $this->assertEquals(1000.00, $order->remaining_cod);
+
+        // Wallet was debited 130: 270 - 130 = 140
+        $midBalance = $this->accountingService->calculateUserBalances($this->reseller->id);
+        $this->assertEquals(140.00, $midBalance['available_balance']);
+
+        // Order is delivered by courier (customer pays full ৳1,000 at door)
+        $this->accountingService->processOrderDelivery($order, [
+            'actual_courier_fee' => 130.00,
+            'actual_cod_fee' => 0.00,
+            'confirmed' => true,
+        ]);
+
+        $order->refresh();
+        // Check reliability balance of 130 is released back to dropshipper wallet
+        $this->assertDatabaseHas('reseller_transactions', [
+            'reseller_id' => $this->reseller->id,
+            'order_id' => $order->id,
+            'amount' => 130.00,
+            'trx_type' => 'credit',
+            'type' => 'advance_refund',
+            'status' => 'completed',
+        ]);
+
+        // Dropshipper wallet has ৳130 restored (140 + 130 = 270)
+        $finalBalance = $this->accountingService->calculateUserBalances($this->reseller->id);
+        $this->assertEquals(270.00, $finalBalance['available_balance']);
     }
 }

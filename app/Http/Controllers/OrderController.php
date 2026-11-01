@@ -1021,7 +1021,8 @@ class OrderController extends Controller
                 return $this->failed("Advance amount (৳{$advanceAmount}) cannot exceed total order amount (৳{$recalculatedTotal}).", null, 422);
             }
 
-            $remainingCod = max(0, round($recalculatedTotal - $advanceAmount, 2));
+            // Customer collection COD amount is the full total order amount; advance charge does not deduct from COD
+            $remainingCod = round($recalculatedTotal, 2);
 
             // Validate paid and due amounts if submitted
             if (isset($validated['paid_amount'])) {

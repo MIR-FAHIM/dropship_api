@@ -138,12 +138,13 @@ class OrderAccountingTest extends TestCase
         /** @var OrderAccountingService $service */
         $service = app(OrderAccountingService::class);
 
-        // Step 1: Process Booking with Advance of 130 taken by ResellerBrain
+        // Step 1: Process Booking with Advance of 130 taken by ResellerBrain (legacy test scenario where advance deducted from COD)
         $service->processOrderBooking($order, [
             'amount' => 130.00,
             'recipient' => 'platform',
             'payment_method' => 'bkash',
             'trx_id' => 'BKASH-ADV-130',
+            'deduct_from_cod' => true,
         ]);
 
         $order->refresh();
@@ -250,6 +251,7 @@ class OrderAccountingTest extends TestCase
             'recipient' => 'platform',
             'payment_method' => 'nagad',
             'trx_id' => 'NAGAD-ADV-130',
+            'deduct_from_cod' => true,
         ]);
 
         $deliveryResult = $service->processOrderDelivery($order, [
