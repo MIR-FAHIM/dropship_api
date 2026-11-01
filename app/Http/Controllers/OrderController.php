@@ -397,89 +397,208 @@ class OrderController extends Controller
                 'customer_phone' => ['nullable', 'string', 'max:50'],
                 'shipping_address' => ['nullable', 'string', 'max:1000'],
 
+                'division' => ['nullable', 'string', 'max:100'],
                 'zone' => ['nullable', 'string', 'max:100'],
                 'district' => ['nullable', 'string', 'max:100'],
                 'area' => ['nullable', 'string', 'max:100'],
+                'thana' => ['nullable', 'string', 'max:100'],
                 'lat' => ['nullable', 'numeric'],
                 'lon' => ['nullable', 'numeric'],
 
                 'delivery_charge' => ['required', 'numeric', 'min:0'],
                 'note' => ['nullable', 'string'],
+
+                // Direct checkout support (Phase 5 Two-Step flow)
+                'customer_collection_amount' => ['nullable', 'numeric', 'min:0'],
+                'collection_amount' => ['nullable', 'numeric', 'min:0'],
+                'product_id' => ['nullable', 'integer', 'exists:products,id'],
+                'qty' => ['nullable', 'integer', 'min:1'],
+                'attribute_id' => ['nullable', 'integer'],
+                'items' => ['nullable', 'array'],
             ]);
 
-            $cart = Cart::where('user_id', $validated['user_id'])
-                ->where('status', 'active')
-                ->latest()
-                ->first();
-
-            if (!$cart) {
-                $this->storeOrderError($request, 'Checkout failed: active cart not found', $this->resolveCheckoutUser($request), 'warning');
-                return $this->failed('Active cart not found', null, 404);
+            if (empty($validated['area']) && !empty($validated['thana'])) {
+                $validated['area'] = $validated['thana'];
             }
 
-            $cartItems = CartItem::with(['product'])
-                ->where('cart_id', $cart->id)
-                ->get();
+            $rawCollectionAmount = $request->input('customer_collection_amount') ?? $request->input('collection_amount');
+            $hasCollectionAmount = !is_null($rawCollectionAmount) && $rawCollectionAmount !== '';
+            $collectionAmount = $hasCollectionAmount ? (float) $rawCollectionAmount : null;
 
-            if ($cartItems->count() === 0) {
-                $this->storeOrderError($request, 'Checkout failed: cart is empty', $this->resolveCheckoutUser($request), 'warning');
-                return $this->failed('Cart is empty', null, 409);
+            // Direct items or Cart items resolution
+            $hasDirectItems = $request->has('items') || $request->filled('product_id');
+            $resolvedItems = [];
+            $cart = null;
+
+            if ($hasDirectItems) {
+                if ($request->has('items') && is_array($request->input('items'))) {
+                    $rawItems = $request->input('items');
+                } else {
+                    $rawItems = [[
+                        'product_id' => (int) $request->input('product_id'),
+                        'qty' => (int) $request->input('qty', 1),
+                        'attribute_id' => $request->input('attribute_id') ? (int) $request->input('attribute_id') : null,
+                        'reseller_price' => $request->input('reseller_price'),
+                    ]];
+                }
+
+                foreach ($rawItems as $idx => $rItem) {
+                    $pId = (int) ($rItem['product_id'] ?? 0);
+                    $product = Product::find($pId);
+                    if (!$product) {
+                        return $this->failed("Product with ID {$pId} not found", null, 404);
+                    }
+                    $resolvedItems[] = (object) [
+                        'id' => 'direct_' . ($idx + 1),
+                        'product_id' => $product->id,
+                        'shop_id' => $product->shop_id ?? $product->vendor_id,
+                        'attribute_id' => $rItem['attribute_id'] ?? null,
+                        'qty' => max(1, (int) ($rItem['qty'] ?? 1)),
+                        'product' => $product,
+                        'unit_price' => $product->unit_price,
+                        'admin_price' => $product->admin_price,
+                        'reseller_price' => $rItem['reseller_price'] ?? null,
+                        'note' => $rItem['note'] ?? null,
+                    ];
+                }
+            } else {
+                $cart = Cart::where('user_id', $validated['user_id'])
+                    ->where('status', 'active')
+                    ->latest()
+                    ->first();
+
+                if (!$cart) {
+                    $this->storeOrderError($request, 'Checkout failed: active cart not found', $this->resolveCheckoutUser($request), 'warning');
+                    return $this->failed('Active cart not found', null, 404);
+                }
+
+                $cartItems = CartItem::with(['product'])
+                    ->where('cart_id', $cart->id)
+                    ->get();
+
+                if ($cartItems->count() === 0) {
+                    $this->storeOrderError($request, 'Checkout failed: cart is empty', $this->resolveCheckoutUser($request), 'warning');
+                    return $this->failed('Cart is empty', null, 409);
+                }
+
+                $resolvedItems = $cartItems;
             }
 
+            $shippingFee = (float) $request->input('delivery_charge', 0);
+            $discount = 0;
             $subtotal = 0;
             $resellerProfit = 0;
-            $cartItemPricing = [];
+            $itemPricing = [];
 
-            foreach ($cartItems as $ci) {
-                $qty = (int) ($ci->qty ?? 0);
-                $unitPrice = $this->normalizePrice($ci->unit_price ?? $ci->product?->unit_price);
-                $adminPrice = $this->resolveAdminPrice($ci, $unitPrice);
-                $resellerPrice = $this->normalizePrice($ci->reseller_price ?? $adminPrice);
+            if ($hasCollectionAmount) {
+                // Phase 5 business rule:
+                // Estimated Dropshipper Profit = Customer Collection Amount - Product Cost - Delivery Charge - COD Charge (1%)
+                $codFee = round($collectionAmount * 0.01, 2);
+                $totalBaseCost = 0;
+                $totalQty = 0;
 
-                if (!is_null($adminPrice) && !is_null($resellerPrice) && $resellerPrice < $adminPrice) {
+                foreach ($resolvedItems as $item) {
+                    $qty = (int) ($item->qty ?? 1);
+                    $totalQty += $qty;
+                    $unitPrice = $this->normalizePrice($item->unit_price ?? $item->product?->unit_price);
+                    $adminPrice = $this->resolveAdminPrice($item, $unitPrice);
+                    $totalBaseCost += round($qty * $adminPrice, 2);
+                }
+
+                $resellerProfit = round($collectionAmount - $totalBaseCost - $shippingFee - $codFee, 2);
+
+                if ($collectionAmount < round($totalBaseCost + $shippingFee + $codFee, 2)) {
                     $errorData = [
-                        'cart_item_id'   => $ci->id,
-                        'product_id'     => $ci->product_id,
-                        'admin_price'    => $adminPrice,
-                        'reseller_price' => $resellerPrice,
+                        'collection_amount' => $collectionAmount,
+                        'total_product_cost' => $totalBaseCost,
+                        'delivery_charge' => $shippingFee,
+                        'cod_fee' => $codFee,
+                        'estimated_profit' => $resellerProfit,
                     ];
                     $this->storeOrderError(
                         $request,
-                        'Checkout failed: Cart item reseller price cannot be less than admin price',
+                        'Checkout failed: Customer Collection Amount is insufficient to cover base cost, delivery, and COD fee',
                         $this->resolveCheckoutUser($request),
                         'warning',
                         null,
                         $errorData
                     );
-                    return $this->failed('Cart item reseller price can not be less than admin price', $errorData, 422);
+                    return $this->failed('Customer Collection Amount is insufficient to cover product cost and delivery charges', $errorData, 422);
                 }
 
-                $lineTotal = !is_null($resellerPrice) ? round($qty * $resellerPrice, 2) : 0;
-                $lineResellerProfit = (!is_null($resellerPrice) && !is_null($adminPrice))
-                    ? round($qty * ($resellerPrice - $adminPrice), 2)
-                    : 0;
+                $total = round($collectionAmount, 2);
+                $subtotal = round($collectionAmount - $shippingFee, 2);
 
-                $subtotal += $lineTotal;
-                $resellerProfit += $lineResellerProfit;
-                $cartItemPricing[$ci->id] = [
-                    'unit_price' => $unitPrice,
-                    'admin_price' => $adminPrice,
-                    'reseller_price' => $resellerPrice,
-                    'line_total' => $lineTotal,
-                    'line_total_reseller_profit' => $lineResellerProfit,
-                ];
+                // Allocate item prices proportionally
+                foreach ($resolvedItems as $item) {
+                    $qty = (int) ($item->qty ?? 1);
+                    $unitPrice = $this->normalizePrice($item->unit_price ?? $item->product?->unit_price);
+                    $adminPrice = $this->resolveAdminPrice($item, $unitPrice);
+                    $itemResellerPrice = $totalQty > 0 ? round(($collectionAmount - $shippingFee - $codFee) / $totalQty, 2) : $adminPrice;
+                    $lineTotal = round($qty * $itemResellerPrice, 2);
+                    $lineProfit = round($qty * ($itemResellerPrice - $adminPrice), 2);
+
+                    $itemPricing[$item->id] = [
+                        'unit_price' => $unitPrice,
+                        'admin_price' => $adminPrice,
+                        'reseller_price' => $itemResellerPrice,
+                        'line_total' => $lineTotal,
+                        'line_total_reseller_profit' => $lineProfit,
+                    ];
+                }
+            } else {
+                // Legacy / Standard cart calculation
+                foreach ($resolvedItems as $ci) {
+                    $qty = (int) ($ci->qty ?? 0);
+                    $unitPrice = $this->normalizePrice($ci->unit_price ?? $ci->product?->unit_price);
+                    $adminPrice = $this->resolveAdminPrice($ci, $unitPrice);
+                    $resellerPrice = $this->normalizePrice($ci->reseller_price ?? $adminPrice);
+
+                    if (!is_null($adminPrice) && !is_null($resellerPrice) && $resellerPrice < $adminPrice) {
+                        $errorData = [
+                            'item_id'        => $ci->id,
+                            'product_id'     => $ci->product_id,
+                            'admin_price'    => $adminPrice,
+                            'reseller_price' => $resellerPrice,
+                        ];
+                        $this->storeOrderError(
+                            $request,
+                            'Checkout failed: Cart item reseller price cannot be less than admin price',
+                            $this->resolveCheckoutUser($request),
+                            'warning',
+                            null,
+                            $errorData
+                        );
+                        return $this->failed('Cart item reseller price can not be less than admin price', $errorData, 422);
+                    }
+
+                    $lineTotal = !is_null($resellerPrice) ? round($qty * $resellerPrice, 2) : 0;
+                    $lineResellerProfit = (!is_null($resellerPrice) && !is_null($adminPrice))
+                        ? round($qty * ($resellerPrice - $adminPrice), 2)
+                        : 0;
+
+                    $subtotal += $lineTotal;
+                    $resellerProfit += $lineResellerProfit;
+                    $itemPricing[$ci->id] = [
+                        'unit_price' => $unitPrice,
+                        'admin_price' => $adminPrice,
+                        'reseller_price' => $resellerPrice,
+                        'line_total' => $lineTotal,
+                        'line_total_reseller_profit' => $lineResellerProfit,
+                    ];
+                }
+
+                $total = round(($subtotal + $shippingFee) - $discount, 2);
             }
 
             DB::beginTransaction();
             $transactionStarted = true;
 
-            // For now: shipping_fee & discount are kept null (or 0) until you add those modules
-            $shippingFee = $request->input('delivery_charge', 0);
-            $discount = 0;
-            $total = round(($subtotal + $shippingFee) - $discount, 2);
-
             // Generate an order_number that is human-friendly and unique
             $orderNumber = 'ORD-' . date('Ymd') . '-' . strtoupper(Str::random(6));
+
+            $firstItem = is_array($resolvedItems) ? ($resolvedItems[0] ?? null) : $resolvedItems->first();
+            $vendorId = $firstItem?->shop_id ?? $firstItem?->product?->vendor_id ?? null;
 
             $order = Order::create([
                 'user_id' => $validated['user_id'],
@@ -504,7 +623,7 @@ class OrderController extends Controller
                 'shipping_fee' => $shippingFee,
                 'discount' => $discount,
                 'total' => $total,
-                'vendor_id' => $cartItems->first()?->shop_id ?? null,
+                'vendor_id' => $vendorId,
 
                 'note' => $validated['note'] ?? null,
             ]);
@@ -516,14 +635,14 @@ class OrderController extends Controller
                 'changed_by' => $validated['user_id'],
             ]);
 
-            foreach ($cartItems as $ci) {
+            foreach ($resolvedItems as $ci) {
                 $product = $ci->product;
-                $pricing = $cartItemPricing[$ci->id];
+                $pricing = $itemPricing[$ci->id];
 
                 OrderItem::create([
                     'order_id' => $order->id,
                     'product_id' => $ci->product_id,
-                    'shop_id' => $ci->shop_id,
+                    'shop_id' => $ci->shop_id ?? $product?->vendor_id,
                     'attribute_id' => $ci->attribute_id,
 
                     // Snapshot important product fields
@@ -543,9 +662,11 @@ class OrderController extends Controller
                 ]);
             }
 
-            // Mark cart as checked_out and clear items
-            $cart->status = 'checked_out';
-            $cart->save();
+            // Mark cart as checked_out if cart was used
+            if ($cart) {
+                $cart->status = 'checked_out';
+                $cart->save();
+            }
 
             // Check advance eligibility (< 5 completed orders rule)
             $eligibility = $this->orderAccountingService->checkAdvanceEligibility($order->user_id);
