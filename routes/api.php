@@ -50,6 +50,7 @@ use App\Http\Controllers\ResellerProductPageController;
 use App\Http\Controllers\ResellerStoreProfileController;
 use App\Http\Controllers\SocialMediaTextContentController;
 use App\Http\Controllers\ProductAssistantQaController;
+use App\Http\Controllers\FeedPostController;
 use App\Http\Controllers\PasswordResetOtpController;
 use App\Http\Controllers\WhatsAppWebhookController;
 use App\Models\TaskType;
@@ -574,6 +575,33 @@ Route::prefix('webhooks/whatsapp')->group(function () {
 
 // Alias for direct CarryBee Webhook URL
 Route::post('/carrybee/webhook', [CarrybeeWebhookController::class, 'handle'])->withoutMiddleware('token');
+
+// Feed Marketing Posts & Community Endpoints
+Route::prefix('feed-posts')->group(function () {
+    Route::get('/', [FeedPostController::class, 'index'])->withoutMiddleware('token');
+    Route::get('/list', [FeedPostController::class, 'index'])->withoutMiddleware('token');
+    Route::get('/details/{id}', [FeedPostController::class, 'show'])->withoutMiddleware('token');
+    Route::post('/create', [FeedPostController::class, 'store']);
+    Route::post('/add', [FeedPostController::class, 'store']);
+    Route::post('/update/{id}', [FeedPostController::class, 'update']);
+    Route::put('/update/{id}', [FeedPostController::class, 'update']);
+    Route::delete('/delete/{id}', [FeedPostController::class, 'destroy']);
+    Route::delete('/remove/{id}', [FeedPostController::class, 'destroy']);
+
+    // Facebook Reactions
+    Route::post('/{id}/react', [FeedPostController::class, 'react']);
+
+    // Comments & Nested Replies
+    Route::get('/{id}/comments', [FeedPostController::class, 'getComments'])->withoutMiddleware('token');
+    Route::post('/{id}/comments', [FeedPostController::class, 'addComment']);
+    Route::delete('/comments/{commentId}', [FeedPostController::class, 'deleteComment']);
+
+    // Direct Facebook Page Sharing
+    Route::post('/{id}/share-to-page', [FeedPostController::class, 'shareToFacebookPage']);
+});
+
+// Legacy support alias for /getPostByType
+Route::get('/getPostByType/{type}', [FeedPostController::class, 'index'])->withoutMiddleware('token');
 
 
 
