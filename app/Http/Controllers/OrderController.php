@@ -390,6 +390,19 @@ class OrderController extends Controller
     {
         $transactionStarted = false;
         try {
+            // Defensive handling for items passed as JSON string or stringified '[object Object]'
+            if ($request->has('items') && is_string($request->input('items'))) {
+                $rawItemsStr = trim($request->input('items'));
+                if ($rawItemsStr === '[object Object]' || $rawItemsStr === '') {
+                    $request->merge(['items' => null]);
+                } else {
+                    $decoded = json_decode($rawItemsStr, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                        $request->merge(['items' => $decoded]);
+                    }
+                }
+            }
+
             $validated = $request->validate([
                 'user_id' => ['required', 'integer', 'exists:users,id'],
 
