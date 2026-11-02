@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
 $middleware->alias([
     'token' => ApiTokenAuth::class,
     'admin' => \App\Http\Middleware\AdminAccess::class,
+    'partner.auth' => \App\Http\Middleware\PartnerApiAuth::class,
 ]);
 $middleware->web(append: [
     ApiTokenAuth::class,

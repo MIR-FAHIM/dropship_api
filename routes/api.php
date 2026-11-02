@@ -53,6 +53,7 @@ use App\Http\Controllers\ProductAssistantQaController;
 use App\Http\Controllers\FeedPostController;
 use App\Http\Controllers\PasswordResetOtpController;
 use App\Http\Controllers\WhatsAppWebhookController;
+use App\Http\Controllers\PartnerApiController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -602,6 +603,32 @@ Route::prefix('feed-posts')->group(function () {
 
 // Legacy support alias for /getPostByType
 Route::get('/getPostByType/{type}', [FeedPostController::class, 'index'])->withoutMiddleware('token');
+
+// ==========================================
+// PARTNER EXTERNAL API (B2B E-COMMERCE CLIENT SITES)
+// ==========================================
+Route::prefix('partner/v1')
+    ->withoutMiddleware('token')
+    ->middleware(\App\Http\Middleware\PartnerApiAuth::class)
+    ->group(function () {
+        Route::get('/auth/verify', [PartnerApiController::class, 'verifyAuth']);
+        Route::get('/categories', [PartnerApiController::class, 'categories']);
+        Route::get('/products', [PartnerApiController::class, 'products']);
+        Route::get('/products/{id}', [PartnerApiController::class, 'productDetails']);
+        Route::post('/orders/create', [PartnerApiController::class, 'createOrder']);
+        Route::get('/orders/{orderNumber}/status', [PartnerApiController::class, 'orderStatus']);
+        Route::post('/webhook/test', [PartnerApiController::class, 'testWebhook']);
+    });
+
+// ==========================================
+// RESELLERBRAIN PARTNER STORE MANAGEMENT (DROPSHIPPER DASHBOARD)
+// ==========================================
+Route::prefix('partner/store')->group(function () {
+    Route::get('/', [PartnerApiController::class, 'getStore']);
+    Route::post('/save', [PartnerApiController::class, 'saveStore']);
+    Route::post('/regenerate-secret', [PartnerApiController::class, 'regenerateSecret']);
+});
+
 
 
 
