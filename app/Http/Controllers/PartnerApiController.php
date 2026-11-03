@@ -77,22 +77,21 @@ class PartnerApiController extends Controller
     private function formatProduct(Product $product): array
     {
         $primaryImageUrl = null;
-        if ($product->relationLoaded('primaryImage') && $product->primaryImage) {
+        if ($product->relationLoaded('primaryImage') && ($product->primaryImage instanceof Upload)) {
             $primaryImageUrl = $product->primaryImage->url;
         } else {
-            $primaryImageUrl = $this->resolveImageUrl($product->thumbnail_img);
+            $primaryImageUrl = $this->resolveImageUrl($product->thumbnail_img ?: ($product->primaryImage ?? null));
         }
 
         $galleryImages = [];
         if ($product->relationLoaded('images') && $product->images->isNotEmpty()) {
             foreach ($product->images as $img) {
-                if ($img->relationLoaded('image') && $img->image) {
-                    $galleryImages[] = $img->image->url;
-                } else {
-                    $resolved = $this->resolveImageUrl($img->image);
-                    if ($resolved) {
-                        $galleryImages[] = $resolved;
-                    }
+                $resolved = ($img->image instanceof Upload) 
+                    ? $img->image->url 
+                    : $this->resolveImageUrl($img->image);
+
+                if ($resolved) {
+                    $galleryImages[] = $resolved;
                 }
             }
         } elseif (!empty($product->photos)) {
