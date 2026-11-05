@@ -1190,6 +1190,27 @@ class OrderAccountingService
     }
 
     /**
+     * Apply a price update to an order item, keeping line_total and
+     * line_total_reseller_profit consistent with the new unit/admin/reseller price
+     * so order-level sums derived from items stay accurate.
+     */
+    private function applyItemPriceUpdate(OrderItem $item, array $itemUpdates): void
+    {
+        $qty = (int) ($item->qty ?? 1);
+        if ($qty <= 0) {
+            $qty = 1;
+        }
+
+        $resellerPrice = $itemUpdates['reseller_price'] ?? (float) $item->reseller_price;
+        $adminPrice = $itemUpdates['admin_price'] ?? (float) $item->admin_price;
+
+        $itemUpdates['line_total'] = round($qty * $resellerPrice, 2);
+        $itemUpdates['line_total_reseller_profit'] = round($qty * ($resellerPrice - $adminPrice), 2);
+
+        $item->update($itemUpdates);
+    }
+
+    /**
      * Save admin breakdown adjustments prior to settlement.
      */
     public function saveBreakdownAdjustments(Order $order, array $adjusted, ?int $adminUserId = null): array
@@ -1220,14 +1241,10 @@ class OrderAccountingService
                 $updates['remaining_cod'] = $remainingVal;
                 $updates['total'] = $remainingVal;
             }
-            if (array_key_exists('reseller_price', $adjusted)) {
-                $resellerPriceVal = round((float) $adjusted['reseller_price'], 2);
-                $updates['reseller_price'] = $resellerPriceVal;
-                $updates['subtotal'] = $resellerPriceVal;
-            }
-            if (array_key_exists('dropshipper_profit', $adjusted)) {
-                $updates['reseller_profit'] = round((float) $adjusted['dropshipper_profit'], 2);
-            }
+            // Note: 'reseller_price' / 'subtotal' / 'reseller_profit' are intentionally NOT
+            // set here from top-level request fields. They are always re-derived from the
+            // order's item rows further below, after item prices are applied, so they stay
+            // authoritative and can't drift from (or get silently reverted by) later edits.
 
             if (!empty($updates)) {
                 $lockedOrder->update($updates);
@@ -1269,7 +1286,9 @@ class OrderAccountingService
                             if (isset($itemData['unit_price'])) $itemUpdates['unit_price'] = (float) $itemData['unit_price'];
                             if (isset($itemData['admin_price'])) $itemUpdates['admin_price'] = (float) $itemData['admin_price'];
                             if (isset($itemData['reseller_price'])) $itemUpdates['reseller_price'] = (float) $itemData['reseller_price'];
-                            if (!empty($itemUpdates)) $item->update($itemUpdates);
+                            if (!empty($itemUpdates)) {
+                                $this->applyItemPriceUpdate($item, $itemUpdates);
+                            }
                         }
                     }
                 }
@@ -1290,13 +1309,24 @@ class OrderAccountingService
                         $itemUpdates['reseller_price'] = round((float) $adjusted['reseller_price'] / $qty, 2);
                     }
                     if (!empty($itemUpdates)) {
-                        $firstItem->update($itemUpdates);
+                        $this->applyItemPriceUpdate($firstItem, $itemUpdates);
                     }
                 }
             }
 
             // Reload relationships
             $lockedOrder->load(['items', 'deliveryInformation']);
+
+            // Authoritative re-sync: order-level subtotal/reseller_price/reseller_profit
+            // must always be derived from the current item rows so they can never drift
+            // out of sync with (or get silently reverted by) a later plain order update.
+            $itemsSubtotal = round((float) $lockedOrder->items->sum('line_total'), 2);
+            $itemsResellerProfit = round((float) $lockedOrder->items->sum('line_total_reseller_profit'), 2);
+            $lockedOrder->update([
+                'subtotal' => $itemsSubtotal,
+                'reseller_price' => $itemsSubtotal,
+                'reseller_profit' => $itemsResellerProfit,
+            ]);
 
             // Recalculate fresh breakdown
             $breakdown = $this->calculateOrderStakeBreakdown($lockedOrder);
