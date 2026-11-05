@@ -353,12 +353,15 @@ class OrderAccountingTest extends TestCase
         $this->assertNotNull($vendorSettlement);
         $this->assertEquals(500.00, $vendorSettlement->gross_entitlement);
 
-        // Reseller profit: 700 selling - 600 admin = 100
+        // Reseller profit uses the cash-flow formula: collectable (remaining_cod = 800)
+        // - admin base price (600) - customer shipping fee (100) - actual COD fee (10) = 90.
+        // (Item-margin alone, 700 selling - 600 admin = 100, is a different, narrower figure
+        // that doesn't account for the shipping/COD fee the dropshipper also bears.)
         $resellerSettlement = OrderSettlement::where('order_id', $order->id)
             ->where('settlement_type', OrderSettlement::TYPE_RESELLER_PROFIT)
             ->first();
         $this->assertNotNull($resellerSettlement);
-        $this->assertEquals(100.00, $resellerSettlement->settleable_amount);
+        $this->assertEquals(90.00, $resellerSettlement->settleable_amount);
     }
 
     /**

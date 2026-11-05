@@ -173,7 +173,7 @@ class OrderAccountingService
             // 3. Entitlements Calculation per vendor / reseller / platform
             $vendorEntitlements = [];
             $totalVendorEntitlement = 0.00;
-            $totalResellerProfit = 0.00;
+            $totalAdminBasePrice = 0.00;
             $totalPlatformProductMargin = 0.00;
 
             foreach ($lockedOrder->items as $item) {
@@ -182,10 +182,9 @@ class OrderAccountingService
 
                 $vendorPrice = round((float) ($item->unit_price ?? $product?->unit_price ?? 0), 2);
                 $adminPrice = round((float) ($item->admin_price ?? $product?->admin_price ?? $vendorPrice), 2);
-                $sellingPrice = round((float) ($item->reseller_price ?? $item->price ?? $adminPrice), 2);
 
                 $itemVendorTotal = round($vendorPrice * $qty, 2);
-                $itemResellerProfit = round(($sellingPrice - $adminPrice) * $qty, 2);
+                $itemAdminTotal = round($adminPrice * $qty, 2);
                 $itemPlatformMargin = round(($adminPrice - $vendorPrice) * $qty, 2);
 
                 $vendorId = $product?->vendor_id ?: $lockedOrder->vendor_id;
@@ -201,13 +200,18 @@ class OrderAccountingService
                 $vendorEntitlements[$vendorId]['gross_amount'] += $itemVendorTotal;
 
                 $totalVendorEntitlement += $itemVendorTotal;
-                $totalResellerProfit += $itemResellerProfit;
+                $totalAdminBasePrice += $itemAdminTotal;
                 $totalPlatformProductMargin += $itemPlatformMargin;
             }
 
             $totalVendorEntitlement = round($totalVendorEntitlement, 2);
-            $totalResellerProfit = round($totalResellerProfit, 2);
+            $totalAdminBasePrice = round($totalAdminBasePrice, 2);
             $totalPlatformProductMargin = round($totalPlatformProductMargin, 2);
+
+            // Dropshipper profit at delivery: same cash-flow formula used everywhere else
+            // (customer collected - admin base price - customer shipping charge - COD fee),
+            // resolved here with the ACTUAL confirmed courier fees rather than estimates.
+            $totalResellerProfit = max(0.00, round($remainingCod - $totalAdminBasePrice - $customerShippingCharge - $actualCodFee, 2));
 
             // 4. Handle Vendor Courier Net Payout vs Platform Remittance
             // If vendor-owned courier: courier remits $courierNetPayout directly to vendor.
@@ -1317,19 +1321,24 @@ class OrderAccountingService
             // Reload relationships
             $lockedOrder->load(['items', 'deliveryInformation']);
 
-            // Authoritative re-sync: order-level subtotal/reseller_price/reseller_profit
-            // must always be derived from the current item rows so they can never drift
-            // out of sync with (or get silently reverted by) a later plain order update.
+            // Authoritative re-sync: subtotal/reseller_price are derived from the current
+            // item rows so they can never drift out of sync with the items.
             $itemsSubtotal = round((float) $lockedOrder->items->sum('line_total'), 2);
-            $itemsResellerProfit = round((float) $lockedOrder->items->sum('line_total_reseller_profit'), 2);
             $lockedOrder->update([
                 'subtotal' => $itemsSubtotal,
                 'reseller_price' => $itemsSubtotal,
-                'reseller_profit' => $itemsResellerProfit,
             ]);
 
-            // Recalculate fresh breakdown
+            // Recalculate fresh breakdown (this is the single authoritative dropshipper-profit
+            // formula: collectable amount - admin base price - shipping charge - COD fee).
             $breakdown = $this->calculateOrderStakeBreakdown($lockedOrder);
+
+            // reseller_profit always reflects this breakdown, so ANY adjustment here
+            // (price, shipping/COD fee, collectable amount) is reflected immediately and
+            // can't be silently reverted by a later, unrelated order edit.
+            $lockedOrder->update([
+                'reseller_profit' => $breakdown['dropshipper']['profit'],
+            ]);
 
             // Update OrderSettlement rows
             $supplierSettlement = OrderSettlement::where('order_id', $lockedOrder->id)

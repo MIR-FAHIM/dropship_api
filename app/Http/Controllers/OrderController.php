@@ -1041,10 +1041,13 @@ class OrderController extends Controller
             }
 
             // Assemble order update payload
+            // Note: reseller_profit is intentionally not set here - it's recalculated
+            // below via the authoritative cash-flow breakdown formula (collectable amount
+            // - admin base price - shipping fee - COD fee), once shipping/discount/total
+            // are final, so it reacts to those changes too, not just item price edits.
             $orderPayload = [
                 'subtotal' => round($subtotal, 2),
                 'reseller_price' => round($subtotal, 2),
-                'reseller_profit' => round($resellerProfit, 2),
                 'shipping_fee' => $shippingFee,
                 'discount' => $discount,
                 'total' => $recalculatedTotal,
@@ -1064,6 +1067,12 @@ class OrderController extends Controller
             }
 
             $order->update($orderPayload);
+
+            // Recalculate reseller_profit using the single authoritative cash-flow
+            // breakdown formula now that items/shipping/discount/total are final.
+            $order->load(['items', 'deliveryInformation']);
+            $breakdown = $this->orderAccountingService->calculateOrderStakeBreakdown($order);
+            $order->update(['reseller_profit' => $breakdown['dropshipper']['profit']]);
 
             DB::commit();
 

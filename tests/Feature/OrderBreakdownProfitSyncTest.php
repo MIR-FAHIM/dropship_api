@@ -14,11 +14,12 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * Reproduces the admin-panel vs dropshipper-panel reseller_profit mismatch:
- * adjusting an order's price via the Financial Stake Breakdown modal must
- * persist to orders.reseller_profit, and that value must survive a later
- * plain order update (e.g. editing shipping_fee) instead of being silently
- * reverted back to the stale, pre-adjustment figure.
+ * Reproduces the admin-panel vs dropshipper-panel reseller_profit mismatch, and
+ * verifies the fix: orders.reseller_profit is always re-derived from the single
+ * authoritative cash-flow formula (collectable amount - admin base price -
+ * shipping fee - COD fee), whether the price, shipping fee, discount or total
+ * is changed via the Financial Stake Breakdown modal OR the plain order-update
+ * endpoint - so it can never go stale or get silently reverted by either path.
  */
 class OrderBreakdownProfitSyncTest extends TestCase
 {
@@ -119,15 +120,17 @@ class OrderBreakdownProfitSyncTest extends TestCase
         return $order;
     }
 
-    public function test_breakdown_price_adjustment_updates_order_level_reseller_profit(): void
+    public function test_breakdown_price_and_collectable_adjustment_updates_order_level_reseller_profit(): void
     {
         $order = $this->createOrderWithItem();
 
-        // Admin raises the reseller selling price by 1500 (800 -> 2300) via the
-        // Financial Stake Breakdown modal.
+        // Admin raises both the reseller selling price (800 -> 2300) and the
+        // collectable/COD amount (900 -> 2400) by 1500 via the Financial Stake
+        // Breakdown modal, without touching shipping_fee (stays 100).
         $response = $this->withHeader('Authorization', 'Bearer ' . $this->adminToken)
             ->postJson("/api/order-settlements/orders/{$order->id}/update-breakdown", [
                 'reseller_price' => 2300.00,
+                'collectable_amount' => 2400.00,
             ]);
 
         $response->assertStatus(200);
@@ -135,42 +138,45 @@ class OrderBreakdownProfitSyncTest extends TestCase
         $order->refresh();
         $item = $order->items()->first();
 
-        // Expected profit: 2300 - 600 (admin_price, unchanged) = 1700
-        $this->assertEquals(2300.00, (float) $order->subtotal);
-        $this->assertEquals(2300.00, (float) $order->reseller_price);
-        $this->assertEquals(1700.00, (float) $order->reseller_profit);
+        // Item-level margin (unaffected by shipping/collectable): 2300 - 600 = 1700.
         $this->assertEquals(2300.00, (float) $item->line_total);
         $this->assertEquals(1700.00, (float) $item->line_total_reseller_profit);
+
+        // Order-level reseller_profit uses the cash-flow formula:
+        // collectable (2400) - admin base price (600) - shipping fee (100)
+        // - default 1% COD fee on collectable (24.00) = 1676.00.
+        $this->assertEquals(2300.00, (float) $order->subtotal);
+        $this->assertEquals(2300.00, (float) $order->reseller_price);
+        $this->assertEquals(2400.00, (float) $order->total);
+        $this->assertEquals(1676.00, (float) $order->reseller_profit);
     }
 
-    public function test_reseller_profit_survives_a_later_plain_order_update(): void
+    public function test_raising_total_via_plain_order_update_also_moves_reseller_profit(): void
     {
         $order = $this->createOrderWithItem();
+        $this->assertEquals(200.00, (float) $order->reseller_profit);
 
-        // Step 1: admin adjusts the price via the breakdown modal.
-        $this->withHeader('Authorization', 'Bearer ' . $this->adminToken)
-            ->postJson("/api/order-settlements/orders/{$order->id}/update-breakdown", [
-                'reseller_price' => 2300.00,
-            ])->assertStatus(200);
-
-        $order->refresh();
-        $this->assertEquals(1700.00, (float) $order->reseller_profit);
-
-        // Step 2: admin (or anyone) later edits an unrelated field (shipping fee)
-        // through the plain order-update endpoint, without touching items.
+        // Admin raises shipping_fee by 1500 (100 -> 1600) through the plain
+        // order-update endpoint (no breakdown modal, no item changes). Subtotal
+        // stays 800, so total must become 800 + 1600 - 0 = 2400.
         $response = $this->withHeader('Authorization', 'Bearer ' . $this->adminToken)
             ->putJson("/api/orders/update/{$order->id}", [
-                'shipping_fee' => 250.00,
+                'shipping_fee' => 1600.00,
+                'total' => 2400.00,
             ]);
 
         $response->assertStatus(200);
 
         $order->refresh();
+        $this->assertEquals(1600.00, (float) $order->shipping_fee);
+        $this->assertEquals(2400.00, (float) $order->total);
+        $this->assertEquals(2400.00, (float) $order->remaining_cod);
 
-        // reseller_profit must NOT be silently reverted to the pre-adjustment 200.00 -
-        // this is exactly the admin-panel vs dropshipper-panel mismatch being fixed.
-        $this->assertEquals(1700.00, (float) $order->reseller_profit);
-        $this->assertEquals(2300.00, (float) $order->subtotal);
-        $this->assertEquals(250.00, (float) $order->shipping_fee);
+        // reseller_profit must move with it (this used to stay frozen at 200.00,
+        // which was the admin-panel vs dropshipper-panel mismatch being fixed):
+        // collectable (2400) - admin base price (600) - shipping fee (1600)
+        // - default 1% COD fee on collectable (24.00) = 176.00.
+        $this->assertNotEquals(200.00, (float) $order->reseller_profit);
+        $this->assertEquals(176.00, (float) $order->reseller_profit);
     }
 }

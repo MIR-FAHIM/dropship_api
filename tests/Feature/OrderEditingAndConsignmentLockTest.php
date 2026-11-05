@@ -252,12 +252,17 @@ class OrderEditingAndConsignmentLockTest extends TestCase
         $this->assertEquals(120.00, (float) $order->shipping_fee);
         $this->assertEquals(50.00, (float) $order->discount);
         $this->assertEquals(1770.00, (float) $order->total);
-        // Profit: 2 * (850 - 600) = 500
-        $this->assertEquals(500.00, (float) $order->reseller_profit);
+        // Order-level reseller_profit uses the cash-flow breakdown formula:
+        // collectable (remaining_cod = total = 1770) - admin base price (2*600=1200)
+        // - shipping fee (120) - default 1% COD fee on collectable (17.70) = 432.30.
+        // (Per-item margin, 2*(850-600)=500, is still reflected in the item's own
+        // line_total_reseller_profit below - the two are different, intentional figures.)
+        $this->assertEquals(432.30, (float) $order->reseller_profit);
 
         $updatedItem = $order->items()->first();
         $this->assertEquals(2, $updatedItem->qty);
         $this->assertEquals(850.00, (float) $updatedItem->reseller_price);
+        $this->assertEquals(500.00, (float) $updatedItem->line_total_reseller_profit);
         $this->assertEquals($this->attr2->id, $updatedItem->attribute_id);
     }
 
