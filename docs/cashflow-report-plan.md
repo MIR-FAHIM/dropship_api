@@ -1,9 +1,9 @@
 # Cashflow Report — Flow Audit & Report Plan
 
-Planning doc only — nothing here is built yet. Covers two things: the flow
-issues found while auditing the current settlement code, and the plan for the
-three stakeholder cashflow reports. Read `docs/payment-flow.md` first; this
-doc assumes that one.
+Covers two things: the flow issues found while auditing the current
+settlement code (several now fixed, flagged below), and the plan for the
+three stakeholder cashflow reports (not built yet). Read `docs/payment-flow.md`
+first; this doc assumes that one.
 
 > You said "four report plans" but named three (admin / dropshipper /
 > vendor). This doc plans those three. If a fourth was intended (e.g. a
@@ -35,31 +35,47 @@ Every report below is this same three-state model, just sliced per audience.
 
 ## Flow issues found
 
-### 1. Vendor settlement direction is inverted for flow A (already known)
+### 1. ✅ FIXED — Vendor settlement direction was inverted for flow A
 
-Documented in `payment-flow.md`'s "Known inconsistency" section —
-`processOrderDelivery()`'s vendor settlement computes "platform owes vendor a
-shortage" when it should compute "vendor owes platform a surplus" for the
-vendor-owned-courier case. Repeating it here because **it directly corrupts
-any liability total Plan A/C would compute from `order_settlements`** until
-fixed.
+`processOrderDelivery()`'s vendor settlement computed "platform owes vendor a
+shortage" even when the courier payout already covered the vendor's product
+cost, the opposite of `calculateOrderStakeBreakdown()`'s already-correct
+`supplier_owes_platform` for that case. Fixed for the single-vendor case (the
+common one) by reusing that same formula, with a new explicit
+`order_settlements.direction` column (`platform_owes_payee` |
+`payee_owes_platform`) rather than relying on sign alone. Multi-vendor orders
+sharing one courier payout remain a genuinely unresolved case (see #4) — the
+prior approximate behaviour is preserved there, not silently "fixed" with a
+guess.
 
-### 2. A dead but live double-payment path
+### 1b. ✅ FIXED — a related, deeper root cause: order_statuses id 10 collision
+
+While fixing #1/timing, found the actual root cause of why disbursement timing
+was unreliable: id `10` ("Carrybee Paid") was *also* hardcoded into two
+unrelated "cancelled/returned" exclusion lists (`Order::is_carrybee_paid` and
+`OrderController::updateOrderStatus`'s reversal branch). That permanently
+forced `is_carrybee_paid` false the moment an order actually became
+CarryBee-paid, and would wrongly reverse delivery accounting if an admin ever
+re-saved an order sitting at that status. Removed `10` from both lists.
+Also: `processOrderDelivery()` is now gated specifically on CarryBee's
+`order.paid` webhook (via `carrybee_paid_at`), not merely on "delivered",
+matching "the disbursement journey starts when CarryBee signals paid."
+
+### 2. ✅ FIXED — a dead but live double-payment path
 
 `POST /settle/reseller-profit/{id}` (`OrderController::settleResellerProfit`)
-is a **separate, older mechanism** that credits a `ResellerTransaction` for
+was a separate, older mechanism that credited a `ResellerTransaction` for
 `order.reseller_profit` directly, independent of `order_settlements` and
-`disburseDropshipperProfitDirectly()`. Its only guard is "no debit
-`Transaction` already exists for this order" — it has **no idea the newer
-settlement system exists**, so if both paths are ever triggered for the same
-order, the reseller is paid twice.
+`disburseDropshipperProfitDirectly()`, with no cross-check against it. It had
+zero references in the frontend. **Removed** (method + route).
 
-It isn't called from any frontend file today (checked — zero references), so
-it's currently unreachable through normal use. But it's a live, callable
-route. **Recommend removing it**, or rewriting it to go through
-`disburseDropshipperProfitDirectly()` so there's one path, one guard.
+Also added, while in this area: `disburseDropshipperProfitDirectly()` now
+refuses a second disbursement for an already-settled order (previously
+nothing stopped a double-click from crediting the wallet twice), and
+`reseller_transactions` has a new unique `(order_id, type, trx_type)` index
+as DB-level defense-in-depth.
 
-### 3. `order_accounting_ledgers` is write-only
+### 3. `order_accounting_ledgers` is write-only (still open)
 
 `OrderAccountingLedger` is a proper double-entry ledger (account codes:
 `cash_platform`, `courier_clearing`, `vendor_payable`, `reseller_payable`,
@@ -76,18 +92,15 @@ thinner)? **Needs a decision before Plan A is built**, since Plan A's
 "cash-in-hand" number is the kind of thing a real ledger answers and an ad-hoc
 sum doesn't.
 
-### 4. The ledger's vendor entry is wrong for multi-vendor orders
+### 4. ✅ FIXED — the ledger's vendor entry was wrong for multi-vendor orders
 
-Whichever way #3 is decided, this needs fixing first if the ledger is used:
-the `vendor_payable` ledger entry in `processOrderDelivery()` credits the
-**entire** combined vendor entitlement to `order.vendor_id` alone —
-```php
-'party_id' => $lockedOrder->vendor_id,
-'credit' => $totalVendorEntitlement, // summed across ALL vendors on the order
-```
-— even though the method's own `$vendorEntitlements` grouping (used correctly
-for `order_settlements`) proves an order can have items from multiple
-vendors. The settlement rows are correct per-vendor; the ledger entry is not.
+The `vendor_payable` ledger entry in `processOrderDelivery()` credited the
+**entire** combined vendor entitlement to `order.vendor_id` alone, even though
+`order_settlements` already split correctly per vendor. Now creates one
+ledger entry per vendor, matching the settlement rows. The deeper multi-vendor
++ vendor-owned-courier *settlement direction* question from #1 remains open -
+one `consignment_id` per order means there's no way to know which vendor's
+account the courier actually paid when more than one vendor is involved.
 
 ### 5. No vendor wallet — vendors are paid a fundamentally different way
 
@@ -171,17 +184,18 @@ issue #2 is cleaned up so the numbers can be trusted.
   (`settlement_invoices`), and the same projected/settled/paid breakdown,
   just driven by invoices instead of a withdraw button.
 
-## What needs to change before building any of this
+## What's left before building the reports
 
-1. Fix issue #1 (vendor settlement direction) — otherwise Plan A/C inherit a
-   wrong number for every vendor-owned-courier order.
-2. Decide and resolve issue #3/#4 (ledger vs settlement-table as the source
-   of truth for aggregation) before Plan A's cash-in-hand section.
-3. Remove or fix issue #2 (`settleResellerProfit`) before trusting any
-   dropshipper liability total.
-4. Decide issue #5 (vendor wallet vs invoice-only) — this determines whether
+1. ~~Fix issue #1 (vendor settlement direction)~~ — done.
+2. ~~Remove/fix issue #2 (`settleResellerProfit`)~~ — done.
+3. ~~Fix issue #4 (multi-vendor ledger split)~~ — done.
+4. Decide issue #3 (ledger vs settlement-table as the source of truth for
+   aggregation) before Plan A's cash-in-hand section — the ledger is now
+   correct, but still nothing reads/sums it for a report.
+5. Decide issue #5 (vendor wallet vs invoice-only) — this determines whether
    Plan C is a new feature (wallet + withdraw) or a report on existing data.
-5. If a vendor wallet is built, add the `payable_type` column from issue #7.
+6. If a vendor wallet is built, add the `payable_type` column from issue #7.
 
-None of this is implemented in this change — this doc is the shared
-understanding to build from next.
+Items 1-3 were implemented and tested (see the backend repo's git log for
+the two fix commits). This doc still reflects the plan for the three reports
+themselves, which aren't built yet.
