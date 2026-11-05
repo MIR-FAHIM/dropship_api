@@ -213,6 +213,11 @@ class OrderAccountingService
             // resolved here with the ACTUAL confirmed courier fees rather than estimates.
             $totalResellerProfit = max(0.00, round($remainingCod - $totalAdminBasePrice - $customerShippingCharge - $actualCodFee, 2));
 
+            // Keep the order row and its items' per-line figures in step with the final,
+            // actual-fee-based profit that's about to be settled below.
+            $lockedOrder->update(['reseller_profit' => $totalResellerProfit]);
+            $this->allocateResellerProfitToItems($lockedOrder, $totalResellerProfit);
+
             // 4. Handle Vendor Courier Net Payout vs Platform Remittance
             // If vendor-owned courier: courier remits $courierNetPayout directly to vendor.
             // Platform remittance to vendor is ONLY the remaining shortage!
@@ -1215,6 +1220,54 @@ class OrderAccountingService
     }
 
     /**
+     * Allocate the order's authoritative cash-flow dropshipper profit (which factors in
+     * shipping fee, COD fee and the collectable amount - things no single item "owns")
+     * across its items' line_total_reseller_profit, proportional to each item's share of
+     * pure product margin. This keeps the per-item figures shown in reports (e.g. the
+     * Sale & Profit page) moving in step with the authoritative order-level total
+     * whenever total/shipping/discount/collectable amount changes - not just item prices.
+     *
+     * The split is a presentational allocation only; it always sums back to exactly
+     * $totalProfit (the last item absorbs any rounding remainder).
+     */
+    public function allocateResellerProfitToItems(Order $order, float $totalProfit): void
+    {
+        $items = $order->items->values();
+        $count = $items->count();
+        if ($count === 0) {
+            return;
+        }
+
+        $totalProfit = round($totalProfit, 2);
+
+        $margins = [];
+        foreach ($items as $item) {
+            $qty = (int) ($item->qty ?? 1);
+            if ($qty <= 0) {
+                $qty = 1;
+            }
+            $margins[] = round($qty * ((float) $item->reseller_price - (float) $item->admin_price), 2);
+        }
+
+        $totalMargin = round(array_sum($margins), 2);
+
+        $allocated = 0.00;
+        foreach ($items as $index => $item) {
+            $isLast = $index === $count - 1;
+
+            if ($isLast) {
+                $share = round($totalProfit - $allocated, 2);
+            } else {
+                $ratio = $totalMargin != 0.00 ? ($margins[$index] / $totalMargin) : (1 / $count);
+                $share = round($totalProfit * $ratio, 2);
+                $allocated = round($allocated + $share, 2);
+            }
+
+            $item->update(['line_total_reseller_profit' => $share]);
+        }
+    }
+
+    /**
      * Save admin breakdown adjustments prior to settlement.
      */
     public function saveBreakdownAdjustments(Order $order, array $adjusted, ?int $adminUserId = null): array
@@ -1339,6 +1392,7 @@ class OrderAccountingService
             $lockedOrder->update([
                 'reseller_profit' => $breakdown['dropshipper']['profit'],
             ]);
+            $this->allocateResellerProfitToItems($lockedOrder, $breakdown['dropshipper']['profit']);
 
             // Update OrderSettlement rows
             $supplierSettlement = OrderSettlement::where('order_id', $lockedOrder->id)

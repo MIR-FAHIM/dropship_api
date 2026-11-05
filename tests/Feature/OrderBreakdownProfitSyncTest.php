@@ -120,6 +120,92 @@ class OrderBreakdownProfitSyncTest extends TestCase
         return $order;
     }
 
+    private function createOrderWithTwoEqualMarginItems(): Order
+    {
+        $order = Order::create([
+            'user_id' => $this->reseller->id,
+            'order_number' => 'ORD-SYNC2-' . uniqid(),
+            'status' => 1,
+            'payment_status' => 'unpaid',
+            'customer_name' => 'Jane Doe',
+            'customer_phone' => '01700000001',
+            'shipping_address' => '123 Dhaka Road',
+            'zone' => 'Dhaka',
+            'subtotal' => 1400.00,
+            'reseller_price' => 1400.00,
+            'reseller_profit' => 400.00,
+            'shipping_fee' => 100.00,
+            'discount' => 0.00,
+            'total' => 1500.00,
+            'remaining_cod' => 1500.00,
+            'vendor_id' => $this->vendor->id,
+        ]);
+
+        // Item A: margin 200 (800 - 600)
+        OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => $this->product->id,
+            'shop_id' => $this->vendor->id,
+            'product_name' => $this->product->name,
+            'sku' => $this->product->sku,
+            'unit_price' => 500.00,
+            'admin_price' => 600.00,
+            'reseller_price' => 800.00,
+            'qty' => 1,
+            'line_total' => 800.00,
+            'line_total_reseller_profit' => 200.00,
+            'status' => 1,
+        ]);
+
+        // Item B: margin 200 (600 - 400)
+        OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => $this->product->id,
+            'shop_id' => $this->vendor->id,
+            'product_name' => $this->product->name,
+            'sku' => $this->product->sku,
+            'unit_price' => 300.00,
+            'admin_price' => 400.00,
+            'reseller_price' => 600.00,
+            'qty' => 1,
+            'line_total' => 600.00,
+            'line_total_reseller_profit' => 200.00,
+            'status' => 1,
+        ]);
+
+        return $order;
+    }
+
+    public function test_multi_item_order_allocates_profit_proportionally_to_item_margin(): void
+    {
+        $order = $this->createOrderWithTwoEqualMarginItems();
+
+        // Raise collectable amount by 1500 (1500 -> 3000), no item/shipping change.
+        $response = $this->withHeader('Authorization', 'Bearer ' . $this->adminToken)
+            ->postJson("/api/order-settlements/orders/{$order->id}/update-breakdown", [
+                'collectable_amount' => 3000.00,
+            ]);
+        $response->assertStatus(200);
+
+        $order->refresh();
+
+        // collectable (3000) - admin base price (600+400=1000) - shipping (100)
+        // - default 1% COD fee on collectable (30.00) = 1870.00.
+        $this->assertEquals(1870.00, (float) $order->reseller_profit);
+
+        $items = $order->items()->orderBy('id')->get();
+        $this->assertCount(2, $items);
+
+        // Both items have equal pure margin (200 each), so they split the 1870.00
+        // order-level profit evenly - 935.00 each - not their original 200.00 margin.
+        $this->assertEquals(935.00, (float) $items[0]->line_total_reseller_profit);
+        $this->assertEquals(935.00, (float) $items[1]->line_total_reseller_profit);
+        $this->assertEquals(
+            (float) $order->reseller_profit,
+            round((float) $items[0]->line_total_reseller_profit + (float) $items[1]->line_total_reseller_profit, 2)
+        );
+    }
+
     public function test_breakdown_price_and_collectable_adjustment_updates_order_level_reseller_profit(): void
     {
         $order = $this->createOrderWithItem();
@@ -138,9 +224,8 @@ class OrderBreakdownProfitSyncTest extends TestCase
         $order->refresh();
         $item = $order->items()->first();
 
-        // Item-level margin (unaffected by shipping/collectable): 2300 - 600 = 1700.
+        // line_total (pure selling-price total) is unaffected by shipping/collectable.
         $this->assertEquals(2300.00, (float) $item->line_total);
-        $this->assertEquals(1700.00, (float) $item->line_total_reseller_profit);
 
         // Order-level reseller_profit uses the cash-flow formula:
         // collectable (2400) - admin base price (600) - shipping fee (100)
@@ -149,6 +234,11 @@ class OrderBreakdownProfitSyncTest extends TestCase
         $this->assertEquals(2300.00, (float) $order->reseller_price);
         $this->assertEquals(2400.00, (float) $order->total);
         $this->assertEquals(1676.00, (float) $order->reseller_profit);
+
+        // The single item takes its full allocated share of that order-level figure,
+        // not the pure margin (2300-600=1700) - this is what the Sale & Profit page
+        // (and anywhere else reading order_items.line_total_reseller_profit) now sees.
+        $this->assertEquals(1676.00, (float) $item->line_total_reseller_profit);
     }
 
     public function test_raising_total_via_plain_order_update_also_moves_reseller_profit(): void
@@ -178,5 +268,9 @@ class OrderBreakdownProfitSyncTest extends TestCase
         // - default 1% COD fee on collectable (24.00) = 176.00.
         $this->assertNotEquals(200.00, (float) $order->reseller_profit);
         $this->assertEquals(176.00, (float) $order->reseller_profit);
+
+        // order_items.line_total_reseller_profit (single item -> full share) moves too.
+        $item = $order->items()->first();
+        $this->assertEquals(176.00, (float) $item->line_total_reseller_profit);
     }
 }

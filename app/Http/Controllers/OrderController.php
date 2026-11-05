@@ -1073,6 +1073,7 @@ class OrderController extends Controller
             $order->load(['items', 'deliveryInformation']);
             $breakdown = $this->orderAccountingService->calculateOrderStakeBreakdown($order);
             $order->update(['reseller_profit' => $breakdown['dropshipper']['profit']]);
+            $this->orderAccountingService->allocateResellerProfitToItems($order, $breakdown['dropshipper']['profit']);
 
             DB::commit();
 
