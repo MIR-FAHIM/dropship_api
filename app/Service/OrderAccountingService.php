@@ -519,11 +519,15 @@ class OrderAccountingService
                 ]);
             }
 
-            // Mark settlements as cancelled
-            OrderSettlement::where('order_id', $order->id)->update([
-                'status' => OrderSettlement::STATUS_CANCELLED,
-                'admin_note' => DB::raw("CONCAT(COALESCE(admin_note, ''), ' [Reversed: " . addslashes($reason) . "]')"),
-            ]);
+            // Mark settlements as cancelled. Appending to admin_note per-row in
+            // PHP (rather than a raw SQL CONCAT) keeps this portable across
+            // database drivers (MySQL in production, sqlite in tests).
+            foreach (OrderSettlement::where('order_id', $order->id)->get() as $settlement) {
+                $settlement->update([
+                    'status' => OrderSettlement::STATUS_CANCELLED,
+                    'admin_note' => trim(($settlement->admin_note ?? '') . " [Reversed: {$reason}]"),
+                ]);
+            }
 
             // Revert company transaction
             Transaction::where('order_id', $order->id)->where('type', 'platform_order_margin')->update([

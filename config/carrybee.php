@@ -30,7 +30,7 @@ return [
         'order.returned' => 8,
         'order.paid-return' => 8,
         'order.exchange' => 6,
-        'order.paid' => 10,
+        'order.paid' => 10, // "Carrybee Paid" - see Order::getIsCarrybeePaidAttribute()
         'order.returned-at-sorting' => 8,
         'order.returned-in-transit' => 8,
         'order.returned-to-merchant' => 8,

@@ -1336,7 +1336,14 @@ class OrderController extends Controller
                 ]);
             }
 
-            if (in_array($statusId, [6, 9])) {
+            // Consignment orders must wait for CarryBee's own "order.paid" webhook
+            // to confirm the COD was actually collected before settlement starts -
+            // a manual "delivered"/"completed" status change alone isn't enough.
+            // Orders with no consignment (manual/offline fulfillment) have no such
+            // webhook coming, so this status change is the only signal available.
+            $canConfirmPayment = !$order->hasConsignment() || $order->is_carrybee_paid;
+
+            if (in_array($statusId, [6, 9]) && $canConfirmPayment) {
                 $order->payment_status = 'paid';
                 $order->save();
 
@@ -1368,7 +1375,11 @@ class OrderController extends Controller
                         'module'     => 'order',
                     ]);
                 }
-            } elseif (in_array($statusId, [7, 8, 10, 11])) {
+            } elseif (in_array($statusId, [7, 8, 11])) {
+                // Status 10 ("Carrybee Paid") is NOT a reversal state - it must
+                // never be grouped with cancelled/returned/lost here, or a
+                // routine re-save while an order sits at "paid" would wrongly
+                // undo delivery accounting that was just correctly created.
                 $order->payment_status = 'unpaid';
                 $order->courier_payout_status = 'pending';
                 $order->save();
@@ -1377,109 +1388,6 @@ class OrderController extends Controller
             }
 
             return $this->success('Order status updated successfully', $order);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return $this->failed('Validation failed', $e->errors(), 422);
-        } catch (\Throwable $e) {
-            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
-        }
-    }
-
-    public function settleResellerProfit(Request $request, $id)
-    {
-        try {
-            $order = Order::find($id);
-            if (!$order) {
-                return $this->failed('Order not found', null, 404);
-            }
-
-            $user = User::find($order->user_id);
-            if (!$user) {
-                return $this->failed('User not found', null, 404);
-            }
-
-            if ($user->user_type === 'admin') {
-                $statusId = $order->status;
-
-                if ($statusId === '9') {
-                    // Check if debit transaction already exists
-                    $hasDebit = Transaction::where('order_id', $order->id)
-                        ->where('trx_type', 'debit')
-                        ->exists();
-                    if ($hasDebit) {
-                        return $this->failed('Debit transaction already exists for this order', null, 409);
-                    }
-
-                    // Update order status
-                    $order->status = 10;
-                    $order->save();
-
-                    // Add status history
-                    OrderStatusHistory::create([
-                        'order_id' => $order->id,
-                        'status_id' => 10,
-                        'note' => 'Settled reseller profit for order',
-                        'changed_by' => $request->changed_by,
-                    ]);
-
-                    // Create debit transaction
-                    $profitAmount = (float) ($order->reseller_profit ?? 0);
-                    Transaction::create([
-                        'amount' => $profitAmount,
-                        'trx_type' => 'debit',
-                        'status' => 'completed',
-                        'source' => 'Admin Action',
-                        'order_id' => $order->id,
-                        'type' => 'order_status',
-                        'note' => 'Debit transaction (reseller profit) for order #' . $order->order_number,
-                    ]);
-                    ResellerTransaction::create([
-                        'amount' => $profitAmount,
-                        'trx_type' => 'credit',
-                        'status' => 'completed',
-                        'source' => 'Admin Action',
-                        'order_id' => $order->id,
-                        'type' => 'order_status',
-                        'note' => 'Credit transaction (reseller profit) for order #' . $order->order_number,
-                        'reseller_id' => $order->user_id,
-                    ]);
-
-                    $formattedProfit = number_format($profitAmount, 2, '.', '');
-                    $this->notificationService->createNotificationSafely([
-                        'title'      => 'Reseller Profit Settled',
-                        'subtitle'   => "Profit for order {$order->order_number} settled. Amount {$formattedProfit} BDT.",
-                        'created_by' => $request->changed_by,
-                        'send_to'    => $order->user_id,
-                        'is_seen'    => false,
-                        'type'       => 'payment',
-                        'is_active'  => true,
-                        'image'      => null,
-                        'module'     => 'order',
-                    ]);
-
-                    $this->notificationService->createAdminNotifications([
-                        'title'      => 'Reseller Profit Settled',
-                        'subtitle'   => "Profit for order {$order->order_number} settled. Amount {$formattedProfit} BDT.",
-                        'created_by' => $request->changed_by,
-                        'is_seen'    => false,
-                        'type'       => 'payment',
-                        'is_active'  => true,
-                        'image'      => null,
-                        'module'     => 'order',
-                    ]);
-
-                    // Update user balance
-                    // if ($profitAmount > 0 && $order->user_id) {
-                    //     User::where('id', $order->user_id)
-                    //         ->increment('balance', $profitAmount);
-                    // }
-
-                    return $this->success('Settle reseller profit successfully', $order);
-                } else {
-                    return $this->failed('Order status is not completed', null, 400);
-                }
-            } else {
-                return $this->failed('User is not admin', null, 403);
-            }
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {

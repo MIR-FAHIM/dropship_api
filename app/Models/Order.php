@@ -243,8 +243,12 @@ class Order extends Model
 
     public function getIsCarrybeePaidAttribute(): bool
     {
-        // Cancelled or returned orders can never be CarryBee paid
-        if (in_array((int) $this->status, [7, 8, 10, 11])) {
+        // Cancelled or returned orders can never be CarryBee paid. Status 10
+        // ("Carrybee Paid") must NOT be in this list - it's the status this
+        // very flag is about, and excluding it here permanently forced this
+        // accessor false (and blocked checkAndMarkOrderCompleted()) the moment
+        // an order actually became CarryBee-paid.
+        if (in_array((int) $this->status, [7, 8, 11])) {
             return false;
         }
 

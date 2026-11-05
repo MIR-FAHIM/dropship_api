@@ -6,14 +6,17 @@ use App\Models\CarrybeeWebhookEvent;
 use App\Models\Order;
 use App\Models\OrderStatusHistory;
 use App\Service\CarrybeeWebhookService;
+use App\Service\OrderAccountingService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class CarrybeeWebhookController extends Controller
 {
-    public function __construct(private readonly CarrybeeWebhookService $webhookService)
-    {
+    public function __construct(
+        private readonly CarrybeeWebhookService $webhookService,
+        private readonly OrderAccountingService $orderAccountingService
+    ) {
     }
 
     public function handle(Request $request): JsonResponse
@@ -224,6 +227,12 @@ class CarrybeeWebhookController extends Controller
                 $order->deliveryInformation->save();
             }
 
+            // This manual reconciliation action IS a "paid" confirmation, same as
+            // the real webhook - it must start the same disbursement journey, not
+            // just flip the paid flags.
+            $disbursement = $this->webhookService->triggerDisbursementForPaidOrder($order);
+            $order->courier_net_payout = $disbursement['courier_net_payout'] ?? $order->courier_net_payout;
+
             // Status history log
             $adminUser = $request->user() ?: $request->attributes->get('api_user');
 
@@ -261,6 +270,11 @@ class CarrybeeWebhookController extends Controller
         }
 
         if ($action === 'reset') {
+            // Undo any settlement/ledger entries the (now-mistaken) "mark paid"
+            // action may have started, so resetting never leaves a disbursement
+            // journey orphaned - the inverse of triggerDisbursementForPaidOrder().
+            $this->orderAccountingService->processOrderReversal($order, 'Admin manually reset CarryBee paid status');
+
             $order->carrybee_invoice_id = null;
             $order->carrybee_paid_at = null;
             $order->carrybee_disbursed_to = null;

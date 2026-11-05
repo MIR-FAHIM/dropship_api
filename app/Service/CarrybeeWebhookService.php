@@ -242,15 +242,36 @@ class CarrybeeWebhookService
             $order->status = $targetStatusId;
         }
 
-        if (in_array($targetStatusId, [6, 10, 9])) {
+        if (in_array($targetStatusId, [6, 9])) {
             $order->payment_status = 'paid';
-            $courierFeeData = [
-                'actual_courier_fee' => Arr::get($payload, 'delivery_fee', null),
-                'actual_cod_fee' => Arr::get($payload, 'cod_fee', 0),
-                'confirmed' => true,
-                'payout_status' => 'received',
-            ];
-            $this->orderAccountingService->processOrderDelivery($order, $courierFeeData);
+
+            if ($order->hasConsignment()) {
+                // Real CarryBee logistics: capture whatever fee figures this
+                // event carries, but don't start the disbursement journey yet.
+                // That only begins once CarryBee's own "order.paid" webhook
+                // confirms the COD was actually collected - see
+                // handleOrderPaidEvent(), which is the sole trigger for
+                // processOrderDelivery() on consignment orders.
+                $deliveryFee = Arr::get($payload, 'delivery_fee', null);
+                $codFee = Arr::get($payload, 'cod_fee', null);
+                if ($deliveryFee !== null) {
+                    $order->actual_courier_fee = round((float) $deliveryFee, 2);
+                }
+                if ($codFee !== null) {
+                    $order->actual_cod_fee = round((float) $codFee, 2);
+                }
+            } else {
+                // No consignment - no "paid" webhook will ever arrive for this
+                // order, so this delivered/completed signal is the only one
+                // we'll get. Settle now.
+                $courierFeeData = [
+                    'actual_courier_fee' => Arr::get($payload, 'delivery_fee', null),
+                    'actual_cod_fee' => Arr::get($payload, 'cod_fee', null),
+                    'confirmed' => true,
+                    'payout_status' => 'received',
+                ];
+                $this->orderAccountingService->processOrderDelivery($order, $courierFeeData);
+            }
         } elseif (in_array($targetStatusId, [7, 8])) {
             $this->orderAccountingService->processOrderReversal($order, 'CarryBee delivery returned/cancelled');
         }
@@ -268,7 +289,7 @@ class CarrybeeWebhookService
             $this->notifyWebhookOrderStatusUpdated($order, $targetStatusId);
         }
 
-        if (in_array($targetStatusId, [10, 9]) && $previousPaymentStatus !== 'paid') {
+        if ($targetStatusId === 9 && $previousPaymentStatus !== 'paid') {
             $this->notifyWebhookPaymentCompleted($order);
         }
 
@@ -422,6 +443,32 @@ class CarrybeeWebhookService
         return implode(' | ', $parts);
     }
 
+    /**
+     * The single place that actually starts the disbursement journey once an
+     * order is confirmed CarryBee-paid - called from the real webhook
+     * (handleOrderPaidEvent) and from the admin's manual "mark as paid"
+     * reconciliation action (CarrybeeWebhookController::manualOrderPayment),
+     * so both paths run the exact same settlement + completion logic instead
+     * of two separately-maintained copies.
+     */
+    public function triggerDisbursementForPaidOrder(Order $order, array $courierFeeData = [], ?string $previousPaymentStatus = null): array
+    {
+        $previousPaymentStatus = $previousPaymentStatus ?? $order->payment_status;
+
+        $result = $this->orderAccountingService->processOrderDelivery($order, array_merge([
+            'confirmed' => true,
+            'payout_status' => 'received',
+        ], $courierFeeData));
+
+        $this->orderAccountingService->checkAndMarkOrderCompleted($order);
+
+        if ($previousPaymentStatus !== 'paid') {
+            $this->notifyWebhookPaymentCompleted($order);
+        }
+
+        return $result;
+    }
+
     private function handleOrderPaidEvent(Order $order, CarrybeeWebhookEvent $webhookEvent, array $payload): void
     {
         $invoiceId = (string) Arr::get($payload, 'invoice_id', '');
@@ -444,21 +491,17 @@ class CarrybeeWebhookService
         }
 
         $disbursedTo = $hasOwnDeliveryAccount ? 'vendor' : 'platform';
-
-        // Disbursed net amount from CarryBee
-        $remainingCod = (float) ($order->remaining_cod ?? $order->total);
-        $actualCourierCost = (float) ($order->actual_courier_cost ?? ((float) ($order->actual_courier_fee ?? 0) + (float) ($order->actual_cod_fee ?? 0)));
-        $netPayout = max(0.00, round($remainingCod - $actualCourierCost, 2));
+        $previousPaymentStatus = $order->payment_status;
 
         // Update Webhook Event
         if ($invoiceId !== '') {
             $webhookEvent->invoice_id = $invoiceId;
         }
         $webhookEvent->disbursed_to = $disbursedTo;
-        $webhookEvent->disbursed_amount = $netPayout;
         $webhookEvent->admin_acknowledged = false;
 
-        // Update Order
+        // Update Order - this IS the authoritative "CarryBee actually collected
+        // the COD and the funds are available" signal.
         if ($invoiceId !== '') {
             $order->carrybee_invoice_id = $invoiceId;
         }
@@ -466,6 +509,7 @@ class CarrybeeWebhookService
         $order->carrybee_disbursed_to = $disbursedTo;
         $order->courier_payout_status = 'received';
         $order->courier_cost_confirmed = true;
+        $order->payment_status = 'paid';
         $order->save();
 
         // Update DeliveryAssignedInfo
@@ -479,8 +523,17 @@ class CarrybeeWebhookService
             $assigned->save();
         }
 
-        // Check if all settlements are now fulfilled to mark order Completed (9)
-        $this->orderAccountingService->checkAndMarkOrderCompleted($order);
+        // This is the single trigger for the disbursement journey on
+        // consignment orders: vendor/reseller/platform settlement rows are
+        // only created once we get here, never merely on "delivered". Prefer
+        // this event's own fee figures; processOrderDelivery() falls back to
+        // whatever "delivered" already captured, or the shipping-fee estimate.
+        $courierFeeData = [
+            'actual_courier_fee' => Arr::get($payload, 'delivery_fee', null),
+            'actual_cod_fee' => Arr::get($payload, 'cod_fee', null),
+        ];
+        $result = $this->triggerDisbursementForPaidOrder($order, $courierFeeData, $previousPaymentStatus);
+        $webhookEvent->disbursed_amount = (float) ($result['courier_net_payout'] ?? 0.00);
 
         // Notify Admins
         $disbursedText = $disbursedTo === 'vendor' ? 'ভেন্ডরের নিজস্ব CarryBee অ্যাকাউন্টে' : 'প্ল্যাটফর্ম অ্যাকাউন্টে';

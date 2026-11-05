@@ -233,7 +233,6 @@ Route::prefix('orders')->group(function () {
     Route::get('/details/{id}', [OrderController::class, 'getOrderDetails']);
     Route::get('/status-summary', [OrderController::class, 'orderStatusSummary']);
     Route::post('update/status/{id}', [OrderController::class, 'updateOrderStatus']);
-    Route::post('settle/reseller-profit/{id}', [OrderController::class, 'settleResellerProfit']);
     Route::post('/{id}/manual-carrybee-payment', [CarrybeeWebhookController::class, 'manualOrderPayment']);
     // Item status update (for vendor/admin workflows)
     Route::patch('/item/status/{id}', [OrderController::class, 'updateOrderItemStatus']);
