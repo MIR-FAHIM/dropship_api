@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ProductAttributeController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\EcommerceWebsiteLeadController;
 use App\Http\Controllers\ProductDiscountController;
 use App\Http\Middleware\ApiTokenAuth;
 use App\Http\Controllers\UploadController;
@@ -336,6 +337,12 @@ Route::prefix('product-attributes')->group(function () {
 Route::prefix('reports')->group(function () {
     Route::get('/dashboard', [ReportController::class, 'dashboard']);
     Route::get('/cashflow-dashboard', [ReportController::class, 'cashflowDashboard']);
+});
+
+Route::prefix('ecommerce-website-leads')->group(function () {
+    Route::post('/', [EcommerceWebsiteLeadController::class, 'store']);
+    Route::get('/', [EcommerceWebsiteLeadController::class, 'index'])->middleware('admin');
+    Route::post('/{id}/status', [EcommerceWebsiteLeadController::class, 'updateStatus'])->middleware('admin');
 });
 
 // Product Clicks Report endpoints
