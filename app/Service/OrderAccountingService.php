@@ -1220,6 +1220,14 @@ class OrderAccountingService
                 $updates['remaining_cod'] = $remainingVal;
                 $updates['total'] = $remainingVal;
             }
+            if (array_key_exists('reseller_price', $adjusted)) {
+                $resellerPriceVal = round((float) $adjusted['reseller_price'], 2);
+                $updates['reseller_price'] = $resellerPriceVal;
+                $updates['subtotal'] = $resellerPriceVal;
+            }
+            if (array_key_exists('dropshipper_profit', $adjusted)) {
+                $updates['reseller_profit'] = round((float) $adjusted['dropshipper_profit'], 2);
+            }
 
             if (!empty($updates)) {
                 $lockedOrder->update($updates);
