@@ -10,10 +10,15 @@ use App\Models\Order;
 use App\Models\OrderStatus;
 use App\Models\Cart;
 use App\Models\Transaction;
+use App\Service\OrderAccountingService;
 use Carbon\Carbon;
 
 class ReportController extends Controller
 {
+    public function __construct(private readonly OrderAccountingService $orderAccountingService)
+    {
+    }
+
     private function success($message, $data = null, int $code = 200)
     {
         return response()->json([
@@ -253,6 +258,28 @@ class ReportController extends Controller
             ];
 
             return $this->success('Dashboard metrics fetched', $data);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * GET /reports/cashflow-dashboard
+     *
+     * Plan A - Admin Panel Cashflow Report. See
+     * OrderAccountingService::getCashflowOverview() and
+     * docs/cashflow-report-plan.md for what this covers and what it
+     * deliberately leaves out (the ledger reconciliation, issue #3).
+     *
+     * Query params: days (int, default 30, max 90).
+     */
+    public function cashflowDashboard(Request $request)
+    {
+        try {
+            $days = (int) $request->query('days', 30);
+            $data = $this->orderAccountingService->getCashflowOverview($days);
+
+            return $this->success('Cashflow overview fetched', $data);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

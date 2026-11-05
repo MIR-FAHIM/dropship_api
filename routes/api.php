@@ -335,6 +335,7 @@ Route::prefix('product-attributes')->group(function () {
 
 Route::prefix('reports')->group(function () {
     Route::get('/dashboard', [ReportController::class, 'dashboard']);
+    Route::get('/cashflow-dashboard', [ReportController::class, 'cashflowDashboard']);
 });
 
 // Product Clicks Report endpoints

@@ -14,6 +14,7 @@ use App\Models\WithdrawRequest;
 use App\Models\WalletTopup;
 use App\Models\SettlementInvoice;
 use App\Models\OrderStatusHistory;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -1995,5 +1996,202 @@ class OrderAccountingService
         ]);
 
         return true;
+    }
+
+    /**
+     * Order status ids whose type/name indicates a cancellation - matched
+     * dynamically against whatever order_statuses rows actually exist,
+     * rather than a hardcoded id (see ReportController for the same pattern).
+     */
+    private function cancelledStatusIds(): array
+    {
+        return \App\Models\OrderStatus::all()
+            ->filter(function ($s) {
+                $haystack = mb_strtolower(trim(($s->type ?? '') . ' ' . ($s->name ?? '')));
+                return $haystack !== '' && (mb_strpos($haystack, 'cancel') !== false || mb_strpos($haystack, 'বাতিল') !== false);
+            })
+            ->pluck('id')->map('intval')->all();
+    }
+
+    /**
+     * Plan A - Admin Panel Cashflow Report.
+     *
+     * The platform's cash position: realized earnings, what's owed to each
+     * stakeholder (liability) vs what they're still owed to pay us
+     * (receivable), the projected -> settled -> paid lifecycle for
+     * dropshippers and vendors, day-wise growth, and a best-effort
+     * cash-in-hand estimate.
+     *
+     * Deliberately does NOT read order_accounting_ledgers (issue #3 in
+     * docs/cashflow-report-plan.md is still an open decision) - every figure
+     * here comes from order_settlements / reseller_transactions /
+     * withdraw_requests, the same tables the existing reseller wallet flow
+     * already trusts.
+     */
+    public function getCashflowOverview(int $days = 30): array
+    {
+        $days = max(1, min(90, $days));
+        $cancelledIds = $this->cancelledStatusIds();
+
+        // ---- Platform's own realized earnings (commission + shipping margin) ----
+        $platformSettlementTypes = [
+            OrderSettlement::TYPE_COMPANY_PRODUCT_COMMISSION,
+            OrderSettlement::TYPE_COMPANY_LOGISTIC_EARNING,
+        ];
+        $platformEarningsQuery = fn () => OrderSettlement::whereIn('settlement_type', $platformSettlementTypes);
+
+        $today = Carbon::today();
+        $platformEarnings = [
+            'today' => round((float) $platformEarningsQuery()->whereDate('settled_at', $today)->sum('net_payable_amount'), 2),
+            'last_7_days' => round((float) $platformEarningsQuery()->whereDate('settled_at', '>=', $today->copy()->subDays(6))->sum('net_payable_amount'), 2),
+            'this_month' => round((float) $platformEarningsQuery()->whereDate('settled_at', '>=', $today->copy()->startOfMonth())->sum('net_payable_amount'), 2),
+            'total' => round((float) $platformEarningsQuery()->sum('net_payable_amount'), 2),
+            'product_commission_total' => round((float) OrderSettlement::where('settlement_type', OrderSettlement::TYPE_COMPANY_PRODUCT_COMMISSION)->sum('net_payable_amount'), 2),
+            'shipping_margin_total' => round((float) OrderSettlement::where('settlement_type', OrderSettlement::TYPE_COMPANY_LOGISTIC_EARNING)->sum('net_payable_amount'), 2),
+        ];
+
+        // ---- Dropshipper flow: projected -> settled (liability) -> paid ----
+        $dropshipperProjected = (float) Order::whereNotIn('status', $cancelledIds)
+            ->whereDoesntHave('settlements', fn ($q) => $q->where('settlement_type', OrderSettlement::TYPE_RESELLER_PROFIT))
+            ->sum('reseller_profit');
+
+        // "Settled" here means the order was delivered and the profit was
+        // confirmed via an order_settlements row - whether or not it has
+        // since been credited into the reseller's wallet is an internal
+        // admin workflow step, not a different liability state: until an
+        // actual withdrawal transfers it out, ResellerBrain still owes it.
+        $dropshipperConfirmedTotal = (float) OrderSettlement::where('settlement_type', OrderSettlement::TYPE_RESELLER_PROFIT)
+            ->where('status', '!=', OrderSettlement::STATUS_CANCELLED)
+            ->sum('net_payable_amount');
+        $dropshipperPaidOut = round((float) ResellerTransaction::where('status', 'completed')
+            ->where('trx_type', 'debit')->where('type', 'withdraw')->sum('amount'), 2);
+        $dropshipperOwed = max(0.00, round($dropshipperConfirmedTotal - $dropshipperPaidOut, 2));
+
+        // ---- Vendor flow: projected -> settled (liability) -> paid, + receivable ----
+        $vendorProjected = (float) OrderItem::whereHas('order', function ($q) use ($cancelledIds) {
+            $q->whereNotIn('status', $cancelledIds)
+                ->whereDoesntHave('settlements', fn ($sq) => $sq->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE));
+        })->selectRaw('COALESCE(SUM(unit_price * qty), 0) as total')->value('total');
+
+        $vendorSettlementQuery = fn () => OrderSettlement::where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE);
+
+        $vendorOwed = round((float) $vendorSettlementQuery()
+            ->where('direction', OrderSettlement::DIRECTION_PLATFORM_OWES_PAYEE)
+            ->where('status', OrderSettlement::STATUS_PENDING)
+            ->sum('net_payable_amount'), 2);
+
+        $vendorPaidOut = round((float) $vendorSettlementQuery()
+            ->where('direction', OrderSettlement::DIRECTION_PLATFORM_OWES_PAYEE)
+            ->where('status', OrderSettlement::STATUS_SETTLED)
+            ->sum('net_payable_amount'), 2);
+
+        $vendorReceivable = round((float) $vendorSettlementQuery()
+            ->where('direction', OrderSettlement::DIRECTION_PAYEE_OWES_PLATFORM)
+            ->where('status', OrderSettlement::STATUS_PENDING)
+            ->sum('net_payable_amount'), 2);
+
+        // ---- Liabilities & receivables (company-wide totals) ----
+        $liabilities = [
+            'owed_to_dropshippers' => $dropshipperOwed,
+            'owed_to_vendors' => $vendorOwed,
+            'total' => round($dropshipperOwed + $vendorOwed, 2),
+        ];
+        $receivables = [
+            'owed_by_vendors' => $vendorReceivable,
+            'note' => 'Surplus a vendor collected directly via their own CarryBee account, above their product cost. '
+                . 'There is no automated collection for this yet - it must be recovered manually.',
+        ];
+
+        // ---- Cash-in-hand estimate ----
+        // Only counts money that actually landed in the PLATFORM's own
+        // account (courier_account_owner = platform) once CarryBee confirmed
+        // payment, minus everything actually paid back out. Deliberately
+        // excludes $vendorReceivable (uncollected vendor surplus) - that
+        // money has never reached ResellerBrain's account.
+        $platformInflow = (float) Order::where('courier_account_owner', 'platform')
+            ->whereNotNull('carrybee_paid_at')
+            ->sum('courier_net_payout');
+        $cashInHand = round($platformInflow - $vendorPaidOut - $dropshipperPaidOut, 2);
+
+        // ---- Day-wise platform earnings growth ----
+        $periodStart = Carbon::today()->subDays($days - 1)->startOfDay();
+        $earningsByDay = $platformEarningsQuery()
+            ->selectRaw('DATE(settled_at) as d, SUM(net_payable_amount) as total')
+            ->where('settled_at', '>=', $periodStart)
+            ->groupBy('d')->pluck('total', 'd');
+        $resellerSettledByDay = OrderSettlement::where('settlement_type', OrderSettlement::TYPE_RESELLER_PROFIT)
+            ->where('status', OrderSettlement::STATUS_SETTLED)
+            ->selectRaw('DATE(settled_at) as d, SUM(net_payable_amount) as total')
+            ->where('settled_at', '>=', $periodStart)
+            ->groupBy('d')->pluck('total', 'd');
+
+        $dailyBreakdown = [];
+        for ($i = $days - 1; $i >= 0; $i--) {
+            $d = Carbon::today()->subDays($i)->toDateString();
+            $dailyBreakdown[] = [
+                'date' => $d,
+                'platform_earnings' => round((float) ($earningsByDay[$d] ?? 0), 2),
+                'reseller_profit_settled' => round((float) ($resellerSettledByDay[$d] ?? 0), 2),
+            ];
+        }
+
+        // ---- Week / month growth, same shape as the orders dashboard ----
+        $pctChange = function (float $current, float $previous): float {
+            if ($previous <= 0.0) {
+                return $current > 0.0 ? 100.0 : 0.0;
+            }
+            return round((($current - $previous) / $previous) * 100, 1);
+        };
+
+        $thisWeekStart = Carbon::today()->subDays(6);
+        $prevWeekStart = Carbon::today()->subDays(13);
+        $prevWeekEnd = Carbon::today()->subDays(7);
+        $thisWeekEarnings = (float) $platformEarningsQuery()->whereDate('settled_at', '>=', $thisWeekStart)->sum('net_payable_amount');
+        $prevWeekEarnings = (float) $platformEarningsQuery()->whereDate('settled_at', '>=', $prevWeekStart)->whereDate('settled_at', '<=', $prevWeekEnd)->sum('net_payable_amount');
+
+        $thisMonthStart = Carbon::today()->startOfMonth();
+        $dayOfMonth = Carbon::today()->day;
+        $prevMonthStart = Carbon::today()->subMonthNoOverflow()->startOfMonth();
+        $prevMonthEnd = $prevMonthStart->copy()->addDays($dayOfMonth - 1);
+        $thisMonthEarnings = (float) $platformEarningsQuery()->whereDate('settled_at', '>=', $thisMonthStart)->sum('net_payable_amount');
+        $prevMonthEarnings = (float) $platformEarningsQuery()->whereDate('settled_at', '>=', $prevMonthStart)->whereDate('settled_at', '<=', $prevMonthEnd)->sum('net_payable_amount');
+
+        return [
+            'platform_earnings' => $platformEarnings,
+            'liabilities' => $liabilities,
+            'receivables' => $receivables,
+            'dropshipper_flow' => [
+                'projected' => round($dropshipperProjected, 2),
+                'settled_unwithdrawn' => $dropshipperOwed,
+                'paid_out_total' => $dropshipperPaidOut,
+            ],
+            'vendor_flow' => [
+                'projected' => round($vendorProjected, 2),
+                'settled_unpaid' => $vendorOwed,
+                'paid_out_total' => $vendorPaidOut,
+                'receivable_from_vendors' => $vendorReceivable,
+            ],
+            'cash_in_hand' => [
+                'estimate' => $cashInHand,
+                'note' => 'Platform-owned-courier inflows received so far, minus everything actually paid '
+                    . 'out to vendors and dropshippers. Excludes uncollected vendor receivables (see '
+                    . '"receivables" above) and does not yet reconcile against order_accounting_ledgers '
+                    . '(see docs/cashflow-report-plan.md issue #3).',
+            ],
+            'daily_breakdown' => $dailyBreakdown,
+            'growth' => [
+                'week' => [
+                    'current_earnings' => round($thisWeekEarnings, 2),
+                    'previous_earnings' => round($prevWeekEarnings, 2),
+                    'earnings_growth_percent' => $pctChange($thisWeekEarnings, $prevWeekEarnings),
+                ],
+                'month' => [
+                    'current_earnings' => round($thisMonthEarnings, 2),
+                    'previous_earnings' => round($prevMonthEarnings, 2),
+                    'earnings_growth_percent' => $pctChange($thisMonthEarnings, $prevMonthEarnings),
+                    'note' => "Compares the first {$dayOfMonth} day(s) of this month vs the same day-count last month.",
+                ],
+            ],
+        ];
     }
 }
