@@ -223,16 +223,49 @@ class OrderAccountingService
             // Platform remittance to vendor is ONLY the remaining shortage!
             $createdSettlements = [];
 
+            $isSingleVendorOrder = count($vendorEntitlements) === 1;
+
             foreach ($vendorEntitlements as $vId => $vData) {
                 $grossEntitlement = round($vData['gross_amount'], 2);
                 $deductedByCourier = 0.00;
                 $netPayable = $grossEntitlement;
+                $direction = OrderSettlement::DIRECTION_PLATFORM_OWES_PAYEE;
+                $adminNote = "Platform delivery: Gross payable {$grossEntitlement} BDT.";
 
-                if ($courierOwner === 'vendor') {
-                    // Courier payout went directly to vendor
+                if ($courierOwner === 'vendor' && $isSingleVendorOrder) {
+                    // Single vendor, vendor's own CarryBee account: the courier
+                    // paid the vendor directly. If that payout covers (or
+                    // exceeds) the vendor's product cost, the vendor owes the
+                    // SURPLUS to the platform - not the other way around. This
+                    // mirrors calculateOrderStakeBreakdown()'s supplier_owes_platform,
+                    // which is the single authoritative formula for this case.
+                    $deductedByCourier = min($grossEntitlement, $courierNetPayout);
+                    if ($courierNetPayout >= $grossEntitlement) {
+                        $direction = OrderSettlement::DIRECTION_PAYEE_OWES_PLATFORM;
+                        $netPayable = round($courierNetPayout - $grossEntitlement, 2);
+                        $adminNote = "Vendor-owned delivery: received {$courierNetPayout} BDT net from courier, "
+                            . "product cost {$grossEntitlement} BDT. Vendor owes platform the {$netPayable} BDT surplus.";
+                    } else {
+                        $netPayable = round($grossEntitlement - $deductedByCourier, 2);
+                        $adminNote = "Vendor-owned delivery: {$deductedByCourier} BDT paid by courier. "
+                            . "Shortage payable to vendor: {$netPayable} BDT.";
+                    }
+                } elseif ($courierOwner === 'vendor') {
+                    // Multiple vendors sharing one courier payout on the same
+                    // order is not a case the consignment model (one
+                    // consignment_id per order) or this direction-aware
+                    // calculation currently resolves correctly - preserve the
+                    // prior approximate behaviour rather than guess a split.
+                    // See docs/cashflow-report-plan.md issue #1/#4.
                     $deductedByCourier = min($grossEntitlement, $courierNetPayout);
                     $netPayable = max(0.00, round($grossEntitlement - $deductedByCourier, 2));
+                    $adminNote = "Vendor-owned delivery (multi-vendor order - unresolved split): "
+                        . "{$deductedByCourier} BDT paid by courier. Shortage payable: {$netPayable} BDT.";
                 }
+
+                // Reused below to build the per-vendor ledger entries instead
+                // of one combined line wrongly attributed to order.vendor_id.
+                $vendorEntitlements[$vId]['deducted_by_courier'] = $deductedByCourier;
 
                 $settlement = OrderSettlement::updateOrCreate(
                     [
@@ -248,11 +281,10 @@ class OrderAccountingService
                         'advance_deduction' => 0.00,
                         'settleable_amount' => $netPayable,
                         'net_payable_amount' => $netPayable,
+                        'direction' => $direction,
                         'status' => $netPayable <= 0.00 ? OrderSettlement::STATUS_SETTLED : OrderSettlement::STATUS_PENDING,
                         'settled_at' => $netPayable <= 0.00 ? now() : null,
-                        'admin_note' => $courierOwner === 'vendor' 
-                            ? "Vendor-owned delivery: ৳{$deductedByCourier} paid by courier. Shortage payable: ৳{$netPayable}."
-                            : "Platform delivery: Gross payable ৳{$netPayable}.",
+                        'admin_note' => $adminNote,
                         'trx_id' => 'SETTLE-V-' . $lockedOrder->id . '-' . $vId . '-' . time(),
                     ]
                 );
@@ -354,33 +386,44 @@ class OrderAccountingService
                 ]);
             }
 
-            // Vendor Payable
-            OrderAccountingLedger::create([
-                'order_id' => $lockedOrder->id,
-                'entry_type' => 'delivery_completed',
-                'account_code' => 'vendor_payable',
-                'party_type' => 'vendor',
-                'party_id' => $lockedOrder->vendor_id,
-                'debit' => 0.00,
-                'credit' => $totalVendorEntitlement,
-                'currency' => 'BDT',
-                'description' => "Vendor gross entitlement for order #{$lockedOrder->id}",
-            ]);
-
-            if ($courierOwner === 'vendor' && $courierNetPayout > 0) {
-                // Deduct courier payout received directly by vendor
+            // Vendor Payable - one entry per vendor (an order can have items
+            // from more than one), not a single line wrongly combining every
+            // vendor's entitlement under order.vendor_id.
+            foreach ($vendorEntitlements as $vId => $vData) {
                 OrderAccountingLedger::create([
                     'order_id' => $lockedOrder->id,
-                    'entry_type' => 'courier_payout',
+                    'entry_type' => 'delivery_completed',
                     'account_code' => 'vendor_payable',
                     'party_type' => 'vendor',
-                    'party_id' => $lockedOrder->vendor_id,
-                    'debit' => $courierNetPayout,
-                    'credit' => 0.00,
+                    'party_id' => $vId,
+                    'debit' => 0.00,
+                    'credit' => round($vData['gross_amount'], 2),
                     'currency' => 'BDT',
-                    'description' => "Direct courier payout of ৳{$courierNetPayout} received by vendor",
+                    'description' => "Vendor gross entitlement for order #{$lockedOrder->id}",
                 ]);
 
+                $vendorDeducted = (float) ($vData['deducted_by_courier'] ?? 0.00);
+                if ($courierOwner === 'vendor' && $vendorDeducted > 0) {
+                    // Deduct this vendor's share of the courier payout they
+                    // received directly.
+                    OrderAccountingLedger::create([
+                        'order_id' => $lockedOrder->id,
+                        'entry_type' => 'courier_payout',
+                        'account_code' => 'vendor_payable',
+                        'party_type' => 'vendor',
+                        'party_id' => $vId,
+                        'debit' => $vendorDeducted,
+                        'credit' => 0.00,
+                        'currency' => 'BDT',
+                        'description' => "Direct courier payout of {$vendorDeducted} BDT received by vendor",
+                    ]);
+                }
+            }
+
+            if ($courierOwner === 'vendor' && $courierNetPayout > 0) {
+                // Clear the courier's own account of the full net payout
+                // (the per-vendor debit entries above already distributed
+                // where that payout actually landed).
                 OrderAccountingLedger::create([
                     'order_id' => $lockedOrder->id,
                     'entry_type' => 'courier_payout',
@@ -1800,6 +1843,16 @@ class OrderAccountingService
                     'trx_id' => 'SETTLE-R-' . $lockedOrder->id . '-' . time(),
                 ]
             );
+
+            // Guard against double disbursement (e.g. a double-click, or a
+            // retried request): if this settlement was already settled
+            // before this call, refuse rather than crediting the wallet again.
+            if ($resellerSettlement->status === OrderSettlement::STATUS_SETTLED) {
+                throw new \InvalidArgumentException(
+                    "Reseller profit for order #{$lockedOrder->order_number} was already disbursed "
+                    . "(settled at {$resellerSettlement->settled_at}, trx {$resellerSettlement->settled_trx_id})."
+                );
+            }
 
             // Mark settlement settled
             $resellerSettlement->update([

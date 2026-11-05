@@ -20,6 +20,13 @@ class OrderSettlement extends Model
     public const STATUS_SETTLED = 'settled';
     public const STATUS_CANCELLED = 'cancelled';
 
+    // Who owes whom - usually the platform owes the payee (vendor product
+    // cost, reseller profit). The exception is a vendor who collected the
+    // COD directly via their own CarryBee account and received more than
+    // their product cost: they owe the surplus TO the platform instead.
+    public const DIRECTION_PLATFORM_OWES_PAYEE = 'platform_owes_payee';
+    public const DIRECTION_PAYEE_OWES_PLATFORM = 'payee_owes_platform';
+
     protected $fillable = [
         'order_id',
         'payable_user_id',
@@ -31,6 +38,7 @@ class OrderSettlement extends Model
         'deducted_by_courier',
         'advance_deduction',
         'net_payable_amount',
+        'direction',
         'currency',
         'status',
         'admin_note',

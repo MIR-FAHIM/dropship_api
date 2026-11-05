@@ -806,6 +806,8 @@ class OrderSettlementController extends Controller
             return $this->success($result['message'], $result);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\InvalidArgumentException $e) {
+            return $this->failed($e->getMessage(), null, 400);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

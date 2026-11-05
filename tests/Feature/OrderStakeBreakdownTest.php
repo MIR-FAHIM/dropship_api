@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Order;
+use App\Models\OrderAccountingLedger;
 use App\Models\OrderItem;
 use App\Models\OrderSettlement;
 use App\Models\Product;
@@ -185,6 +186,118 @@ class OrderStakeBreakdownTest extends TestCase
         $response->assertJsonPath('data.supplier.supplier_owes_platform', 748.7);
         $response->assertJsonPath('data.dropshipper.profit', 635.7);
         $this->assertEquals(113.00, (float) $response->json('data.platform.net_profit'));
+    }
+
+    public function test_vendor_owned_courier_surplus_settlement_matches_live_breakdown_direction()
+    {
+        // Same order as test_financial_breakdown_matches_target_order_formula:
+        // vendor received 2498.70 net from the courier but only owes the
+        // product 1750.00 - a surplus of 748.70 the VENDOR owes the platform,
+        // not the other way around. This proves the real settlement row
+        // created by processOrderDelivery() now agrees with the live
+        // breakdown's supplier_owes_platform figure instead of contradicting it.
+        $order = Order::create([
+            'order_number' => 'ORD-SURPLUS-DIRECTION',
+            'user_id' => $this->dropshipper->id,
+            'vendor_id' => $this->vendor->id,
+            'total' => 2630.00,
+            'subtotal' => 2500.00,
+            'shipping_fee' => 130.00,
+            'remaining_cod' => 2630.00,
+            'courier_account_owner' => 'vendor',
+            'status' => 'Delivered',
+            'payment_status' => 'unpaid',
+            'consignment_id' => 'F10246FF7KW-2',
+        ]);
+
+        OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => $this->product->id,
+            'shop_id' => $this->vendor->id,
+            'unit_price' => 1750.00,
+            'admin_price' => 1838.00,
+            'reseller_price' => 2500.00,
+            'qty' => 1,
+        ]);
+
+        $this->accountingService->processOrderDelivery($order, [
+            'actual_courier_fee' => 105.00,
+            'actual_cod_fee' => 26.30,
+            'confirmed' => true,
+        ]);
+
+        $vendorSettlement = OrderSettlement::where('order_id', $order->id)
+            ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
+            ->first();
+
+        $this->assertNotNull($vendorSettlement);
+        $this->assertEquals(OrderSettlement::DIRECTION_PAYEE_OWES_PLATFORM, $vendorSettlement->direction);
+        $this->assertEquals(1750.00, $vendorSettlement->gross_entitlement);
+        // Matches calculateOrderStakeBreakdown()'s supplier_owes_platform (748.70) exactly.
+        $this->assertEquals(748.70, $vendorSettlement->net_payable_amount);
+        $this->assertEquals(748.70, $vendorSettlement->settleable_amount);
+    }
+
+    public function test_multi_vendor_order_creates_separate_ledger_entries_per_vendor()
+    {
+        $secondVendorUser = User::create([
+            'name' => 'Vendor Two', 'email' => 'vendor2_' . uniqid() . '@example.com',
+            'password' => bcrypt('password123'), 'role' => 'vendor', 'user_type' => 'vendor', 'banned' => 0,
+        ]);
+        $secondVendor = Vendor::create([
+            'user_id' => $secondVendorUser->id, 'shop_name' => 'Second Shop',
+            'is_active' => true, 'has_own_delivery_account' => false,
+        ]);
+        $secondProduct = Product::create([
+            'name' => 'Second Product', 'slug' => 'second-product-' . uniqid(),
+            'vendor_id' => $secondVendor->id, 'shop_id' => $secondVendor->id,
+            'unit_price' => 300.00, 'admin_price' => 330.00, 'price' => 400.00,
+            'category_id' => 1, 'brand_id' => 1, 'status' => 1, 'is_approved' => 1,
+        ]);
+
+        $order = Order::create([
+            'order_number' => 'ORD-MULTI-VENDOR',
+            'user_id' => $this->dropshipper->id,
+            'vendor_id' => $this->vendor->id, // order's own vendor_id - only ONE of the two
+            'total' => 2900.00,
+            'shipping_fee' => 100.00,
+            'remaining_cod' => 2900.00,
+            'courier_account_owner' => 'platform',
+            'status' => 'Delivered',
+        ]);
+
+        OrderItem::create([
+            'order_id' => $order->id, 'product_id' => $this->product->id, 'shop_id' => $this->vendor->id,
+            'unit_price' => 1750.00, 'admin_price' => 1838.00, 'reseller_price' => 2500.00, 'qty' => 1,
+        ]);
+        OrderItem::create([
+            'order_id' => $order->id, 'product_id' => $secondProduct->id, 'shop_id' => $secondVendor->id,
+            'unit_price' => 300.00, 'admin_price' => 330.00, 'reseller_price' => 400.00, 'qty' => 1,
+        ]);
+
+        $this->accountingService->processOrderDelivery($order, [
+            'actual_courier_fee' => 80.00,
+            'actual_cod_fee' => 10.00,
+            'confirmed' => true,
+        ]);
+
+        // Both vendors must each get their own settlement row...
+        $settlements = OrderSettlement::where('order_id', $order->id)
+            ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
+            ->get()->keyBy('vendor_id');
+        $this->assertEquals(1750.00, $settlements[$this->vendor->id]->gross_entitlement);
+        $this->assertEquals(300.00, $settlements[$secondVendor->id]->gross_entitlement);
+
+        // ...and their own vendor_payable ledger entry (not one combined line
+        // wrongly attributed to order.vendor_id alone).
+        $ledgerEntries = OrderAccountingLedger::where('order_id', $order->id)
+            ->where('account_code', 'vendor_payable')
+            ->where('entry_type', 'delivery_completed')
+            ->get()->keyBy('party_id');
+
+        $this->assertCount(2, $ledgerEntries);
+        $this->assertEquals(1750.00, (float) $ledgerEntries[$this->vendor->id]->credit);
+        $this->assertEquals(300.00, (float) $ledgerEntries[$secondVendor->id]->credit);
     }
 
     public function test_admin_can_adjust_breakdown_before_settlement()
@@ -482,6 +595,25 @@ class OrderStakeBreakdownTest extends TestCase
             'bank_reference' => 'BK789456123',
             'payment_method' => 'bkash',
         ]);
+
+        // A second disbursement attempt for the same order must be refused,
+        // not credit the wallet again.
+        $secondResponse = $this->withHeaders($this->adminHeaders)->postJson("/api/order-settlements/orders/{$order->id}/disburse-reseller-profit", [
+            'amount' => 635.70,
+            'payment_method' => 'bkash',
+            'trx_id' => 'BK789456124',
+            'note' => 'Accidental second disbursement attempt',
+        ]);
+
+        $secondResponse->assertStatus(400);
+        $this->assertEquals(
+            1,
+            \App\Models\ResellerTransaction::where('order_id', $order->id)
+                ->where('trx_type', 'credit')
+                ->where('type', 'order_settlement')
+                ->count(),
+            'Reseller must not be credited twice for the same order.'
+        );
     }
 
     public function test_vendor_invoice_payment_and_approval_lifecycle()
