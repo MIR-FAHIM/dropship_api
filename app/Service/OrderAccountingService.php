@@ -1001,18 +1001,16 @@ class OrderAccountingService
         $deliveryInfo = $order->deliveryInformation;
         $consignmentId = $order->consignment_id ?: $deliveryInfo?->consignment_id;
 
-        // Courier collectable (Customer COD is always the full order total entered by dropshipper)
-        // Advance charge / reliability balance is separate and must NEVER deduct from customer COD.
-        if ($order->remaining_cod !== null && (float) $order->remaining_cod === 0.00) {
-            $courierCollectable = 0.00;
-        } elseif ($deliveryInfo?->collectable_amount !== null && (float) $deliveryInfo->collectable_amount === 0.00) {
-            $courierCollectable = 0.00;
-        } elseif ($orderTotal > 0) {
-            $courierCollectable = $orderTotal;
-        } elseif ($order->remaining_cod !== null) {
+        // Courier collectable (Customer COD / Collectable Amount)
+        // Priority 1: If remaining_cod is explicitly set on the order (authoritative COD amount)
+        // Priority 2: Delivery assigned info collectable_amount (e.g. from Carrybee / courier sync)
+        // Priority 3: Order total as fallback
+        if ($order->remaining_cod !== null) {
             $courierCollectable = round((float) $order->remaining_cod, 2);
         } elseif ($deliveryInfo?->collectable_amount !== null) {
             $courierCollectable = round((float) $deliveryInfo->collectable_amount, 2);
+        } elseif ($orderTotal > 0) {
+            $courierCollectable = $orderTotal;
         } else {
             $courierCollectable = 0.00;
         }
@@ -1139,19 +1137,19 @@ class OrderAccountingService
             'courier_account_owner' => $hasOwnDeliveryAccount ? 'vendor' : 'platform',
             'consignment_id' => $consignmentId,
             'courier' => [
-                'collectable_amount' => $courierCollectable,
-                'delivery_fee' => $courierDeliveryFee,
-                'cod_fee' => $courierCodFee,
-                'total_courier_fee' => $totalCourierCost,
+                'collectable_amount' => round((float) $courierCollectable, 2),
+                'delivery_fee' => round((float) $courierDeliveryFee, 2),
+                'cod_fee' => round((float) $courierCodFee, 2),
+                'total_courier_fee' => round((float) $totalCourierCost, 2),
                 'fee_settlement_status' => 'settled_at_source',
                 'fee_settlement_note' => 'Delivery fee and COD fee automatically deducted and settled at source by delivery company prior to disbursement',
-                'net_received_by_supplier' => $courierNetToSupplier,
-                'net_disbursed' => $courierNetToSupplier,
+                'net_received_by_supplier' => round((float) $courierNetToSupplier, 2),
+                'net_disbursed' => round((float) $courierNetToSupplier, 2),
             ],
             'supplier' => [
-                'vendor_price' => $supplierVendorPrice,
-                'supplier_owes_platform' => $supplierOwesPlatform,
-                'platform_owes_supplier' => $platformOwesSupplier,
+                'vendor_price' => round((float) $supplierVendorPrice, 2),
+                'supplier_owes_platform' => round((float) $supplierOwesPlatform, 2),
+                'platform_owes_supplier' => round((float) $platformOwesSupplier, 2),
                 'is_settled' => $supplierSettlement?->status === OrderSettlement::STATUS_SETTLED,
                 'settled_trx_id' => $supplierSettlement?->settled_trx_id,
                 'settled_at' => $supplierSettlement?->settled_at?->toIso8601String(),
@@ -1160,19 +1158,19 @@ class OrderAccountingService
                 'user_id' => $order->user_id,
                 'user_name' => $order->user?->name,
                 'user_phone' => $order->user?->phone,
-                'customer_collected' => $customerCollected,
-                'admin_base_price' => $adminBasePrice,
-                'customer_delivery_charge' => $customerShippingCharge,
-                'cod_charge' => $courierCodFee,
-                'profit' => $dropshipperProfit,
+                'customer_collected' => round((float) $customerCollected, 2),
+                'admin_base_price' => round((float) $adminBasePrice, 2),
+                'customer_delivery_charge' => round((float) $customerShippingCharge, 2),
+                'cod_charge' => round((float) $courierCodFee, 2),
+                'profit' => round((float) $dropshipperProfit, 2),
                 'is_settled' => $resellerSettlement?->status === OrderSettlement::STATUS_SETTLED,
                 'settled_trx_id' => $resellerSettlement?->settled_trx_id,
                 'settled_at' => $resellerSettlement?->settled_at?->toIso8601String(),
             ],
             'platform' => [
-                'product_commission' => $platformProductCommission,
-                'delivery_margin' => $platformDeliveryMargin,
-                'net_profit' => $platformNetProfit,
+                'product_commission' => round((float) $platformProductCommission, 2),
+                'delivery_margin' => round((float) $platformDeliveryMargin, 2),
+                'net_profit' => round((float) $platformNetProfit, 2),
             ],
             'advance' => [
                 'amount' => $advanceAmount,
@@ -1213,11 +1211,14 @@ class OrderAccountingService
                 $updates['actual_courier_cost'] = round($delFee + $codFee, 2);
                 $updates['courier_cost_confirmed'] = true;
             }
-            if (array_key_exists('remaining_cod', $adjusted)) {
-                $updates['remaining_cod'] = round((float) $adjusted['remaining_cod'], 2);
-            }
             if (array_key_exists('collectable_amount', $adjusted)) {
-                $updates['remaining_cod'] = round((float) $adjusted['collectable_amount'], 2);
+                $collectableVal = round((float) $adjusted['collectable_amount'], 2);
+                $updates['remaining_cod'] = $collectableVal;
+                $updates['total'] = $collectableVal;
+            } elseif (array_key_exists('remaining_cod', $adjusted)) {
+                $remainingVal = round((float) $adjusted['remaining_cod'], 2);
+                $updates['remaining_cod'] = $remainingVal;
+                $updates['total'] = $remainingVal;
             }
 
             if (!empty($updates)) {
