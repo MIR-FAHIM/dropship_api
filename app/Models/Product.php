@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -106,6 +107,12 @@ class Product extends Model
         'external_link_btn' => 'Buy Now',
         'wholesale_product' => 0,
     ];
+
+    public function scopeVisibleOnHome(Builder $query): Builder
+    {
+        return $query->where('approved', 1)->where('show_home', 1)
+            ->whereHas('vendor', fn (Builder $vendor) => $vendor->where('is_active', 1));
+    }
 
     // ✅ Relationships
     public function user()

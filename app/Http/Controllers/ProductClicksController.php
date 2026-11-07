@@ -158,10 +158,7 @@ class ProductClicksController extends Controller
         try {
             $limit = (int) ($request->input('limit', 10));
 
-            $query = ProductClicks::selectRaw('product_id, COUNT(*) as total_clicks')
-                ->groupBy('product_id')
-                ->orderByDesc('total_clicks')
-                ->limit($limit);
+            $query = $this->rankedClicks($limit);
 
             if ($request->filled('start_date')) {
                 $query->whereDate('created_at', '>=', $request->input('start_date'));
@@ -189,5 +186,39 @@ class ProductClicksController extends Controller
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    public function homeLeaderboard()
+    {
+        $limit = 10;
+        $rows = $this->rankedClicks($limit)
+            ->whereHas('product', fn ($product) => $product->visibleOnHome())
+            ->with(['product:id,name,thumbnail_img', 'product.primaryImage:id,file_name'])
+            ->get()
+            ->filter(fn ($row) => $row->product !== null)
+            ->values();
+
+        return $this->success('Home product clicks leaderboard', [
+            'limit' => $limit,
+            'leaderboard' => $rows->map(fn ($row, $index) => [
+                'rank' => $index + 1,
+                'product_id' => $row->product_id,
+                'product' => [
+                    'id' => $row->product->id,
+                    'name' => $row->product->name,
+                    'primary_image' => ['file_name' => $row->product->primaryImage?->file_name],
+                ],
+                'total_clicks' => (int) $row->total_clicks,
+            ]),
+        ]);
+    }
+
+    private function rankedClicks(int $limit)
+    {
+        return ProductClicks::selectRaw('product_id, COUNT(*) as total_clicks')
+            ->groupBy('product_id')
+            ->orderByDesc('total_clicks')
+            ->orderBy('product_id')
+            ->limit($limit);
     }
 }

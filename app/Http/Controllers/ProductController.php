@@ -526,17 +526,18 @@ class ProductController extends Controller
                 'vendor.district',
                 'brand',
                 'productDiscount'
-            ])->where('approved', 1)->where('show_home', 1)
-              ->whereHas('vendor', function ($q) {
-                  $q->where('is_active', 1);
-              });
+            ])->visibleOnHome();
 
             if ($request->filled('vendor_id')) {
                 $query->where('vendor_id', $request->vendor_id);
             }
 
             if ($request->filled('category_id')) {
-                $query->where('category_id', $request->category_id);
+                $categoryId = (int) $request->category_id;
+                $query->where(function ($category) use ($categoryId) {
+                    $category->where('category_id', $categoryId)
+                        ->orWhereHas('category', fn ($child) => $child->where('parent_id', $categoryId));
+                });
             }
 
             if ($request->filled('sub_category_id')) {
@@ -580,7 +581,7 @@ class ProductController extends Controller
             }
 
             $perPage = (int) $request->get('per_page', 24);
-            $products = $query->latest()->paginate($perPage);
+            $products = $query->latest()->orderByDesc('id')->paginate($perPage);
 
             return $this->success('Products fetched successfully', $products, 200,);
         } catch (\Throwable $e) {
