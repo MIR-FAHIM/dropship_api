@@ -23,6 +23,7 @@ class CarrybeePaidWebhookTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['carrybee.webhook.secret' => 'carrybee-test-secret']);
 
         // Seed order statuses 1..11
         $statuses = [
@@ -123,7 +124,13 @@ class CarrybeePaidWebhookTest extends TestCase
         ];
 
         // Carrybee webhook call (unauthenticated external webhook)
-        $response = $this->postJson('/api/delivery-companies/carrybee/webhook', $payload);
+        $this->postJson('/api/delivery-companies/carrybee/webhook', $payload, ['X-Carrybee-Webhook-Signature' => 'wrong-signature'])
+            ->assertUnauthorized();
+        $this->assertFalse($order->fresh()->is_carrybee_paid);
+
+        $response = $this->postJson('/api/delivery-companies/carrybee/webhook', $payload, [
+            'X-Carrybee-Webhook-Signature' => 'carrybee-test-secret',
+        ]);
 
         $response->assertStatus(200)
             ->assertJson([
@@ -221,7 +228,9 @@ class CarrybeePaidWebhookTest extends TestCase
         ];
 
         // Hit the alias route /api/carrybee/webhook
-        $response = $this->postJson('/api/carrybee/webhook', $payload);
+        $response = $this->postJson('/api/carrybee/webhook', $payload, [
+            'X-Carrybee-Webhook-Signature' => 'carrybee-test-secret',
+        ]);
 
         $response->assertStatus(200)
             ->assertJson([
@@ -236,7 +245,7 @@ class CarrybeePaidWebhookTest extends TestCase
         $this->assertEquals('platform', $order->fresh()->carrybee_disbursed_to);
     }
 
-    public function test_admin_simulation_endpoint_processes_test_webhook(): void
+    public function test_admin_simulation_does_not_settle_or_record_a_payment(): void
     {
         $vendor = $this->createVendor(hasOwnDeliveryAccount: true);
 
@@ -267,19 +276,15 @@ class CarrybeePaidWebhookTest extends TestCase
         $response = $this->withHeaders($this->adminHeaders)
             ->postJson('/api/delivery-companies/carrybee/test-webhook', $testPayload);
 
-        $response->assertStatus(200)
-            ->assertJson([
-                'status'  => 'success',
-                'message' => 'Webhook processed',
-            ]);
+        $response->assertOk()
+            ->assertJsonPath('data.simulation', true)
+            ->assertJsonPath('data.order_matched', true)
+            ->assertJsonPath('data.mapped_status_id', 10);
 
-        // Check webhook event list
-        $listResponse = $this->withHeaders($this->adminHeaders)
-            ->getJson('/api/delivery-companies/carrybee/webhook-events?event=order.paid');
-        $listResponse->assertStatus(200)
-            ->assertJsonPath('status', 'success');
-
-        $this->assertGreaterThanOrEqual(1, count($listResponse->json('data.data')));
+        $this->assertNull($order->fresh()->carrybee_paid_at);
+        $this->assertFalse($order->fresh()->is_carrybee_paid);
+        $this->assertDatabaseMissing('carrybee_webhook_events', ['consignment_id' => 'FX-SIM-TEST']);
+        $this->assertDatabaseMissing('order_accounting_ledgers', ['order_id' => $order->id]);
     }
 
     public function test_admin_can_manually_mark_and_reset_carrybee_payment(): void
@@ -422,7 +427,7 @@ class CarrybeePaidWebhookTest extends TestCase
             'user_id' => $this->admin->id,
             'vendor_id' => $vendor->id,
             'order_number' => 'ORD-CB-999',
-            'status' => 6, // Delivered
+            'status' => 10, // CarryBee Paid (regression: previously treated as cancelled)
             'payment_status' => 'paid',
             'total' => 650,
             'remaining_cod' => 500,

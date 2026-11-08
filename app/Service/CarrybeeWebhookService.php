@@ -30,16 +30,21 @@ class CarrybeeWebhookService
             ];
         }
 
+        if (!$isTest && !$this->isValidSignature($rawBody, $signature)) {
+            return [
+                'ok' => false,
+                'http_code' => 401,
+                'message' => 'Invalid webhook signature',
+            ];
+        }
+
         $fingerprint = $this->buildFingerprint($payload);
         $webhookEvent = CarrybeeWebhookEvent::where('fingerprint', $fingerprint)->first();
 
         if ($webhookEvent) {
             $webhookEvent->attempts = (int) $webhookEvent->attempts + 1;
-            if (Arr::has($payload, 'invoice_id')) {
-                $webhookEvent->invoice_id = Arr::get($payload, 'invoice_id');
-            }
-
-            if ($webhookEvent->processed_at !== null) {
+            // Older invalid requests may have left a record for the same event.
+            if ($webhookEvent->processed_at !== null && $webhookEvent->signature_valid) {
                 $webhookEvent->processing_status = 'duplicate';
                 $webhookEvent->message = 'Duplicate webhook ignored';
                 $webhookEvent->save();
@@ -66,21 +71,7 @@ class CarrybeeWebhookService
             ]);
         }
 
-        $signatureValid = $isTest || $this->isValidSignature($rawBody, $signature);
-        $webhookEvent->signature_valid = $signatureValid;
-
-        if (!$signatureValid) {
-            $webhookEvent->processing_status = 'invalid_signature';
-            $webhookEvent->message = 'Signature verification failed';
-            $webhookEvent->processed_at = now();
-            $webhookEvent->save();
-
-            return [
-                'ok' => false,
-                'http_code' => 401,
-                'message' => 'Invalid webhook signature',
-            ];
-        }
+        $webhookEvent->signature_valid = true;
 
         $eventStatusMap = (array) config('carrybee.event_status_map', []);
         $mappedStatusId = $eventStatusMap[$event] ?? null;
@@ -165,8 +156,7 @@ class CarrybeeWebhookService
     {
         $secret = (string) config('carrybee.webhook.secret', '');
         if ($secret === '') {
-            // If secret is not set yet, allow webhook processing
-            return true;
+            return false;
         }
 
         $received = trim($received, " \t\n\r\0\x0B\"'");
@@ -552,13 +542,25 @@ class CarrybeeWebhookService
 
     public function processTestWebhook(array $payload): array
     {
-        $rawBody = json_encode($payload);
-        return $this->process(
-            payload: $payload,
-            rawBody: $rawBody,
-            signature: 'test-simulated',
-            headers: ['X-Simulated-By' => ['Admin-Panel-Tester']],
-            isTest: true
-        );
+        $event = (string) ($payload['event'] ?? '');
+        $statusMap = (array) config('carrybee.event_status_map', []);
+        if (!array_key_exists($event, $statusMap)) {
+            return ['ok' => false, 'http_code' => 422, 'message' => 'Unsupported CarryBee event'];
+        }
+
+        $order = $this->resolveOrder($payload);
+
+        return [
+            'ok' => true,
+            'http_code' => 200,
+            'message' => 'Webhook preview only. No order, payment or ledger was changed.',
+            'data' => [
+                'simulation' => true,
+                'order_id' => $order?->id,
+                'order_matched' => $order !== null,
+                'mapped_status_id' => $statusMap[$event],
+                'invoice_id' => $payload['invoice_id'] ?? null,
+            ],
+        ];
     }
 }

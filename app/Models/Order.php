@@ -9,6 +9,8 @@ class Order extends Model
 {
     use HasFactory;
 
+    public const CARRYBEE_NON_PAYABLE_STATUSES = [7, 8, 11];
+
     protected $fillable = [
         'user_id',
         'order_number',
@@ -248,7 +250,7 @@ class Order extends Model
         // very flag is about, and excluding it here permanently forced this
         // accessor false (and blocked checkAndMarkOrderCompleted()) the moment
         // an order actually became CarryBee-paid.
-        if (in_array((int) $this->status, [7, 8, 11])) {
+        if (in_array((int) $this->status, self::CARRYBEE_NON_PAYABLE_STATUSES, true)) {
             return false;
         }
 

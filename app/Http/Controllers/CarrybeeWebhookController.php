@@ -280,8 +280,10 @@ class CarrybeeWebhookController extends Controller
             $order->carrybee_disbursed_to = null;
             $order->courier_payout_status = 'pending';
 
-            // If the order is cancelled/returned, ensure payment_status is unpaid
-            if (in_array((int) $order->status, [7, 8, 10, 11])) {
+            // A reset moves a CarryBee Paid order back to Delivered; delivery and payout are separate.
+            if ((int) $order->status === (int) config('carrybee.event_status_map.order.paid', 10)) {
+                $order->status = 6; // Delivered
+            } elseif (in_array((int) $order->status, Order::CARRYBEE_NON_PAYABLE_STATUSES, true)) {
                 $order->payment_status = 'unpaid';
             }
             $order->save();

@@ -595,87 +595,28 @@ class DeliveryCompanyController extends Controller
             $order = Order::with(['vendor', 'items.product.vendor'])->where('consignment_id', $consignmentId)->first();
         }
 
-        // Sync transfer_status_id if provided by Carrybee
-        if ($deliveryInfo && is_array($details) && !empty($details['transfer_status_id'])) {
-            $deliveryInfo->update([
-                'transfer_status_id' => $details['transfer_status_id'],
-            ]);
+        // Keep delivery tracking in sync without changing financial settlement.
+        if ($deliveryInfo && !empty($details['transfer_status_id'])) {
+            $deliveryInfo->update(['transfer_status_id' => $details['transfer_status_id']]);
         }
 
-        // Query Webhook Event
-        $latestPaidEvent = CarrybeeWebhookEvent::where(function ($q) use ($consignmentId, $order) {
-                $q->where('consignment_id', $consignmentId);
-                if ($order) {
-                    $q->orWhere('order_id', $order->id);
-                }
-            })
+        // Report persisted settlement facts. A GET must not repair or reapply a payout.
+        // A logged event (even an order.paid event) is not itself proof of settlement.
+        $latestPaidEvent = CarrybeeWebhookEvent::where('consignment_id', $consignmentId)
             ->where('event', 'order.paid')
-            ->latest()
+            ->when($order, fn ($query) => $query->where('order_id', $order->id))
+            ->where('signature_valid', true)
+            ->whereIn('processing_status', ['processed', 'duplicate'])
+            ->whereNotNull('processed_at')
+            ->latest('id')
             ->first();
 
-        $isCancelledOrReturned = $order && in_array((int) ($order->status?->id ?? $order->status), [7, 8, 10, 11]);
-
-        $isCarrybeePaid = false;
-        $carrybeeInvoiceId = null;
-        $carrybeePaidAt = null;
-        $carrybeeDisbursedTo = null;
-        $carrybeeDisbursedAmount = null;
-
-        if (!$isCancelledOrReturned) {
-            if ($order && ($order->is_carrybee_paid || !empty($order->carrybee_paid_at) || !empty($order->carrybee_invoice_id))) {
-                $isCarrybeePaid = true;
-                $carrybeeInvoiceId = $order->carrybee_invoice_id;
-                $carrybeePaidAt = $order->carrybee_paid_at;
-                $carrybeeDisbursedTo = $order->carrybee_disbursed_to;
-            } elseif ($deliveryInfo && (!empty($deliveryInfo->carrybee_paid_at) || !empty($deliveryInfo->carrybee_invoice_id))) {
-                $isCarrybeePaid = true;
-                $carrybeeInvoiceId = $deliveryInfo->carrybee_invoice_id;
-                $carrybeePaidAt = $deliveryInfo->carrybee_paid_at;
-            }
-
-            if ($latestPaidEvent) {
-                $isCarrybeePaid = true;
-                $carrybeeInvoiceId = $carrybeeInvoiceId ?: $latestPaidEvent->invoice_id;
-                $carrybeePaidAt = $carrybeePaidAt ?: ($latestPaidEvent->event_time ?: $latestPaidEvent->created_at);
-                $carrybeeDisbursedTo = $carrybeeDisbursedTo ?: $latestPaidEvent->disbursed_to;
-                $carrybeeDisbursedAmount = $latestPaidEvent->disbursed_amount;
-            }
-
-            // Sync order / delivery info if paid in webhook but not yet flagged
-            if ($isCarrybeePaid && $order) {
-                $orderDirty = false;
-                if ($carrybeeInvoiceId && empty($order->carrybee_invoice_id)) {
-                    $order->carrybee_invoice_id = $carrybeeInvoiceId;
-                    $orderDirty = true;
-                }
-                if ($carrybeePaidAt && empty($order->carrybee_paid_at)) {
-                    $order->carrybee_paid_at = $carrybeePaidAt;
-                    $orderDirty = true;
-                }
-                if ($carrybeeDisbursedTo && empty($order->carrybee_disbursed_to)) {
-                    $order->carrybee_disbursed_to = $carrybeeDisbursedTo;
-                    $orderDirty = true;
-                }
-                if ($orderDirty) {
-                    $order->save();
-                }
-            }
-
-            if ($isCarrybeePaid && $deliveryInfo) {
-                $infoDirty = false;
-                if ($carrybeeInvoiceId && empty($deliveryInfo->carrybee_invoice_id)) {
-                    $deliveryInfo->carrybee_invoice_id = $carrybeeInvoiceId;
-                    $infoDirty = true;
-                }
-                if ($carrybeePaidAt && empty($deliveryInfo->carrybee_paid_at)) {
-                    $deliveryInfo->carrybee_paid_at = $carrybeePaidAt;
-                    $infoDirty = true;
-                }
-                if ($infoDirty) {
-                    $deliveryInfo->save();
-                }
-            }
-        }
+        $isNonPayable = $order && in_array((int) $order->status, Order::CARRYBEE_NON_PAYABLE_STATUSES, true);
+        $carrybeeInvoiceId = $isNonPayable ? null : ($order?->carrybee_invoice_id ?: $deliveryInfo?->carrybee_invoice_id);
+        $carrybeePaidAt = $isNonPayable ? null : ($order?->carrybee_paid_at ?: $deliveryInfo?->carrybee_paid_at);
+        $isCarrybeePaid = !$isNonPayable && (bool) ($carrybeeInvoiceId || $carrybeePaidAt);
+        $carrybeeDisbursedTo = $isCarrybeePaid ? $order?->carrybee_disbursed_to : null;
+        $carrybeeDisbursedAmount = $isCarrybeePaid ? $order?->courier_net_payout : null;
 
         $vendor = $order?->vendor ?: $order?->items?->first()?->product?->vendor;
         $hasOwnDeliveryAccount = (bool) ($vendor?->has_own_delivery_account ?? false);
@@ -686,7 +627,7 @@ class DeliveryCompanyController extends Controller
             'carrybee_invoice_id'       => $carrybeeInvoiceId,
             'carrybee_paid_at'          => $carrybeePaidAt ? Carbon::parse($carrybeePaidAt)->toIso8601String() : null,
             'carrybee_disbursed_to'     => $carrybeeDisbursedTo ?: ($hasOwnDeliveryAccount ? 'vendor' : 'platform'),
-            'carrybee_disbursed_amount' => $carrybeeDisbursedAmount !== null ? (float) $carrybeeDisbursedAmount : (float) ($order?->courier_net_payout ?? 0),
+            'carrybee_disbursed_amount' => $carrybeeDisbursedAmount !== null ? (float) $carrybeeDisbursedAmount : null,
             'webhook_event_found'       => !is_null($latestPaidEvent),
             'local_order_id'            => $order?->id,
             'local_order_number'        => $order?->order_number,
@@ -716,6 +657,10 @@ class DeliveryCompanyController extends Controller
                 'transfer_status_id' => $deliveryInfo->transfer_status_id,
                 'created_at'         => $deliveryInfo->created_at,
             ];
+        }
+
+        if (!array_key_exists('local_delivery_info', $responseBody)) {
+            $responseBody['local_delivery_info'] = null;
         }
 
         return $responseBody;
