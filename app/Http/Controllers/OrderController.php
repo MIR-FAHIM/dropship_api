@@ -1266,7 +1266,16 @@ class OrderController extends Controller
         try {
             $perPage = (int) $request->get('per_page', 20);
 
-            $query = Order::with(['status', 'user', 'vendor', 'items.shop', 'deliveryInformation']);
+            $query = Order::with([
+                'status',
+                'user' => fn ($user) => $user->withCount([
+                    'orders as completed_order_count' => fn ($orders) => $orders
+                        ->whereIn('status', Order::DROPSHIPPER_COMPLETED_STATUSES),
+                ])->withCasts(['completed_order_count' => 'integer']),
+                'vendor',
+                'items.shop',
+                'deliveryInformation',
+            ]);
 
             // Vendor filter: support vendor_id or vendor
             $vendorId = $request->get('vendor_id') ?? $request->get('vendor');
