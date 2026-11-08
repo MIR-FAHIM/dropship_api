@@ -351,7 +351,9 @@ class UserController extends Controller
     {
         try {
             $perPage = (int) ($request->get('per_page', 20));
-            $query = User::where('user_type', 'dropshipper');
+            $query = User::where('user_type', 'dropshipper')
+                ->withCount('orders as total_order_count')
+                ->withCasts(['total_order_count' => 'integer']);
 
             if ($request->filled('id')) {
                 $query->where('id', $request->id);
