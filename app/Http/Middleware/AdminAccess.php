@@ -11,7 +11,7 @@ class AdminAccess
     /**
      * Handle an incoming request.
      */
-    public function handle(Request $request, Closure $next): Response
+    public function handle(Request $request, Closure $next, ?string $area = null): Response
     {
         $user = $request->attributes->get('api_user') ?? $request->user();
 
@@ -36,7 +36,7 @@ class AdminAccess
             strtolower((string) ($user->role ?? '')),
         ]);
 
-        $allowedAdminRoles = ['admin', 'superadmin', 'product manager'];
+        $allowedAdminRoles = $area === 'orders' ? ['admin', 'superadmin'] : ['admin', 'superadmin', 'product manager'];
 
         if (!array_intersect($roles, $allowedAdminRoles)) {
             return response()->json([

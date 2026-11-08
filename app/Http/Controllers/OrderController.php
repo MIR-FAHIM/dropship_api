@@ -9,6 +9,7 @@ use App\Models\OrderStatus;
 use App\Models\OrderStatusHistory;
 use App\Models\Transaction;
 use App\Models\OrderItem;
+use App\Models\OrderItemChangeLog;
 use App\Models\OrderErrorLog;
 use App\Models\OrderSettlement;
 use App\Models\ResellerTransaction;
@@ -16,6 +17,7 @@ use App\Models\User;
 use App\Models\DeliveryCompany;
 use App\Models\Product;
 use App\Models\ProductAttribute;
+use App\Models\SettlementInvoice;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -810,6 +812,57 @@ class OrderController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+    public function replacementProducts(Request $request)
+    {
+        $validated = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+        $search = trim($validated['search'] ?? '');
+        $products = Product::query()
+            ->select(['id', 'name', 'sku', 'vendor_id', 'unit_price', 'admin_price', 'current_stock'])
+            ->with(['vendor:id,shop_name', 'productAttributes.attribute:id,name', 'productAttributes.value:id,value'])
+            ->whereHas('vendor', fn ($query) => $query->where('is_active', true))
+            ->where('current_stock', '>', 0)
+            ->whereNotNull('unit_price')
+            ->whereNotNull('sku')
+            ->where('sku', '!=', '')
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($match) use ($search) {
+                    $match->where('name', 'like', '%'.$search.'%')
+                        ->orWhere('sku', 'like', '%'.$search.'%');
+                    if (ctype_digit($search)) {
+                        $match->orWhere('id', $search);
+                    }
+                });
+            })
+            ->orderBy('name')->orderBy('id')->paginate(12);
+
+        return $this->success('Replacement products fetched successfully', $products);
+    }
+
+    private function itemReplacementBlockReason(Order $order): ?string
+    {
+        if ($order->items->count() !== 1) {
+            return 'Product replacement is only available for single-item orders.';
+        }
+        if (str_starts_with((string) $order->order_number, 'ORD-P')) {
+            return 'Partner orders reserve stock and cannot be replaced from this editor.';
+        }
+        if (!in_array((int) $order->status, [1, 2, 3], true) || $order->deliveryInformation || $order->deliveryMan()->exists() || $order->hasConsignment()) {
+            return 'Only orders awaiting fulfillment with no delivery assignment can change products.';
+        }
+        if (in_array(strtolower((string) $order->payment_status), ['paid', 'partial', 'partially_paid', 'refunded'], true)
+            || $order->is_carrybee_paid || $order->courier_cost_confirmed
+            || $order->settlements()->exists()
+            || $order->accountingLedgers()->where('entry_type', 'delivery_completed')->exists()
+            || SettlementInvoice::whereJsonContains('order_ids', (int) $order->id)->exists()) {
+            return 'Product replacement is locked because payment, delivery costs, or settlement have already been recorded.';
+        }
+
+        return null;
+    }
+
     public function updateOrder(Request $request, $id)
     {
         DB::beginTransaction();
@@ -866,8 +919,9 @@ class OrderController extends Controller
 
                 // Line items
                 'items'            => ['nullable', 'array', 'min:1'],
-                'items.*.id'       => ['nullable', 'integer'],
+                'items.*.id'       => ['required', 'integer', 'distinct'],
                 'items.*.product_id' => ['nullable', 'integer', 'exists:products,id'],
+                'items.*.expected_product_id' => ['nullable', 'integer'],
                 'items.*.qty'      => ['required_with:items', 'integer', 'min:1'],
                 'items.*.reseller_price' => ['required_with:items', 'numeric', 'min:0'],
                 'items.*.admin_price' => ['nullable', 'numeric', 'min:0'],
@@ -879,39 +933,67 @@ class OrderController extends Controller
                 'items.*.note'     => ['nullable', 'string'],
             ]);
 
+            $originalItems = $order->items->mapWithKeys(fn (OrderItem $item) => [
+                $item->id => OrderItemChangeLog::snapshot($item),
+            ]);
+
             // Process order items
-            if ($request->has('items') && is_array($validated['items'])) {
-                $processedItemIds = [];
+            $replacement = null;
+            if (isset($validated['items'])) {
+                $submittedIds = collect($validated['items'])->pluck('id')->map(fn ($itemId) => (int) $itemId)->sort()->values();
+                if ($submittedIds->all() !== $order->items->pluck('id')->sort()->values()->all()) {
+                    DB::rollBack();
+                    return $this->failed('Items must match the existing order lines. Reload the order and try again.', null, 422);
+                }
                 $subtotal = 0.0;
-                $resellerProfit = 0.0;
 
                 foreach ($validated['items'] as $itemData) {
-                    $existingItem = !empty($itemData['id'])
-                        ? $order->items->firstWhere('id', (int) $itemData['id'])
-                        : null;
-
-                    $productId = $itemData['product_id'] ?? $existingItem?->product_id;
-                    $product = $productId ? Product::find($productId) : null;
-
-                    $qty = (int) $itemData['qty'];
-                    if ($qty < 1) {
+                    $existingItem = $order->items->firstWhere('id', (int) $itemData['id']);
+                    if (array_key_exists('expected_product_id', $itemData)
+                        && (int) $itemData['expected_product_id'] !== (int) $existingItem->product_id) {
                         DB::rollBack();
-                        return $this->failed('Item quantity must be at least 1.', null, 422);
+                        return $this->failed('The order product has changed. Reload the order before saving.', null, 409);
                     }
 
-                    $resellerPrice = (float) $itemData['reseller_price'];
+                    $productId = $itemData['product_id'] ?? $existingItem->product_id;
+                    $isReplacement = (int) $productId !== (int) $existingItem->product_id;
+                    $product = null;
+                    $qty = (int) $itemData['qty'];
+                    if ($isReplacement) {
+                        if ($reason = $this->itemReplacementBlockReason($order)) {
+                            DB::rollBack();
+                            return $this->failed($reason, null, 422);
+                        }
 
-                    $adminPrice = isset($itemData['admin_price'])
-                        ? (float) $itemData['admin_price']
-                        : (float) ($product?->admin_price ?? $existingItem?->admin_price ?? 0);
+                        $product = Product::with('vendor')->lockForUpdate()->find($productId);
+                        if (!$product?->vendor?->is_active || trim((string) $product->sku) === '' || $product->unit_price === null) {
+                            DB::rollBack();
+                            return $this->failed('Select a replacement product with a SKU, vendor price, and active vendor.', null, 422);
+                        }
+                        if ($qty > (int) $product->current_stock) {
+                            DB::rollBack();
+                            return $this->failed('The replacement product does not have enough stock for this quantity.', null, 422);
+                        }
+                        $replacement = [
+                            'product' => $product,
+                            'previous_product_id' => $existingItem->product_id,
+                            'previous_sku' => $existingItem->sku,
+                        ];
+                    }
 
-                    $unitPrice = isset($itemData['unit_price'])
-                        ? (float) $itemData['unit_price']
-                        : (float) ($product?->unit_price ?? $existingItem?->unit_price ?? 0);
+                    $resellerPrice = round((float) $itemData['reseller_price'], 2);
+
+                    $unitPrice = $isReplacement
+                        ? $this->normalizePrice($product->unit_price)
+                        : round((float) ($itemData['unit_price'] ?? $existingItem->unit_price ?? $existingItem->product?->unit_price ?? 0), 2);
+
+                    $adminPrice = $isReplacement
+                        ? $this->resolveAdminPrice($product, $unitPrice)
+                        : round((float) ($itemData['admin_price'] ?? $existingItem->admin_price ?? $existingItem->product?->admin_price ?? $unitPrice), 2);
 
                     if ($resellerPrice < $adminPrice) {
                         DB::rollBack();
-                        $pName = $itemData['product_name'] ?? $product?->name ?? 'item';
+                        $pName = $product?->name ?? $existingItem->product_name ?? 'item';
                         return $this->failed(
                             "Reseller selling price (৳{$resellerPrice}) cannot be less than admin base price (৳{$adminPrice}) for '{$pName}'.",
                             ['product_id' => $productId],
@@ -921,15 +1003,19 @@ class OrderController extends Controller
 
                     $attributeId = array_key_exists('attribute_id', $itemData)
                         ? ($itemData['attribute_id'] ? (int) $itemData['attribute_id'] : null)
-                        : $existingItem?->attribute_id;
+                        : ($isReplacement ? null : $existingItem->attribute_id);
 
                     if ($attributeId && $productId) {
-                        $attrExists = ProductAttribute::where('id', $attributeId)
+                        $attribute = ProductAttribute::where('id', $attributeId)
                             ->where('product_id', $productId)
-                            ->exists();
-                        if (!$attrExists) {
+                            ->first();
+                        if (!$attribute) {
                             DB::rollBack();
                             return $this->failed("Selected product attribute does not belong to this product.", ['attribute_id' => $attributeId], 422);
+                        }
+                        if ($isReplacement && (!$attribute->is_active || $attribute->stock < $qty)) {
+                            DB::rollBack();
+                            return $this->failed('The selected replacement variant is inactive or has insufficient stock.', null, 422);
                         }
                     }
 
@@ -937,14 +1023,12 @@ class OrderController extends Controller
                     $lineResellerProfit = round($qty * ($resellerPrice - $adminPrice), 2);
 
                     $subtotal += $lineTotal;
-                    $resellerProfit += $lineResellerProfit;
-
-                    $itemAttributes = [
+                    $existingItem->update([
                         'order_id' => $order->id,
                         'product_id' => $productId,
-                        'shop_id' => $itemData['shop_id'] ?? $product?->shop_id ?? $existingItem?->shop_id ?? $order->vendor_id,
-                        'product_name' => $itemData['product_name'] ?? $product?->name ?? $existingItem?->product_name,
-                        'sku' => $itemData['sku'] ?? $product?->sku ?? $existingItem?->sku,
+                        'shop_id' => $isReplacement ? $product->vendor_id : $existingItem->shop_id,
+                        'product_name' => $isReplacement ? $product->name : $existingItem->product_name,
+                        'sku' => $isReplacement ? $product->sku : $existingItem->sku,
                         'attribute_id' => $attributeId,
                         'unit_price' => $unitPrice,
                         'admin_price' => $adminPrice,
@@ -952,27 +1036,12 @@ class OrderController extends Controller
                         'qty' => $qty,
                         'line_total' => $lineTotal,
                         'line_total_reseller_profit' => $lineResellerProfit,
-                        'note' => $itemData['note'] ?? $existingItem?->note ?? null,
-                    ];
-
-                    if ($existingItem) {
-                        $existingItem->update($itemAttributes);
-                        $processedItemIds[] = $existingItem->id;
-                    } else {
-                        $newItem = OrderItem::create(array_merge($itemAttributes, ['status' => 1]));
-                        $processedItemIds[] = $newItem->id;
-                    }
-                }
-
-                // Delete items removed from the order
-                foreach ($order->items as $oldItem) {
-                    if (!in_array($oldItem->id, $processedItemIds)) {
-                        $oldItem->delete();
-                    }
+                        'status' => $isReplacement ? 1 : $existingItem->status,
+                        'note' => $itemData['note'] ?? $existingItem->note,
+                    ]);
                 }
             } else {
                 $subtotal = (float) $order->items->sum('line_total');
-                $resellerProfit = (float) $order->items->sum('line_total_reseller_profit');
             }
 
             // Delivery charge & Discount
@@ -1012,7 +1081,7 @@ class OrderController extends Controller
             }
 
             // Advance & Remaining COD
-            $advanceAmount = isset($validated['advance_amount'])
+            $advanceAmount = !$replacement && isset($validated['advance_amount'])
                 ? (float) $validated['advance_amount']
                 : (float) ($order->advance_amount ?? 0);
 
@@ -1061,9 +1130,33 @@ class OrderController extends Controller
             }
 
             foreach (['payment_status', 'advance_amount', 'advance_payment_method', 'advance_trx_id', 'advance_sender_phone', 'advance_status'] as $k) {
-                if (array_key_exists($k, $validated)) {
+                if (!$replacement && array_key_exists($k, $validated)) {
                     $orderPayload[$k] = $validated[$k];
                 }
+            }
+
+            if ($replacement) {
+                $product = $replacement['product'];
+                $orderPayload += [
+                    'vendor_id' => $product->vendor_id,
+                    'status' => (int) $order->status === 3 ? 2 : $order->status,
+                    'courier_account_owner' => $product->vendor->has_own_delivery_account ? 'vendor' : 'platform',
+                    'actual_courier_fee' => null,
+                    'actual_cod_fee' => null,
+                    'actual_courier_cost' => null,
+                    'courier_net_payout' => null,
+                ];
+                $order->carryBeeDraft()->delete();
+                // These booking rows are projections, not customer payments or wallet movements.
+                $booking = $order->accountingLedgers()->where('entry_type', 'booking');
+                (clone $booking)->where('account_code', 'courier_clearing')->update(['debit' => $remainingCod]);
+                (clone $booking)->where('account_code', 'order_revenue_clearing')->update(['credit' => $recalculatedTotal]);
+                OrderStatusHistory::create([
+                    'order_id' => $order->id,
+                    'status_id' => $orderPayload['status'],
+                    'note' => "Product replaced: #{$replacement['previous_product_id']} ({$replacement['previous_sku']}) to #{$product->id} ({$product->sku}).",
+                    'changed_by' => $request->user()->id,
+                ]);
             }
 
             $order->update($orderPayload);
@@ -1075,9 +1168,27 @@ class OrderController extends Controller
             $order->update(['reseller_profit' => $breakdown['dropshipper']['profit']]);
             $this->orderAccountingService->allocateResellerProfitToItems($order, $breakdown['dropshipper']['profit']);
 
+            foreach ($order->items as $item) {
+                $previous = $originalItems->get($item->id);
+                $current = OrderItemChangeLog::snapshot($item);
+                if ($previous === $current) {
+                    continue;
+                }
+
+                OrderItemChangeLog::create([
+                    'order_id' => $order->id,
+                    'order_item_id' => $item->id,
+                    'admin_id' => $request->user()->id,
+                    'action' => $previous['product_id'] !== $current['product_id'] ? 'product_replaced' : 'item_updated',
+                    'previous_values' => $previous,
+                    'new_values' => $current,
+                ]);
+            }
+
             DB::commit();
 
             $order->load([
+                'vendor',
                 'items.shop',
                 'items.product.productAttributes.attribute',
                 'items.product.productAttributes.value',
@@ -1256,6 +1367,7 @@ class OrderController extends Controller
             $order->has_consignment = $order->hasConsignment();
             $order->is_editable = $order->isEditable();
             $order->consignment_id = $order->getConsignmentId();
+            $order->item_replacement_block_reason = $this->itemReplacementBlockReason($order);
 
             return $this->success('Order fetched successfully', $order);
         } catch (\Throwable $e) {

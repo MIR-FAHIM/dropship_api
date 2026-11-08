@@ -226,7 +226,8 @@ Route::prefix('orders')->group(function () {
     Route::post('/{id}/reject-advance', [OrderController::class, 'rejectAdvance']);
     Route::get('/list/{userId}', [OrderController::class, 'listOrdersByUser']);
     Route::get('/all/orders', [OrderController::class, 'allOrders']);
-    Route::put('/update/{id}', [OrderController::class, 'updateOrder']);
+    Route::get('/replacement-products', [OrderController::class, 'replacementProducts'])->middleware('admin:orders');
+    Route::put('/update/{id}', [OrderController::class, 'updateOrder'])->middleware('admin:orders');
     // Completed orders
     Route::get('/completed', [OrderController::class, 'completedOrders']);
     Route::get('/completed/{userId}', [OrderController::class, 'completedOrdersByUser']);

@@ -42,6 +42,7 @@ class OrderBreakdownProfitSyncTest extends TestCase
             'email' => 'admin_sync_test@test.com',
             'user_type' => 'admin',
             'role' => 'admin',
+            'banned' => 0,
         ]);
         $this->adminToken = ApiTokenService::create($admin, ['basic', 'admin'], 60, 'admin-token')['plain'];
 

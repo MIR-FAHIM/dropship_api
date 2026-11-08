@@ -12,6 +12,7 @@ use App\Models\VendorCarryBeeCredintial;
 use App\Service\CarrybeeService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class DeliveryCompanyController extends Controller
@@ -378,6 +379,7 @@ class DeliveryCompanyController extends Controller
         try {
             $validated = $request->validate([
                 'order_id'                    => ['required', 'integer', 'exists:orders,id'],
+                'expected_product_id'         => ['nullable', 'integer', 'min:1'],
                 'store_id'                    => ['required'],
                 'merchant_order_id'           => ['required', 'string', 'max:255'],
                 'delivery_type'               => ['required', 'integer'],
@@ -404,64 +406,72 @@ class DeliveryCompanyController extends Controller
                 'own_note'                    => ['nullable', 'string'],
             ]);
 
-            $orderId = $validated['order_id'];
-            unset($validated['order_id']);
+            return DB::transaction(function () use ($validated, $vendorId) {
+                $orderId = $validated['order_id'];
+                $expectedProduct = $validated['expected_product_id'] ?? null;
+                unset($validated['order_id'], $validated['expected_product_id']);
 
-            $orderModel = Order::find($orderId);
-            if ($orderModel && $orderModel->hasConsignment()) {
-                return $this->failed('A delivery order has already been created for this order', null, 409);
-            }
+                $orderModel = Order::whereKey($orderId)->lockForUpdate()->firstOrFail();
+                if ($orderModel->hasConsignment()) {
+                    return $this->failed('A delivery order has already been created for this order', null, 409);
+                }
 
-            if (DeliveryAssignedInfo::where('order_id', $orderId)->exists()) {
-                return $this->failed('A delivery order has already been created for this order', null, 409);
-            }
+                if (DeliveryAssignedInfo::where('order_id', $orderId)->exists()) {
+                    return $this->failed('A delivery order has already been created for this order', null, 409);
+                }
 
-            $service = $this->carrybeeService($vendorId);
+                if (($orderModel->vendor_id && (int) $orderModel->vendor_id !== (int) $vendorId)
+                    || ($expectedProduct !== null && !$orderModel->items()->where('product_id', $expectedProduct)->exists())) {
+                    return $this->failed('The order product or vendor has changed. Reload the order before assigning delivery.', null, 409);
+                }
 
-            if (!$service instanceof CarrybeeService) {
-                return $service;
-            }
+                $service = $this->carrybeeService($vendorId);
 
-            // Save full form data as a draft record
-            CarryBeeOrderCreateForm::updateOrCreate(
-                ['order_id' => $orderId],
-                array_merge(['order_id' => $orderId], $validated)
-            );
+                if (!$service instanceof CarrybeeService) {
+                    return $service;
+                }
 
-            // Strip own_* fields before forwarding to Carrybee API
-            $carrybeePayload = array_filter(
-                $validated,
-                fn($key) => !str_starts_with($key, 'own_'),
-                ARRAY_FILTER_USE_KEY
-            );
-
-            $result = $service->createOrder($carrybeePayload);
-
-            if ($result['status'] >= 400) {
-                return $this->failed('Carrybee API error', $result['body'], $result['status']);
-            }
-
-            $order = $result['body']['data']['order'] ?? null;
-
-            if ($order) {
-                DeliveryAssignedInfo::updateOrCreate(
+                // Save full form data as a draft record
+                CarryBeeOrderCreateForm::updateOrCreate(
                     ['order_id' => $orderId],
-                    [
-                        'consignment_id'     => $order['consignment_id'],
-                        'merchant_order_id'  => $order['merchant_order_id'] ?? null,
-                        'delivery_company_id'  => $vendorId,
-                        'recipient_name'     => $order['recipient_name'],
-                        'recipient_phone'    => $order['recipient_phone'],
-                        'recipient_address'  => $order['recipient_address'],
-                        'collectable_amount' => $order['collectable_amount'] ?? 0,
-                        'delivery_fee'       => $order['delivery_fee'] ?? 0,
-                        'total_fee'          => $order['total_fee'] ?? 0,
-                        'transfer_status_id' => $order['transfer_status_id'] ?? 1,
-                    ]
+                    array_merge(['order_id' => $orderId], $validated)
                 );
-            }
 
-            return $this->success('Order created successfully', $result['body'], 201);
+                // Strip own_* fields before forwarding to Carrybee API
+                $carrybeePayload = array_filter(
+                    $validated,
+                    fn($key) => !str_starts_with($key, 'own_'),
+                    ARRAY_FILTER_USE_KEY
+                );
+
+                $result = $service->createOrder($carrybeePayload);
+
+                if ($result['status'] >= 400) {
+                    return $this->failed('Carrybee API error', $result['body'], $result['status']);
+                }
+
+                $order = $result['body']['data']['order'] ?? null;
+
+                if ($order) {
+                    DeliveryAssignedInfo::updateOrCreate(
+                        ['order_id' => $orderId],
+                        [
+                            'consignment_id'     => $order['consignment_id'],
+                            'merchant_order_id'  => $order['merchant_order_id'] ?? null,
+                            'delivery_company_id'  => $vendorId,
+                            'recipient_name'     => $order['recipient_name'],
+                            'recipient_phone'    => $order['recipient_phone'],
+                            'recipient_address'  => $order['recipient_address'],
+                            'collectable_amount' => $order['collectable_amount'] ?? 0,
+                            'delivery_fee'       => $order['delivery_fee'] ?? 0,
+                            'total_fee'          => $order['total_fee'] ?? 0,
+                            'transfer_status_id' => $order['transfer_status_id'] ?? 1,
+                        ]
+                    );
+                }
+
+                return $this->success('Order created successfully', $result['body'], 201);
+            });
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {

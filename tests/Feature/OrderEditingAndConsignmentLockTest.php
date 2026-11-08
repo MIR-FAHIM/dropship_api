@@ -4,11 +4,14 @@ namespace Tests\Feature;
 
 use App\Models\Attribute;
 use App\Models\AttributeValue;
+use App\Models\CarryBeeOrderCreateForm;
 use App\Models\Category;
 use App\Models\DeliveryAssignedInfo;
 use App\Models\DeliveryInformation;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\OrderItemChangeLog;
+use App\Models\OrderSettlement;
 use App\Models\OrderStatus;
 use App\Models\Product;
 use App\Models\ProductAttribute;
@@ -62,6 +65,7 @@ class OrderEditingAndConsignmentLockTest extends TestCase
             'email' => 'admin_test@test.com',
             'user_type' => 'admin',
             'role' => 'admin',
+            'banned' => 0,
         ]);
 
         $this->adminToken = ApiTokenService::create($this->admin, ['basic', 'admin'], 60, 'admin-token')['plain'];
@@ -451,6 +455,221 @@ class OrderEditingAndConsignmentLockTest extends TestCase
 
         $response->assertStatus(409);
         $this->assertStringContainsString('already been created', $response->json('message'));
+    }
+
+    private function replacementItems(Order $order, array $overrides = []): array
+    {
+        $item = $order->items()->firstOrFail();
+
+        return ['items' => [array_replace([
+            'id' => $item->id,
+            'expected_product_id' => $item->product_id,
+            'product_id' => $this->product2->id,
+            'qty' => $item->qty,
+            'reseller_price' => 1000,
+        ], $overrides)]];
+    }
+
+    public function test_replacement_updates_both_vendor_references_sku_prices_and_booking_in_place(): void
+    {
+        $order = $this->createTestOrder();
+        $order->update(['status' => 3, 'discount' => 25, 'advance_amount' => 50, 'advance_status' => 'approved', 'advance_trx_id' => 'ADVANCE-123']);
+        $vendor = Vendor::create([
+            'user_id' => User::factory()->create()->id, 'shop_name' => 'Replacement Vendor',
+            'is_active' => true, 'has_own_delivery_account' => true,
+        ]);
+        $this->product2->update(['vendor_id' => $vendor->id]);
+        $order->items()->update(['status' => 'ready']);
+        $item = $order->items()->firstOrFail();
+        CarryBeeOrderCreateForm::create([
+            'order_id' => $order->id, 'store_id' => 'old-store', 'merchant_order_id' => $order->order_number,
+            'delivery_type' => 1, 'product_type' => 1, 'recipient_phone' => '01700000000',
+            'recipient_name' => 'Customer', 'recipient_address' => 'Dhaka', 'city_id' => 1, 'zone_id' => 1,
+            'area_id' => 1, 'item_weight' => 500, 'item_quantity' => 1, 'collectable_amount' => 900,
+        ]);
+        foreach (['courier_clearing' => [900, 0], 'order_revenue_clearing' => [0, 900], 'cash_platform' => [50, 0]] as $account => [$debit, $credit]) {
+            $order->accountingLedgers()->create(['entry_type' => 'booking', 'account_code' => $account, 'debit' => $debit, 'credit' => $credit]);
+        }
+
+        $payload = $this->replacementItems($order, [
+            'shop_id' => $this->vendor->id, 'sku' => 'STALE-SKU', 'product_name' => 'Wrong Name',
+            'unit_price' => 1, 'admin_price' => 2,
+        ]) + ['payment_status' => 'paid', 'advance_amount' => 0, 'advance_status' => 'none'];
+        $this->authPutJson("/api/orders/update/{$order->id}", $payload)
+            ->assertOk()->assertJsonPath('data.vendor.id', $vendor->id)
+            ->assertJsonPath('data.items.0.id', $item->id)
+            ->assertJsonPath('data.items.0.sku', 'PANTS-01');
+
+        $this->assertDatabaseHas('orders', [
+            'id' => $order->id, 'order_number' => $order->order_number, 'vendor_id' => $vendor->id,
+            'status' => 2, 'payment_status' => 'unpaid', 'subtotal' => 1000, 'reseller_price' => 1000,
+            'total' => 1075, 'remaining_cod' => 1075, 'reseller_profit' => 164.25, 'courier_account_owner' => 'vendor',
+            'advance_amount' => 50, 'advance_status' => 'approved', 'advance_trx_id' => 'ADVANCE-123',
+        ]);
+        $this->assertDatabaseHas('order_items', [
+            'id' => $item->id, 'order_id' => $order->id, 'product_id' => $this->product2->id,
+            'shop_id' => $vendor->id, 'sku' => 'PANTS-01', 'product_name' => 'Denim Pants',
+            'attribute_id' => null, 'status' => 1, 'unit_price' => 700, 'admin_price' => 800,
+            'reseller_price' => 1000, 'qty' => 1, 'line_total' => 1000, 'line_total_reseller_profit' => 164.25,
+        ]);
+        $log = OrderItemChangeLog::where('order_item_id', $item->id)->sole();
+        $this->assertEquals($this->admin->id, $log->admin_id);
+        $this->assertSame('product_replaced', $log->action);
+        $this->assertEquals('SHIRT-01', $log->previous_values['sku']);
+        $this->assertEquals($this->vendor->id, $log->previous_values['shop_id']);
+        $this->assertEquals($this->attr1->id, $log->previous_values['attribute_id']);
+        $this->assertEquals(500, $log->previous_values['unit_price']);
+        $this->assertEquals('PANTS-01', $log->new_values['sku']);
+        $this->assertEquals($vendor->id, $log->new_values['shop_id']);
+        $this->assertEquals(700, $log->new_values['unit_price']);
+        $this->assertEquals(164.25, $log->new_values['line_total_reseller_profit']);
+        $this->assertSame(1, $order->items()->count());
+        $this->assertDatabaseMissing('carry_bee_order_create_forms', ['order_id' => $order->id]);
+        $this->assertDatabaseHas('order_status_histories', ['order_id' => $order->id, 'status_id' => 2, 'changed_by' => $this->admin->id]);
+        $this->assertDatabaseHas('order_accounting_ledgers', ['order_id' => $order->id, 'account_code' => 'courier_clearing', 'debit' => 1075]);
+        $this->assertDatabaseHas('order_accounting_ledgers', ['order_id' => $order->id, 'account_code' => 'order_revenue_clearing', 'credit' => 1075]);
+        $this->assertDatabaseHas('order_accounting_ledgers', ['order_id' => $order->id, 'account_code' => 'cash_platform', 'debit' => 50]);
+        $this->assertSame(50, (int) $this->product1->fresh()->current_stock);
+        $this->assertSame(50, (int) $this->product2->fresh()->current_stock);
+        $this->authGetJson("/api/orders/vendor/{$vendor->id}")->assertOk()->assertJsonPath('data.data.0.id', $order->id);
+        $this->authGetJson("/api/orders/vendor/{$this->vendor->id}")->assertNotFound();
+    }
+
+    public function test_replacement_catalog_can_find_products_by_sku_and_omits_unavailable_products(): void
+    {
+        $this->product1->update(['current_stock' => 0]);
+        $this->authGetJson('/api/orders/replacement-products?search=PANTS-01')
+            ->assertOk()->assertJsonPath('data.data.0.id', $this->product2->id)
+            ->assertJsonPath('data.data.0.vendor.id', $this->vendor->id);
+        $this->authGetJson('/api/orders/replacement-products?search=SHIRT-01')
+            ->assertOk()->assertJsonPath('data.total', 0);
+    }
+
+    public function test_non_admin_cannot_replace_or_browse_replacement_products(): void
+    {
+        $order = $this->createTestOrder();
+        foreach (['vendor', 'reseller', 'product manager'] as $role) {
+            $user = User::factory()->create(['role' => $role, 'banned' => 0]);
+            $token = ApiTokenService::create($user, ['basic'], 1, 'replacement-access-test')['plain'];
+            $this->withToken($token)->putJson("/api/orders/update/{$order->id}", $this->replacementItems($order))->assertForbidden();
+            $this->withToken($token)->getJson('/api/orders/replacement-products')->assertForbidden();
+        }
+    }
+
+    public function test_invalid_replacement_never_changes_the_order_or_existing_item(): void
+    {
+        $order = $this->createTestOrder();
+        $item = $order->items()->firstOrFail();
+        $this->authPutJson("/api/orders/update/{$order->id}", $this->replacementItems($order, ['expected_product_id' => $this->product2->id]))->assertConflict();
+        $this->authPutJson("/api/orders/update/{$order->id}", $this->replacementItems($order, ['attribute_id' => $this->attr1->id]))->assertUnprocessable();
+        $this->authPutJson("/api/orders/update/{$order->id}", $this->replacementItems($order, ['reseller_price' => 799]))->assertUnprocessable();
+        $this->authPutJson("/api/orders/update/{$order->id}", $this->replacementItems($order, ['id' => $item->id + 1]))->assertUnprocessable();
+        $this->authPutJson("/api/orders/update/{$order->id}", $this->replacementItems($order) + ['total' => 5])->assertUnprocessable();
+        $this->product2->update(['current_stock' => 0]);
+        $this->authPutJson("/api/orders/update/{$order->id}", $this->replacementItems($order))->assertUnprocessable();
+        $this->assertDatabaseHas('orders', ['id' => $order->id, 'total' => 900, 'vendor_id' => $this->vendor->id]);
+        $this->assertDatabaseHas('order_items', ['id' => $item->id, 'product_id' => $this->product1->id, 'sku' => 'SHIRT-01']);
+        $this->assertSame(1, $order->items()->count());
+        $this->assertDatabaseCount('order_item_change_logs', 0);
+    }
+
+    public function test_item_edit_audit_appends_each_admin_change_and_skips_no_op_saves(): void
+    {
+        $order = $this->createTestOrder();
+        $item = $order->items()->sole();
+        $order->update(['reseller_profit' => 191]);
+        $item->update(['line_total_reseller_profit' => 191]);
+        $url = "/api/orders/update/{$order->id}";
+        $payload = ['items' => [[
+            'id' => $item->id,
+            'product_id' => $item->product_id,
+            'qty' => 1,
+            'reseller_price' => 800,
+        ]]];
+        $this->authPutJson($url, $payload)->assertOk();
+        $this->assertDatabaseCount('order_item_change_logs', 0);
+
+        $payload['items'][0]['qty'] = 2;
+        $this->authPutJson($url, $payload)->assertOk();
+
+        $otherAdmin = User::factory()->create(['role' => 'admin', 'banned' => 0]);
+        $token = ApiTokenService::create($otherAdmin, ['basic', 'admin'], 1, 'second-admin')['plain'];
+        $payload['items'][0]['reseller_price'] = 900;
+        $payload['admin_id'] = $this->admin->id;
+        $this->withToken($token)->putJson($url, $payload)->assertOk();
+
+        $logs = OrderItemChangeLog::where('order_id', $order->id)->orderBy('id')->get();
+        $this->assertCount(2, $logs);
+        $this->assertEquals($item->id, $logs[0]->order_item_id);
+        $this->assertEquals($this->admin->id, $logs[0]->admin_id);
+        $this->assertEquals($otherAdmin->id, $logs[1]->admin_id);
+        $this->assertSame(['item_updated', 'item_updated'], $logs->pluck('action')->all());
+        $this->assertSame(1, $logs[0]->previous_values['qty']);
+        $this->assertSame(2, $logs[0]->new_values['qty']);
+        $this->assertSame($logs[0]->new_values, $logs[1]->previous_values);
+        $this->assertEquals(900, $logs[1]->new_values['reseller_price']);
+        $this->assertNotNull($logs[1]->created_at);
+    }
+
+    public function test_replacement_requires_an_active_in_stock_variant_from_the_selected_product(): void
+    {
+        $order = $this->createTestOrder();
+        $variant = ProductAttribute::create([
+            'product_id' => $this->product2->id, 'attribute_id' => $this->attr1->attribute_id,
+            'attribute_value_id' => $this->attr1->attribute_value_id, 'stock' => 0, 'is_active' => true,
+        ]);
+        $payload = $this->replacementItems($order, ['attribute_id' => $variant->id]);
+        $this->authPutJson("/api/orders/update/{$order->id}", $payload)->assertUnprocessable();
+        $variant->update(['stock' => 2, 'is_active' => false]);
+        $this->authPutJson("/api/orders/update/{$order->id}", $payload)->assertUnprocessable();
+        $variant->update(['is_active' => true]);
+        $this->authPutJson("/api/orders/update/{$order->id}", $payload)->assertOk()
+            ->assertJsonPath('data.items.0.attribute_id', $variant->id);
+    }
+
+    public function test_paid_settled_dispatched_and_partner_orders_cannot_be_replaced(): void
+    {
+        foreach ([['payment_status' => 'paid'], ['status' => 4], ['order_number' => 'ORD-P5-20261108-ABCDE']] as $state) {
+            $order = $this->createTestOrder();
+            $order->update($state);
+            $this->authGetJson("/api/orders/details/{$order->id}")->assertJsonPath('status', 'success')
+                ->assertJsonStructure(['data' => ['item_replacement_block_reason']]);
+            $this->authPutJson("/api/orders/update/{$order->id}", $this->replacementItems($order))->assertUnprocessable();
+        }
+
+        $order = $this->createTestOrder();
+        $order->settlements()->create([
+            'user_type' => 'vendor', 'vendor_id' => $this->vendor->id,
+            'settlement_type' => OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE,
+            'settleable_amount' => 500, 'status' => OrderSettlement::STATUS_SETTLED,
+        ]);
+        $this->authPutJson("/api/orders/update/{$order->id}", $this->replacementItems($order))->assertUnprocessable();
+    }
+
+    public function test_replacement_is_blocked_for_multi_item_and_consignment_orders(): void
+    {
+        $multi = $this->createTestOrder();
+        $secondItem = $multi->items()->create(['product_id' => $this->product2->id, 'qty' => 1]);
+        $payload = $this->replacementItems($multi);
+        $payload['items'][] = ['id' => $secondItem->id, 'qty' => 1, 'reseller_price' => 1000];
+        $this->authPutJson("/api/orders/update/{$multi->id}", $payload)->assertUnprocessable();
+        $assigned = $this->createTestOrder(true);
+        $this->authPutJson("/api/orders/update/{$assigned->id}", $this->replacementItems($assigned))
+            ->assertUnprocessable()->assertJsonPath('errors.locked', true);
+    }
+
+    public function test_courier_submission_with_old_product_is_rejected_before_creating_a_draft(): void
+    {
+        $order = $this->createTestOrder();
+        $this->authPutJson("/api/orders/update/{$order->id}", $this->replacementItems($order))->assertOk();
+        $payload = [
+            'order_id' => $order->id, 'expected_product_id' => $this->product1->id,
+            'store_id' => 123, 'merchant_order_id' => $order->order_number, 'delivery_type' => 1, 'product_type' => 1,
+            'recipient_phone' => '01700000000', 'recipient_name' => 'Customer', 'recipient_address' => 'Dhaka',
+            'city_id' => 1, 'zone_id' => 1, 'item_weight' => 500, 'item_quantity' => 1, 'collectable_amount' => 900,
+        ];
+        $this->withToken($this->adminToken)->postJson("/api/delivery-companies/carrybee/{$this->vendor->id}/orders", $payload)->assertConflict();
+        $this->assertDatabaseMissing('carry_bee_order_create_forms', ['order_id' => $order->id]);
     }
 }
 
