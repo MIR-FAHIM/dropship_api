@@ -250,8 +250,24 @@ class OrderAdvanceAndTopupTest extends TestCase
         $this->accountingService->rejectOrderAdvance($order, $this->admin->id, 'Verify again', true);
         $this->assertEquals(0, $this->accountingService->calculateUserBalances($this->reseller->id)['available_balance']);
 
-        $reapproved = $this->accountingService->approveOrderAdvance($order, $this->admin->id, 'Confirmed', true);
+        $reapproved = $this->accountingService->approveOrderAdvance($order, $this->admin->id, 'Confirmed', true, [
+            'advance_trx_id' => 'BKASH-CORRECTED',
+            'advance_sender_phone' => '01711223344',
+        ]);
         $this->assertSame('approved', $reapproved->advance_status);
+        $this->assertSame('BKASH-CORRECTED', $reapproved->advance_trx_id);
+        $this->assertSame('01711223344', $reapproved->advance_sender_phone);
+        $this->assertDatabaseHas('reseller_transactions', [
+            'order_id' => $order->id,
+            'trx_id' => 'BKASH-CORRECTED',
+            'status' => 'completed',
+        ]);
+        $this->assertDatabaseHas('order_accounting_ledgers', [
+            'order_id' => $order->id,
+            'entry_type' => 'booking',
+            'account_code' => 'cash_platform',
+            'reference_id' => 'BKASH-CORRECTED',
+        ]);
         $this->assertEquals(130, $this->accountingService->calculateUserBalances($this->reseller->id)['available_balance']);
         $this->assertSame(1, ResellerTransaction::where('order_id', $order->id)->where('type', 'order_advance')->count());
         $ledger = $order->accountingLedgers()->where('account_code', 'cash_platform');
@@ -261,6 +277,34 @@ class OrderAdvanceAndTopupTest extends TestCase
         $this->expectException(ValidationException::class);
         $this->expectExceptionMessage('The advance has already been refunded or released.');
         $this->accountingService->rejectOrderAdvance($order, $this->admin->id, 'Too late', true);
+    }
+
+    public function test_admin_can_enter_payment_details_when_reapproving_a_pay_later_advance(): void
+    {
+        $order = Order::create([
+            'user_id' => $this->reseller->id,
+            'order_number' => 'ORD-PAY-LATER',
+            'status' => 1,
+            'total' => 1130,
+            'advance_status' => 'rejected',
+            'advance_amount' => 130,
+            'advance_payment_method' => 'pay_later',
+        ]);
+
+        $approved = $this->accountingService->approveOrderAdvance($order, $this->admin->id, 'Verified', true, [
+            'advance_trx_id' => 'PAY-LATER-VERIFIED',
+            'advance_sender_phone' => '01711223344',
+        ]);
+
+        $this->assertSame('approved', $approved->advance_status);
+        $this->assertSame('PAY-LATER-VERIFIED', $approved->fresh()->advance_trx_id);
+        $this->assertSame('01711223344', $approved->fresh()->advance_sender_phone);
+        $this->assertDatabaseHas('order_accounting_ledgers', [
+            'order_id' => $order->id,
+            'entry_type' => 'booking',
+            'account_code' => 'cash_platform',
+            'reference_id' => 'PAY-LATER-VERIFIED',
+        ]);
     }
 
     public function test_advance_payment_via_mfs_submits_pending_and_admin_can_approve(): void

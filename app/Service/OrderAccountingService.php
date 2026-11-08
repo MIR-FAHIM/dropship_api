@@ -880,9 +880,14 @@ class OrderAccountingService
     /**
      * Admin Quick-Approve order advance payment.
      */
-    public function approveOrderAdvance(Order $order, int $adminId, ?string $note = null, bool $reapprove = false): Order
-    {
-        return DB::transaction(function () use ($order, $adminId, $note, $reapprove) {
+    public function approveOrderAdvance(
+        Order $order,
+        int $adminId,
+        ?string $note = null,
+        bool $reapprove = false,
+        array $paymentDetails = []
+    ): Order {
+        return DB::transaction(function () use ($order, $adminId, $note, $reapprove, $paymentDetails) {
             $order = Order::lockForUpdate()->findOrFail($order->id);
             $advanceAmount = round((float) $order->advance_amount, 2);
             $statuses = $reapprove ? ['rejected'] : ['pending', 'submitted'];
@@ -913,7 +918,7 @@ class OrderAccountingService
             // Reliability balance verified does not deduct from customer collection amount (COD)
             $remainingCod = $totalOrderAmount;
 
-            $order->update([
+            $order->fill($paymentDetails)->update([
                 'advance_status' => 'approved',
                 'advance_verified_at' => now(),
                 'advance_verified_by' => $adminId,
@@ -923,6 +928,7 @@ class OrderAccountingService
 
             // Update ResellerTransaction to completed
             $transaction?->update([
+                'trx_id' => $order->advance_trx_id,
                 'status' => 'completed',
                 'note' => "Advance payment via {$order->advance_payment_method} verified by Admin for order #{$order->order_number}",
             ]);

@@ -1683,10 +1683,20 @@ class OrderController extends Controller
             }
 
             $adminId = (int) $request->user()->id;
-            $request->validate(['reapprove' => ['sometimes', 'boolean']]);
+            $validated = $request->validate([
+                'reapprove' => ['sometimes', 'boolean'],
+                'advance_trx_id' => ['sometimes', 'nullable', 'string', 'max:100'],
+                'advance_sender_phone' => ['sometimes', 'nullable', 'string', 'max:30'],
+            ]);
             $note = $request->input('admin_note', 'Approved by Admin');
 
-            $order = $this->orderAccountingService->approveOrderAdvance($order, $adminId, $note, $request->boolean('reapprove'));
+            $order = $this->orderAccountingService->approveOrderAdvance(
+                $order,
+                $adminId,
+                $note,
+                $request->boolean('reapprove'),
+                array_intersect_key($validated, array_flip(['advance_trx_id', 'advance_sender_phone']))
+            );
 
             // Notify dropshipper
             $this->notificationService->createNotificationSafely([
