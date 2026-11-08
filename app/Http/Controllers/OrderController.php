@@ -1129,6 +1129,20 @@ class OrderController extends Controller
                 }
             }
 
+            $advanceFields = array_intersect_key($validated, array_flip([
+                'advance_amount', 'advance_payment_method', 'advance_trx_id', 'advance_sender_phone', 'advance_status',
+            ]));
+            if (!$replacement && $advanceFields) {
+                $proposedOrder = (clone $order)->fill($advanceFields);
+                $decisionStatuses = ['approved', 'rejected'];
+                if ((in_array($order->advance_status, $decisionStatuses, true) && $proposedOrder->isDirty(array_keys($advanceFields)))
+                    || ($proposedOrder->isDirty('advance_status') && in_array($proposedOrder->advance_status, $decisionStatuses, true))) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'advance_status' => 'Use the Reliability Balance controls to approve, reject, or reverse an advance.',
+                    ]);
+                }
+            }
+
             foreach (['payment_status', 'advance_amount', 'advance_payment_method', 'advance_trx_id', 'advance_sender_phone', 'advance_status'] as $k) {
                 if (!$replacement && array_key_exists($k, $validated)) {
                     $orderPayload[$k] = $validated[$k];
@@ -1368,6 +1382,9 @@ class OrderController extends Controller
             $order->is_editable = $order->isEditable();
             $order->consignment_id = $order->getConsignmentId();
             $order->item_replacement_block_reason = $this->itemReplacementBlockReason($order);
+            if (in_array($order->advance_status, ['pending', 'submitted', 'approved', 'rejected'], true)) {
+                $order->advance_decision_block_reason = $this->orderAccountingService->advanceDecisionBlockReason($order);
+            }
 
             return $this->success('Order fetched successfully', $order);
         } catch (\Throwable $e) {
@@ -1665,10 +1682,11 @@ class OrderController extends Controller
                 return $this->failed('Advance payment is already approved.', null, 400);
             }
 
-            $adminId = (int) ($request->user()?->id ?: 1);
+            $adminId = (int) $request->user()->id;
+            $request->validate(['reapprove' => ['sometimes', 'boolean']]);
             $note = $request->input('admin_note', 'Approved by Admin');
 
-            $order = $this->orderAccountingService->approveOrderAdvance($order, $adminId, $note);
+            $order = $this->orderAccountingService->approveOrderAdvance($order, $adminId, $note, $request->boolean('reapprove'));
 
             // Notify dropshipper
             $this->notificationService->createNotificationSafely([
@@ -1684,6 +1702,8 @@ class OrderController extends Controller
             ]);
 
             return $this->success('Order advance approved successfully', $order);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed($e->getMessage(), $e->errors(), 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
@@ -1703,15 +1723,19 @@ class OrderController extends Controller
 
             $validated = $request->validate([
                 'reason' => ['required', 'string', 'max:255'],
+                'reverse_approval' => ['sometimes', 'boolean'],
             ]);
 
-            $adminId = (int) ($request->user()?->id ?: 1);
-            $order = $this->orderAccountingService->rejectOrderAdvance($order, $adminId, $validated['reason']);
+            $adminId = (int) $request->user()->id;
+            $reverseApproval = $request->boolean('reverse_approval');
+            $order = $this->orderAccountingService->rejectOrderAdvance($order, $adminId, $validated['reason'], $reverseApproval);
 
             // Notify dropshipper
             $this->notificationService->createNotificationSafely([
-                'title'      => 'Advance Payment Rejected',
-                'subtitle'   => "Advance payment for Order {$order->order_number} was rejected: {$validated['reason']}. Please submit a valid payment.",
+                'title'      => $reverseApproval ? 'Advance Payment Approval Reversed' : 'Advance Payment Rejected',
+                'subtitle'   => $reverseApproval
+                    ? "Approval of the advance for Order {$order->order_number} was reversed: {$validated['reason']}."
+                    : "Advance payment for Order {$order->order_number} was rejected: {$validated['reason']}. Please submit a valid payment.",
                 'created_by' => $adminId,
                 'send_to'    => $order->user_id,
                 'is_seen'    => false,
@@ -1721,9 +1745,9 @@ class OrderController extends Controller
                 'module'     => 'order',
             ]);
 
-            return $this->success('Order advance rejected successfully', $order);
+            return $this->success($reverseApproval ? 'Order advance approval reversed' : 'Order advance rejected successfully', $order);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            return $this->failed('Validation failed', $e->errors(), 422);
+            return $this->failed($e->getMessage(), $e->errors(), 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

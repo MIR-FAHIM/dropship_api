@@ -14,6 +14,7 @@ use App\Models\Vendor;
 use App\Models\WalletTopup;
 use App\Service\OrderAccountingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class OrderAdvanceAndTopupTest extends TestCase
@@ -190,6 +191,76 @@ class OrderAdvanceAndTopupTest extends TestCase
             'account_code' => 'cash_platform',
             'debit' => 130.00,
         ]);
+    }
+
+    public function test_reversing_a_wallet_advance_restores_the_balance_once(): void
+    {
+        ResellerTransaction::create([
+            'reseller_id' => $this->reseller->id,
+            'amount' => 500,
+            'trx_type' => 'credit',
+            'type' => 'wallet_topup',
+            'status' => 'completed',
+        ]);
+        $order = Order::create([
+            'user_id' => $this->reseller->id,
+            'order_number' => 'ORD-WLT-REVERSE',
+            'status' => 1,
+            'total' => 1130,
+        ]);
+        $this->accountingService->payAdvanceFromWallet($order, 130);
+
+        $reversed = $this->accountingService->rejectOrderAdvance($order, $this->admin->id, 'Wrong order', true);
+
+        $this->assertSame('rejected', $reversed->advance_status);
+        $this->assertEquals($this->admin->id, $reversed->advance_verified_by);
+        $this->assertNotNull($reversed->advance_verified_at);
+        $this->assertSame('Wrong order', $reversed->advance_admin_note);
+        $this->assertEquals(1130, $reversed->remaining_cod);
+        $this->assertEquals(500, $this->accountingService->calculateUserBalances($this->reseller->id)['available_balance']);
+        $this->assertDatabaseHas('reseller_transactions', [
+            'order_id' => $order->id,
+            'type' => 'order_advance',
+            'trx_type' => 'debit',
+            'status' => 'rejected',
+        ]);
+        $this->assertDatabaseMissing('reseller_transactions', ['order_id' => $order->id, 'type' => 'advance_refund']);
+        $this->assertDatabaseHas('order_accounting_ledgers', [
+            'order_id' => $order->id,
+            'account_code' => 'cash_platform',
+            'entry_type' => 'advance_reversal',
+            'reference_id' => $reversed->advance_trx_id,
+            'credit' => 130,
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $this->accountingService->rejectOrderAdvance($order, $this->admin->id, 'Duplicate request', true);
+    }
+
+    public function test_mobile_advance_can_be_reapproved_after_reversal_but_cannot_be_reversed_after_release(): void
+    {
+        $order = Order::create([
+            'user_id' => $this->reseller->id,
+            'order_number' => 'ORD-MFS-REVERSE',
+            'status' => 1,
+            'total' => 1130,
+        ]);
+        $this->accountingService->submitMfsAdvance($order, 130, 'bkash', 'BKASH-REVERSE');
+        $this->accountingService->approveOrderAdvance($order, $this->admin->id);
+        $this->accountingService->rejectOrderAdvance($order, $this->admin->id, 'Verify again', true);
+        $this->assertEquals(0, $this->accountingService->calculateUserBalances($this->reseller->id)['available_balance']);
+
+        $reapproved = $this->accountingService->approveOrderAdvance($order, $this->admin->id, 'Confirmed', true);
+        $this->assertSame('approved', $reapproved->advance_status);
+        $this->assertEquals(130, $this->accountingService->calculateUserBalances($this->reseller->id)['available_balance']);
+        $this->assertSame(1, ResellerTransaction::where('order_id', $order->id)->where('type', 'order_advance')->count());
+        $ledger = $order->accountingLedgers()->where('account_code', 'cash_platform');
+        $this->assertEquals(130, (clone $ledger)->sum('debit') - (clone $ledger)->sum('credit'));
+
+        $this->accountingService->refundOrderAdvance($order);
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('The advance has already been refunded or released.');
+        $this->accountingService->rejectOrderAdvance($order, $this->admin->id, 'Too late', true);
     }
 
     public function test_advance_payment_via_mfs_submits_pending_and_admin_can_approve(): void

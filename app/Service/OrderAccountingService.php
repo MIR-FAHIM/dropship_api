@@ -16,6 +16,7 @@ use App\Models\SettlementInvoice;
 use App\Models\OrderStatusHistory;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class OrderAccountingService
@@ -760,6 +761,10 @@ class OrderAccountingService
     {
         return DB::transaction(function () use ($order, $amount) {
             $order = Order::lockForUpdate()->findOrFail($order->id);
+            if ($order->advance_status === 'approved') {
+                throw ValidationException::withMessages(['advance_status' => 'Advance payment is already approved.']);
+            }
+            User::lockForUpdate()->findOrFail($order->user_id);
             $balances = $this->calculateUserBalances($order->user_id);
 
             if ($amount > $balances['available_balance']) {
@@ -772,7 +777,7 @@ class OrderAccountingService
             // Reliability balance paid by reseller does not deduct from customer collection amount (COD)
             $remainingCod = $totalOrderAmount;
 
-            $trxId = 'WLT-ADV-' . $order->id . '-' . time();
+            $trxId = 'WLT-ADV-' . $order->id . '-' . Str::uuid();
 
             $order->update([
                 'advance_amount' => $amount,
@@ -780,17 +785,27 @@ class OrderAccountingService
                 'advance_recipient' => 'platform',
                 'advance_payment_method' => 'wallet',
                 'advance_trx_id' => $trxId,
+                'advance_sender_phone' => null,
                 'advance_verified_at' => now(),
+                'advance_verified_by' => null,
+                'advance_admin_note' => null,
                 'remaining_cod' => $remainingCod,
             ]);
 
-            // Record completed debit in ResellerTransaction
-            ResellerTransaction::create([
-                'reseller_id' => $order->user_id,
+            $advanceTransactions = ResellerTransaction::where('order_id', $order->id)->where('type', 'order_advance');
+            (clone $advanceTransactions)->where('trx_type', 'credit')->where('status', 'pending')->update([
+                'status' => 'rejected',
+                'note' => 'Superseded by a wallet payment.',
+            ]);
+
+            // The wallet table has one row per order, type and direction.
+            ResellerTransaction::updateOrCreate([
                 'order_id' => $order->id,
-                'amount' => $amount,
-                'trx_type' => 'debit',
                 'type' => 'order_advance',
+                'trx_type' => 'debit',
+            ], [
+                'reseller_id' => $order->user_id,
+                'amount' => $amount,
                 'source' => 'wallet',
                 'trx_id' => $trxId,
                 'status' => 'completed',
@@ -822,6 +837,9 @@ class OrderAccountingService
     {
         return DB::transaction(function () use ($order, $amount, $method, $trxId, $senderPhone) {
             $order = Order::lockForUpdate()->findOrFail($order->id);
+            if ($order->advance_status === 'approved') {
+                throw ValidationException::withMessages(['advance_status' => 'Advance payment is already approved.']);
+            }
             $totalOrderAmount = round((float) $order->total, 2);
             // Reliability balance submitted by reseller does not deduct from customer collection amount (COD)
             $remainingCod = $totalOrderAmount;
@@ -833,6 +851,9 @@ class OrderAccountingService
                 'advance_payment_method' => $method,
                 'advance_trx_id' => $trxId,
                 'advance_sender_phone' => $senderPhone,
+                'advance_verified_at' => null,
+                'advance_verified_by' => null,
+                'advance_admin_note' => null,
                 'remaining_cod' => $remainingCod,
             ]);
 
@@ -840,11 +861,11 @@ class OrderAccountingService
                 [
                     'order_id' => $order->id,
                     'type' => 'order_advance',
+                    'trx_type' => 'credit',
                 ],
                 [
                     'reseller_id' => $order->user_id,
                     'amount' => $amount,
-                    'trx_type' => 'credit',
                     'source' => $method,
                     'trx_id' => $trxId,
                     'status' => 'pending',
@@ -859,11 +880,35 @@ class OrderAccountingService
     /**
      * Admin Quick-Approve order advance payment.
      */
-    public function approveOrderAdvance(Order $order, int $adminId, ?string $note = null): Order
+    public function approveOrderAdvance(Order $order, int $adminId, ?string $note = null, bool $reapprove = false): Order
     {
-        return DB::transaction(function () use ($order, $adminId, $note) {
+        return DB::transaction(function () use ($order, $adminId, $note, $reapprove) {
             $order = Order::lockForUpdate()->findOrFail($order->id);
             $advanceAmount = round((float) $order->advance_amount, 2);
+            $statuses = $reapprove ? ['rejected'] : ['pending', 'submitted'];
+            if (!in_array($order->advance_status, $statuses, true) || $advanceAmount <= 0) {
+                throw ValidationException::withMessages(['advance_status' => 'The advance is no longer eligible for this approval. Reload the order and try again.']);
+            }
+            if ($order->advance_payment_method === 'wallet') {
+                throw ValidationException::withMessages(['advance_status' => 'Wallet advances must be paid again by the reseller.']);
+            }
+            if ($reason = $this->advanceDecisionBlockReason($order)) {
+                throw ValidationException::withMessages(['advance_status' => $reason]);
+            }
+            $advanceTransactions = ResellerTransaction::where('order_id', $order->id)->where('type', 'order_advance');
+            $transactionStatus = $order->advance_status === 'rejected' ? 'rejected' : 'pending';
+            $transaction = (clone $advanceTransactions)
+                ->where('reseller_id', $order->user_id)
+                ->where('trx_id', $order->advance_trx_id)
+                ->where('trx_type', 'credit')
+                ->where('amount', $advanceAmount)
+                ->where('status', $transactionStatus)
+                ->latest('id')
+                ->first();
+            if ((clone $advanceTransactions)->where('status', 'completed')->exists()
+                || (!$transaction && (clone $advanceTransactions)->where('status', $transactionStatus)->exists())) {
+                throw ValidationException::withMessages(['advance_status' => 'The advance and wallet records do not match. Reconcile them before approving.']);
+            }
             $totalOrderAmount = round((float) $order->total, 2);
             // Reliability balance verified does not deduct from customer collection amount (COD)
             $remainingCod = $totalOrderAmount;
@@ -877,12 +922,10 @@ class OrderAccountingService
             ]);
 
             // Update ResellerTransaction to completed
-            ResellerTransaction::where('order_id', $order->id)
-                ->where('type', 'order_advance')
-                ->update([
-                    'status' => 'completed',
-                    'note' => "Advance payment via {$order->advance_payment_method} verified by Admin for order #{$order->order_number}",
-                ]);
+            $transaction?->update([
+                'status' => 'completed',
+                'note' => "Advance payment via {$order->advance_payment_method} verified by Admin for order #{$order->order_number}",
+            ]);
 
             // Post to platform ledger
             if ($advanceAmount > 0) {
@@ -907,10 +950,65 @@ class OrderAccountingService
     /**
      * Admin Reject order advance payment.
      */
-    public function rejectOrderAdvance(Order $order, int $adminId, string $reason): Order
+    public function rejectOrderAdvance(Order $order, int $adminId, string $reason, bool $reverseApproval = false): Order
     {
-        return DB::transaction(function () use ($order, $adminId, $reason) {
+        return DB::transaction(function () use ($order, $adminId, $reason, $reverseApproval) {
             $order = Order::lockForUpdate()->findOrFail($order->id);
+            $statuses = $reverseApproval ? ['approved'] : ['pending', 'submitted'];
+            if (!in_array($order->advance_status, $statuses, true)) {
+                throw ValidationException::withMessages(['advance_status' => 'Advance status has changed. Reload the order and try again.']);
+            }
+
+            $advanceTransactions = ResellerTransaction::where('order_id', $order->id)
+                ->where('type', 'order_advance')
+                ->where('status', $reverseApproval ? 'completed' : 'pending');
+            $transactions = (clone $advanceTransactions)
+                ->where('reseller_id', $order->user_id)
+                ->where('trx_id', $order->advance_trx_id);
+
+            if ($reverseApproval) {
+                if ($blockReason = $this->advanceDecisionBlockReason($order)) {
+                    throw ValidationException::withMessages(['advance_status' => $blockReason]);
+                }
+
+                $amount = round((float) $order->advance_amount, 2);
+                $walletEntries = $transactions->lockForUpdate()->get();
+                $walletPayment = $order->advance_payment_method === 'wallet';
+                $expectedDirection = $walletPayment ? 'debit' : 'credit';
+                if ($amount <= 0 || $walletEntries->count() > 1
+                    || $walletEntries->count() !== $advanceTransactions->count()
+                    || ($walletPayment && $walletEntries->isEmpty())
+                    || $walletEntries->contains(fn ($entry) => round($entry->amount, 2) !== $amount || $entry->trx_type !== $expectedDirection)) {
+                    throw ValidationException::withMessages(['advance_status' => 'The advance and wallet records do not match. Reconcile them before reversing approval.']);
+                }
+
+                $ledger = $order->accountingLedgers()
+                    ->where('account_code', 'cash_platform')
+                    ->where('reference_id', $order->advance_trx_id)
+                    ->whereIn('entry_type', ['booking', 'advance_reversal']);
+                $netAdvance = round((float) (clone $ledger)->sum('debit') - (float) (clone $ledger)->sum('credit'), 2);
+                if ($netAdvance !== $amount) {
+                    throw ValidationException::withMessages(['advance_status' => 'The advance and accounting ledger do not match. Reconcile them before reversing approval.']);
+                }
+
+                if (!$walletPayment && $walletEntries->isNotEmpty()) {
+                    User::lockForUpdate()->findOrFail($order->user_id);
+                    if ($this->calculateUserBalances($order->user_id)['available_balance'] < $amount) {
+                        throw ValidationException::withMessages(['advance_status' => 'The reseller has insufficient available balance to reverse this credit.']);
+                    }
+                }
+
+                $order->accountingLedgers()->create([
+                    'entry_type' => 'advance_reversal',
+                    'account_code' => 'cash_platform',
+                    'party_type' => 'platform',
+                    'debit' => 0,
+                    'credit' => $amount,
+                    'currency' => 'BDT',
+                    'reference_id' => $order->advance_trx_id,
+                    'description' => "Advance approval reversed by admin #{$adminId}: {$reason}",
+                ]);
+            }
 
             $order->update([
                 'advance_status' => 'rejected',
@@ -920,15 +1018,30 @@ class OrderAccountingService
                 'remaining_cod' => $order->total,
             ]);
 
-            ResellerTransaction::where('order_id', $order->id)
-                ->where('type', 'order_advance')
-                ->update([
-                    'status' => 'rejected',
-                    'note' => "Advance payment rejected: {$reason}",
-                ]);
+            $transactions->update([
+                'status' => 'rejected',
+                'note' => $reverseApproval ? "Advance approval reversed: {$reason}" : "Advance payment rejected: {$reason}",
+            ]);
 
             return $order;
         });
+    }
+
+    public function advanceDecisionBlockReason(Order $order): ?string
+    {
+        if (ResellerTransaction::where('order_id', $order->id)->where('type', 'advance_refund')->exists()) {
+            return 'The advance has already been refunded or released.';
+        }
+
+        if ($order->hasConsignment()
+            || in_array((int) $order->status, [7, 8, 9, 10, 11], true)
+            || in_array($order->orderStatus?->type, ['delivered', 'completed', 'cancelled', 'returned'], true)
+            || $order->settlements()->exists()
+            || $order->accountingLedgers()->where('entry_type', 'delivery_completed')->exists()) {
+            return 'The advance is locked because the order has reached delivery or settlement.';
+        }
+
+        return null;
     }
 
     /**
@@ -937,6 +1050,7 @@ class OrderAccountingService
     public function refundOrderAdvance(Order $order, string $reason = 'cancelled'): void
     {
         DB::transaction(function () use ($order, $reason) {
+            $order = Order::lockForUpdate()->findOrFail($order->id);
             if ($order->advance_status !== 'approved' || (float) $order->advance_amount <= 0) {
                 return;
             }
