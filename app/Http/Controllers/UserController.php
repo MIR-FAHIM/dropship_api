@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Order;
 use App\Models\User;
 use App\Models\RegistrationErrorLog;
 use App\Models\ResellerTransaction;
@@ -397,6 +398,39 @@ class UserController extends Controller
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    public function dropshipperLeaderboard(Request $request)
+    {
+        $validated = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $orderTotals = Order::query()
+            ->select('user_id')
+            ->selectRaw('COUNT(*) as total_order_count, COALESCE(SUM(reseller_profit), 0) as total_profit')
+            ->whereNotNull('user_id')
+            ->groupBy('user_id');
+
+        $leaderboard = User::query()
+            ->joinSub($orderTotals, 'order_totals', 'order_totals.user_id', '=', 'users.id')
+            ->where('users.user_type', 'dropshipper')
+            ->select('users.id', 'users.name', 'order_totals.total_order_count', 'order_totals.total_profit')
+            ->withCasts(['total_order_count' => 'integer', 'total_profit' => 'float'])
+            ->orderByDesc('order_totals.total_order_count')
+            ->orderBy('users.id')
+            ->paginate($validated['per_page'] ?? 20)
+            ->withQueryString();
+
+        $rank = ($leaderboard->currentPage() - 1) * $leaderboard->perPage() + 1;
+        $leaderboard->through(function (User $dropshipper) use (&$rank) {
+            $dropshipper->rank = $rank++;
+
+            return $dropshipper;
+        });
+
+        return $this->success('Dropshipper leaderboard fetched successfully', $leaderboard);
     }
 
     /**

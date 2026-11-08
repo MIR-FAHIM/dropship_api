@@ -134,6 +134,7 @@ Route::prefix('users')->group(function () {
     Route::get('/vendors', [UserController::class, 'getVendors']);
     Route::get('/delivery-men', [UserController::class, 'getDeliveryMan']);
     Route::get('/dropshippers', [UserController::class, 'getDropshipperList']);
+    Route::get('/dropshippers/leaderboard', [UserController::class, 'dropshipperLeaderboard'])->middleware('admin:orders');
     Route::post('/login-as-dropshipper', [AuthController::class, 'loginAsDropshipper']);
     Route::get('/details/{id}', [UserController::class, 'getUserDetails']);
     Route::get('/getBalance/{id}', [UserController::class, 'getUserBalance']);
