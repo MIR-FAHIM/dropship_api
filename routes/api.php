@@ -403,6 +403,8 @@ Route::prefix('transactions')->group(function () {
     Route::get('/reseller', [TransactionController::class, 'resellerTransactions']);
     Route::get('/reseller/advance-refunds', [TransactionController::class, 'resellerAdvanceRefunds'])
         ->middleware('admin:accounts');
+    Route::get('/reseller/advance-history', [TransactionController::class, 'resellerAdvanceHistory'])
+        ->middleware('admin:accounts');
 });
 
 // Facebook endpoints

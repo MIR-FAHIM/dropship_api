@@ -6,6 +6,7 @@ use App\Models\Transaction;
 use App\Models\ResellerTransaction;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class TransactionController extends Controller
 {
@@ -254,6 +255,50 @@ class TransactionController extends Controller
         }
 
         return $this->success('Reseller advance refunds fetched', ['items' => $items]);
+    }
+
+    public function resellerAdvanceHistory(Request $request)
+    {
+        $validated = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        // Admin-entered advances can have a ledger booking without a reseller wallet transaction.
+        $advanceEvents = DB::table('order_accounting_ledgers as ledger')
+            ->join('orders', 'orders.id', '=', 'ledger.order_id')
+            ->where('ledger.account_code', 'cash_platform')
+            ->where(function ($query) {
+                $query->where(fn ($booking) => $booking->where('ledger.entry_type', 'booking')->where('ledger.debit', '>', 0))
+                    ->orWhere(fn ($reversal) => $reversal->where('ledger.entry_type', 'advance_reversal')->where('ledger.credit', '>', 0));
+            })
+            ->select('ledger.id', 'ledger.order_id', 'orders.user_id as reseller_id', 'ledger.reference_id as trx_id')
+            ->selectRaw("CASE WHEN ledger.entry_type = 'booking' THEN ledger.debit ELSE ledger.credit END as amount")
+            ->selectRaw("CASE WHEN ledger.entry_type = 'booking' THEN 'order_advance' ELSE 'advance_reversal' END as type")
+            ->selectRaw("CASE WHEN ledger.entry_type = 'booking' THEN 'approved' ELSE 'reversed' END as status")
+            ->addSelect('ledger.description as note', 'ledger.created_at');
+
+        $refunds = DB::table('reseller_transactions')
+            ->where('type', 'advance_refund')
+            ->select('id', 'order_id', 'reseller_id', 'trx_id', 'amount', 'type', 'status', 'note', 'created_at');
+
+        $items = DB::query()
+            ->fromSub($advanceEvents->unionAll($refunds), 'events')
+            ->leftJoin('users', 'users.id', '=', 'events.reseller_id')
+            ->leftJoin('orders', 'orders.id', '=', 'events.order_id')
+            ->select('events.*', 'users.name as reseller_name', 'orders.order_number')
+            ->orderByDesc('events.created_at')
+            ->orderByDesc('events.id')
+            ->orderBy('events.type')
+            ->paginate($validated['per_page'] ?? 20)
+            ->withQueryString()
+            ->through(function ($event) {
+                $event->created_at = $event->created_at ? Carbon::parse($event->created_at)->toIso8601String() : null;
+
+                return $event;
+            });
+
+        return $this->success('Reseller advance history fetched', ['items' => $items]);
     }
 
     public function resellerTransactions(Request $request)
