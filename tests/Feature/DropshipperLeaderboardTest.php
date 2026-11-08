@@ -22,7 +22,8 @@ class DropshipperLeaderboardTest extends TestCase
 
         Order::create(['user_id' => $first->id, 'status' => 1, 'reseller_profit' => 100.25]);
         Order::create(['user_id' => $first->id, 'status' => 9, 'reseller_profit' => 49.50]);
-        Order::create(['user_id' => $second->id, 'status' => 9, 'reseller_profit' => 200]);
+        Order::create(['user_id' => $first->id, 'status' => 10, 'reseller_profit' => 0]);
+        Order::create(['user_id' => $second->id, 'status' => 7, 'reseller_profit' => 200]);
         Order::create(['user_id' => $customer->id, 'status' => 1, 'reseller_profit' => 20]);
 
         $token = bin2hex(random_bytes(20));
@@ -40,12 +41,15 @@ class DropshipperLeaderboardTest extends TestCase
             ->assertJsonPath('data.total', 2)
             ->assertJsonPath('data.data.0.id', $first->id)
             ->assertJsonPath('data.data.0.rank', 1)
-            ->assertJsonPath('data.data.0.total_order_count', 2)
+            ->assertJsonPath('data.data.0.total_order_count', 3)
+            ->assertJsonPath('data.data.0.completed_order_count', 2)
             ->assertJsonPath('data.data.0.total_profit', 149.75);
 
         $this->getJson($endpoint.'&page=2', $headers)
             ->assertOk()
             ->assertJsonPath('data.data.0.id', $second->id)
-            ->assertJsonPath('data.data.0.rank', 2);
+            ->assertJsonPath('data.data.0.rank', 2)
+            ->assertJsonPath('data.data.0.total_order_count', 1)
+            ->assertJsonPath('data.data.0.completed_order_count', 0);
     }
 }

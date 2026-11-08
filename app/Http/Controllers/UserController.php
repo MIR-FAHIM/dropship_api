@@ -410,14 +410,24 @@ class UserController extends Controller
         $orderTotals = Order::query()
             ->select('user_id')
             ->selectRaw('COUNT(*) as total_order_count, COALESCE(SUM(reseller_profit), 0) as total_profit')
+            ->selectRaw(
+                'COUNT(CASE WHEN status IN (?, ?) THEN 1 END) as completed_order_count',
+                Order::DROPSHIPPER_COMPLETED_STATUSES
+            )
             ->whereNotNull('user_id')
             ->groupBy('user_id');
 
         $leaderboard = User::query()
             ->joinSub($orderTotals, 'order_totals', 'order_totals.user_id', '=', 'users.id')
             ->where('users.user_type', 'dropshipper')
-            ->select('users.id', 'users.name', 'order_totals.total_order_count', 'order_totals.total_profit')
-            ->withCasts(['total_order_count' => 'integer', 'total_profit' => 'float'])
+            ->select(
+                'users.id',
+                'users.name',
+                'order_totals.total_order_count',
+                'order_totals.completed_order_count',
+                'order_totals.total_profit'
+            )
+            ->withCasts(['total_order_count' => 'integer', 'completed_order_count' => 'integer', 'total_profit' => 'float'])
             ->orderByDesc('order_totals.total_order_count')
             ->orderBy('users.id')
             ->paginate($validated['per_page'] ?? 20)

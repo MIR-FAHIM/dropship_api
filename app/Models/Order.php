@@ -10,6 +10,7 @@ class Order extends Model
     use HasFactory;
 
     public const CARRYBEE_NON_PAYABLE_STATUSES = [7, 8, 11];
+    public const DROPSHIPPER_COMPLETED_STATUSES = [9, 10];
 
     protected $fillable = [
         'user_id',
