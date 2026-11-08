@@ -248,6 +248,11 @@ class TransactionController extends Controller
             ->paginate($validated['per_page'] ?? 20)
             ->withQueryString();
 
+        foreach ($items as $transaction) {
+            // History needs only the order reference. Order accessors expect a full order.
+            $transaction->order?->setAppends([]);
+        }
+
         return $this->success('Reseller advance refunds fetched', ['items' => $items]);
     }
 

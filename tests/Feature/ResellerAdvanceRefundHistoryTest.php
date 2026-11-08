@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\ApiToken;
+use App\Models\Order;
 use App\Models\ResellerTransaction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -26,7 +27,15 @@ class ResellerAdvanceRefundHistoryTest extends TestCase
             'status' => 'completed',
         ];
         $olderRefund = ResellerTransaction::create($transaction + ['type' => 'advance_refund']);
-        $newerRefund = ResellerTransaction::create($transaction + ['type' => 'advance_refund']);
+        $order = Order::create([
+            'user_id' => $reseller->id,
+            'order_number' => 'ORD-ADVANCE-REFUND',
+            'status' => 9,
+        ]);
+        $newerRefund = ResellerTransaction::create($transaction + [
+            'type' => 'advance_refund',
+            'order_id' => $order->id,
+        ]);
         ResellerTransaction::create($transaction + ['type' => 'order_advance']);
         $headers = $this->headersFor($admin);
 
@@ -35,11 +44,16 @@ class ResellerAdvanceRefundHistoryTest extends TestCase
             ->assertJsonPath('data.items.total', 2)
             ->assertJsonCount(1, 'data.items.data')
             ->assertJsonPath('data.items.data.0.id', $newerRefund->id)
+            ->assertJsonPath('data.items.data.0.order', [
+                'id' => $order->id,
+                'order_number' => $order->order_number,
+            ])
             ->assertJsonPath('data.items.data.0.reseller.name', $reseller->name);
 
         $this->getJson(self::ENDPOINT.'?per_page=1&page=2', $headers)
             ->assertOk()
-            ->assertJsonPath('data.items.data.0.id', $olderRefund->id);
+            ->assertJsonPath('data.items.data.0.id', $olderRefund->id)
+            ->assertJsonPath('data.items.data.0.order', null);
     }
 
     public function test_history_requires_an_accounts_admin(): void
