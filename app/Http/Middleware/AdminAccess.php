@@ -36,7 +36,9 @@ class AdminAccess
             strtolower((string) ($user->role ?? '')),
         ]);
 
-        $allowedAdminRoles = $area === 'orders' ? ['admin', 'superadmin'] : ['admin', 'superadmin', 'product manager'];
+        $allowedAdminRoles = in_array($area, ['orders', 'accounts'], true)
+            ? ['admin', 'superadmin']
+            : ['admin', 'superadmin', 'product manager'];
 
         if (!array_intersect($roles, $allowedAdminRoles)) {
             return response()->json([

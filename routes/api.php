@@ -401,6 +401,8 @@ Route::prefix('transactions')->group(function () {
     Route::get('/debit', [TransactionController::class, 'debitTransaction']);
     Route::get('/report', [TransactionController::class, 'transactionReport']);
     Route::get('/reseller', [TransactionController::class, 'resellerTransactions']);
+    Route::get('/reseller/advance-refunds', [TransactionController::class, 'resellerAdvanceRefunds'])
+        ->middleware('admin:accounts');
 });
 
 // Facebook endpoints

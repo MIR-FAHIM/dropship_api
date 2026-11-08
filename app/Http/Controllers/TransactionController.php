@@ -233,6 +233,24 @@ class TransactionController extends Controller
         }
     }
 
+    public function resellerAdvanceRefunds(Request $request)
+    {
+        $validated = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $items = ResellerTransaction::query()
+            ->where('type', 'advance_refund')
+            ->with(['order:id,order_number', 'reseller:id,name'])
+            ->latest()
+            ->orderByDesc('id')
+            ->paginate($validated['per_page'] ?? 20)
+            ->withQueryString();
+
+        return $this->success('Reseller advance refunds fetched', ['items' => $items]);
+    }
+
     public function resellerTransactions(Request $request)
     {
         try {
