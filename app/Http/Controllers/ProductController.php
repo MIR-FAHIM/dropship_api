@@ -747,6 +747,19 @@ class ProductController extends Controller
             if (!$product) {
                 return $this->failed('Product not found', null, 404);
             }
+
+            if ($request->has('current_stock')) {
+                $user = $request->user();
+                $roles = [strtolower((string) $user?->user_type), strtolower((string) $user?->role)];
+                $canManageProducts = array_intersect($roles, ['admin', 'superadmin', 'product manager']);
+                $ownsProduct = array_intersect($roles, ['vendor', 'seller'])
+                    && $product->vendor()->where('user_id', $user->id)->exists();
+
+                if (!$user || (int) $user->banned === 1 || (!$canManageProducts && !$ownsProduct)) {
+                    return $this->failed('You are not allowed to update stock for this product', null, 403);
+                }
+            }
+
             // Normalize photos input: accept comma string or single id and convert to array
 
             $validated = $request->validate([
@@ -784,7 +797,7 @@ class ProductController extends Controller
                 'featured' => ['sometimes', 'nullable', 'boolean'],
                 'seller_featured' => ['sometimes', 'nullable', 'boolean'],
 
-                'current_stock' => ['sometimes', 'nullable', 'integer', 'min:0'],
+                'current_stock' => ['sometimes', 'required', 'integer', 'min:0', 'max:2147483647'],
                 'unit' => ['sometimes', 'nullable', 'string', 'max:50'],
                 'weight' => ['sometimes', 'nullable', 'numeric'],
                 'min_qty' => ['sometimes', 'nullable', 'integer'],

@@ -21,21 +21,23 @@ class AuthController extends Controller
         return $payload;
     }
 
-    private function storeLoginError(Request $request, string $message, ?User $user = null, string $level = 'error', ?\Throwable $exception = null): void
+    private function storeLoginError(Request $request, string $message, ?User $user = null, string $level = 'warning', ?\Throwable $exception = null, array $validationErrors = []): void
     {
         try {
+            $payload = array_filter($request->only(['email', 'phone', 'remember', 'expires_in_days', 'name']), 'is_scalar');
+            $requestData = $validationErrors ? ['payload' => $payload, 'validation_errors' => $validationErrors] : $payload;
+
             LoginError::create([
                 'user_id' => $user?->id,
                 'level' => $level,
                 'message' => $message,
                 'file' => $exception?->getFile(),
                 'line' => $exception?->getLine(),
-                'url' => $request->fullUrl(),
+                'url' => $request->url(),
                 'method' => $request->method(),
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
-                'request_data' => json_encode($this->maskSensitive($request->all()), JSON_UNESCAPED_UNICODE),
-                'stack_trace' => $exception?->getTraceAsString(),
+                'request_data' => json_encode($requestData, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
                 'created_at' => now(),
             ]);
         } catch (\Throwable $e) {
@@ -133,6 +135,8 @@ class AuthController extends Controller
      */
     public function login(Request $request)
     {
+        $user = null;
+
         try {
             $validated = $request->validate([
                 'email' => ['nullable', 'email', 'required_without:phone'],
@@ -141,8 +145,6 @@ class AuthController extends Controller
                 'expires_in_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
                 'name' => ['nullable', 'string', 'max:255'],
             ]);
-
-            $user = null;
 
             if (!empty($validated['email'])) {
                 $user = User::where('email', $validated['email'])->first();
@@ -167,14 +169,22 @@ class AuthController extends Controller
                 $user = User::whereIn('phone', $variants)->first();
             }
 
-            if (!$user || !Hash::check($validated['password'], $user->password)) {
-                $this->storeLoginError($request, 'Invalid credentials', $user, 'warning');
+            if (!$user) {
+                $reason = !empty($validated['email'])
+                    ? 'No account found for this email address'
+                    : 'No account found for this phone number';
+                $this->storeLoginError($request, $reason);
+                return $this->failed('Invalid credentials', null, 401);
+            }
+
+            if (!Hash::check($validated['password'], $user->password)) {
+                $this->storeLoginError($request, 'Incorrect password', $user);
                 return $this->failed('Invalid credentials', null, 401);
             }
 
             // Check if user is banned (not activated)
             if (isset($user->banned) && $user->banned == 1) {
-                $this->storeLoginError($request, 'Login blocked for banned user', $user, 'warning');
+                $this->storeLoginError($request, 'Account inactive or banned', $user);
                 return $this->failed('You need to activate your account', null, 403);
             }
 
@@ -197,11 +207,11 @@ class AuthController extends Controller
                 'user' => $user,
             ], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            $this->storeLoginError($request, 'Login validation failed', null, 'warning', $e);
+            $this->storeLoginError($request, 'Login validation failed', validationErrors: $e->errors());
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
-            $this->storeLoginError($request, 'Login failed with server error', null, 'error', $e);
-            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+            $this->storeLoginError($request, 'Login failed with server error: '.$e::class, $user, 'error', $e);
+            return $this->failed('Something went wrong', null, 500);
         }
     }
 
