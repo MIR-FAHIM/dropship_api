@@ -527,7 +527,7 @@ Route::prefix('delivery-companies')->group(function () {
     Route::post('/carrybee/acknowledge-paid-order/{id}', [CarrybeeWebhookController::class, 'acknowledgePaidOrder']);
     Route::post('/carrybee/test-webhook', [CarrybeeWebhookController::class, 'testWebhook']);
     Route::get('/carrybee/webhook-events', [CarrybeeWebhookController::class, 'getWebhookEvents']);
-    Route::post('/carrybee/manual-order-payment/{id}', [CarrybeeWebhookController::class, 'manualOrderPayment']);
+    Route::post('/carrybee/manual-order-payment/{id}', [CarrybeeWebhookController::class, 'manualOrderPayment'])->middleware('admin:accounts');
     // Order Drafts
     Route::post('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftSave']);
     Route::get('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftList']);

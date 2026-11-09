@@ -10,6 +10,7 @@ use App\Service\OrderAccountingService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class CarrybeeWebhookController extends Controller
 {
@@ -54,6 +55,8 @@ class CarrybeeWebhookController extends Controller
     public function getUnacknowledgedPaidOrders(): JsonResponse
     {
         $events = CarrybeeWebhookEvent::where('event', 'order.paid')
+            ->whereIn('processing_status', ['processed', 'duplicate'])
+            ->whereNotNull('disbursed_to')
             ->where('admin_acknowledged', false)
             ->whereNotNull('order_id')
             ->with(['order.vendor', 'order.items.product.vendor'])
@@ -178,14 +181,6 @@ class CarrybeeWebhookController extends Controller
      */
     public function manualOrderPayment(Request $request, int $id): JsonResponse
     {
-        $order = Order::with(['deliveryInformation', 'vendor', 'items.product.vendor'])->find($id);
-        if (!$order) {
-            return response()->json([
-                'status' => 'failed',
-                'message' => 'Order not found.',
-            ], 404);
-        }
-
         $validated = $request->validate([
             'action' => ['required', 'string', 'in:mark_paid,reset'],
             'invoice_id' => ['nullable', 'string', 'max:100'],
@@ -194,9 +189,28 @@ class CarrybeeWebhookController extends Controller
             'note' => ['nullable', 'string', 'max:500'],
         ]);
 
+        return DB::transaction(function () use ($request, $id, $validated) {
+            $order = Order::with(['deliveryInformation', 'vendor', 'items.product.vendor'])->lockForUpdate()->find($id);
+            if (!$order) {
+                return response()->json(['status' => 'failed', 'message' => 'Order not found.'], 404);
+            }
+
+            return $this->applyManualOrderPayment($request, $order, $validated);
+        });
+    }
+
+    private function applyManualOrderPayment(Request $request, Order $order, array $validated): JsonResponse
+    {
         $action = $validated['action'];
 
         if ($action === 'mark_paid') {
+            if (in_array((int) $order->status, Order::CARRYBEE_NON_PAYABLE_STATUSES, true)) {
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Cancelled, returned, or lost orders cannot be marked as CarryBee paid.',
+                ], 422);
+            }
+
             $hasOwnDeliveryAccount = false;
             if ($order->vendor && (bool) $order->vendor->has_own_delivery_account) {
                 $hasOwnDeliveryAccount = true;

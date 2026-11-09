@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorCarryBeeCredintial;
 use App\Service\ApiTokenService;
+use App\Service\OrderAccountingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -96,9 +97,6 @@ class CarrybeePaidWebhookTest extends TestCase
             'status'              => 5,
             'payment_status'      => 'unpaid',
             'remaining_cod'       => 1200,
-            'actual_courier_fee'  => 80,
-            'actual_cod_fee'      => 12,
-            'actual_courier_cost' => 92,
         ]);
 
         DeliveryAssignedInfo::create([
@@ -150,6 +148,9 @@ class CarrybeePaidWebhookTest extends TestCase
         $this->assertEquals('IX212124433', $freshOrder->carrybee_invoice_id);
         $this->assertEquals('vendor', $freshOrder->carrybee_disbursed_to);
         $this->assertEquals('received', $freshOrder->courier_payout_status);
+        $this->assertEquals(80, $freshOrder->actual_courier_fee);
+        $this->assertEquals(12, $freshOrder->actual_cod_fee);
+        $this->assertEquals(1108, $freshOrder->courier_net_payout);
 
         // Verify DeliveryAssignedInfo updated
         $freshAssigned = DeliveryAssignedInfo::where('order_id', $order->id)->first();
@@ -278,6 +279,8 @@ class CarrybeePaidWebhookTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('data.simulation', true)
+            ->assertJsonPath('data.settlement_applied', false)
+            ->assertJsonPath('data.current_settlement_status', 'pending')
             ->assertJsonPath('data.order_matched', true)
             ->assertJsonPath('data.mapped_status_id', 10);
 
@@ -285,6 +288,58 @@ class CarrybeePaidWebhookTest extends TestCase
         $this->assertFalse($order->fresh()->is_carrybee_paid);
         $this->assertDatabaseMissing('carrybee_webhook_events', ['consignment_id' => 'FX-SIM-TEST']);
         $this->assertDatabaseMissing('order_accounting_ledgers', ['order_id' => $order->id]);
+    }
+
+    public function test_failed_paid_webhook_leaves_the_order_pending_and_can_be_retried(): void
+    {
+        $order = Order::create([
+            'order_number' => 'ORD-PAID-RETRY', 'status' => 6, 'payment_status' => 'unpaid',
+            'total' => 844, 'remaining_cod' => 844,
+        ]);
+        $delivery = DeliveryAssignedInfo::create([
+            'order_id' => $order->id, 'consignment_id' => 'CONS-RETRY', 'collectable_amount' => 844,
+            'recipient_name' => 'Test Recipient', 'recipient_phone' => '01700000000', 'recipient_address' => 'Dhaka',
+            'delivery_fee' => 105, 'total_fee' => 113.44,
+        ]);
+        $accounting = app(OrderAccountingService::class);
+        $this->partialMock(OrderAccountingService::class, function ($mock) {
+            $mock->shouldReceive('processOrderDelivery')->once()->andThrow(new \RuntimeException('Test settlement failure'));
+        });
+        $payload = [
+            'event' => 'order.paid', 'consignment_id' => 'CONS-RETRY',
+            'merchant_order_id' => 'ORD-PAID-RETRY', 'invoice_id' => 'INV-RETRY',
+        ];
+        $headers = ['X-Carrybee-Webhook-Signature' => 'carrybee-test-secret'];
+        $url = '/api/delivery-companies/carrybee/webhook';
+
+        $failed = $this->postJson($url, $payload, $headers)->assertStatus(500);
+        $eventId = $failed->json('data.event_id');
+        $this->assertDatabaseHas('carrybee_webhook_events', [
+            'id' => $eventId, 'order_id' => $order->id, 'processing_status' => 'failed', 'processed_at' => null,
+        ]);
+        $this->assertFalse($order->fresh()->is_carrybee_paid);
+        $this->assertNull($delivery->fresh()->carrybee_paid_at);
+        $this->assertDatabaseMissing('order_settlements', ['order_id' => $order->id]);
+
+        $this->app->instance(OrderAccountingService::class, $accounting);
+        $this->app['router']->current()->flushController();
+        $this->postJson($url, $payload, $headers)->assertOk()->assertJsonPath('data.event_id', $eventId);
+        $this->assertTrue($order->fresh()->is_carrybee_paid);
+        $this->assertEquals(730.56, $order->fresh()->courier_net_payout);
+        $this->assertDatabaseHas('carrybee_webhook_events', ['id' => $eventId, 'processing_status' => 'processed']);
+        $this->postJson($url, $payload, $headers)->assertOk()->assertJsonPath('message', 'Duplicate webhook ignored');
+        $this->assertDatabaseCount('carrybee_webhook_events', 1);
+    }
+
+    public function test_vendor_cannot_manually_confirm_payment(): void
+    {
+        $vendor = $this->createVendor();
+        $order = Order::create(['vendor_id' => $vendor->id, 'status' => 6, 'payment_status' => 'unpaid']);
+        $token = ApiTokenService::create($vendor->user, ['basic'], 1, 'vendor-token')['plain'];
+        $this->withToken($token)->postJson("/api/delivery-companies/carrybee/manual-order-payment/{$order->id}", [
+            'action' => 'mark_paid',
+        ])->assertForbidden();
+        $this->assertFalse($order->fresh()->is_carrybee_paid);
     }
 
     public function test_admin_can_manually_mark_and_reset_carrybee_payment(): void

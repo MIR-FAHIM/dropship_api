@@ -10,6 +10,8 @@ use App\Models\OrderStatus;
 use App\Models\OrderStatusHistory;
 use App\Models\Transaction;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class CarrybeeWebhookService
 {
@@ -104,11 +106,63 @@ class CarrybeeWebhookService
             ];
         }
 
+        try {
+            return DB::transaction(function () use ($order, $webhookEvent, $event, $mappedStatusId, $payload) {
+                $order = Order::lockForUpdate()->findOrFail($order->id);
+                $eventRecord = CarrybeeWebhookEvent::lockForUpdate()->findOrFail($webhookEvent->id);
+                if ($eventRecord->processed_at !== null && $eventRecord->signature_valid) {
+                    return [
+                        'ok' => true,
+                        'http_code' => 200,
+                        'message' => 'Duplicate webhook ignored',
+                        'data' => ['event_id' => $eventRecord->id],
+                    ];
+                }
+
+                return $this->processMatchedEvent($order, $eventRecord, $event, $mappedStatusId, $payload);
+            });
+        } catch (Throwable $e) {
+            report($e);
+            // Keep a diagnostic record without acknowledging a payout that rolled back.
+            CarrybeeWebhookEvent::whereKey($webhookEvent->id)->whereNull('processed_at')->update([
+                'order_id' => $order->id,
+                'mapped_status_id' => $mappedStatusId,
+                'signature_valid' => true,
+                'processing_status' => 'failed',
+                'message' => 'Processing failed; the webhook may be retried.',
+            ]);
+
+            return [
+                'ok' => false,
+                'http_code' => 500,
+                'message' => 'Webhook processing failed',
+                'data' => ['event_id' => $webhookEvent->id],
+            ];
+        }
+    }
+
+    private function processMatchedEvent(Order $order, CarrybeeWebhookEvent $webhookEvent, string $event, ?int $mappedStatusId, array $payload): array
+    {
+        $webhookEvent->signature_valid = true;
         $webhookEvent->order_id = $order->id;
         $webhookEvent->mapped_status_id = $mappedStatusId;
 
         // Specific processing for CarryBee order.paid event
         if ($event === 'order.paid') {
+            if (in_array((int) $order->status, Order::CARRYBEE_NON_PAYABLE_STATUSES, true)) {
+                $webhookEvent->processing_status = 'ignored';
+                $webhookEvent->message = 'Payment event received for a non-payable order; manual review required.';
+                $webhookEvent->processed_at = now();
+                $webhookEvent->save();
+
+                return [
+                    'ok' => true,
+                    'http_code' => 202,
+                    'message' => $webhookEvent->message,
+                    'data' => ['event_id' => $webhookEvent->id, 'order_id' => $order->id],
+                ];
+            }
+
             $this->handleOrderPaidEvent($order, $webhookEvent, $payload);
         }
 
@@ -444,6 +498,15 @@ class CarrybeeWebhookService
     public function triggerDisbursementForPaidOrder(Order $order, array $courierFeeData = [], ?string $previousPaymentStatus = null): array
     {
         $previousPaymentStatus = $previousPaymentStatus ?? $order->payment_status;
+        $assigned = $order->deliveryInformation;
+        $deliveryFee = $courierFeeData['actual_courier_fee'] ?? $order->actual_courier_fee ?? $assigned?->delivery_fee;
+        $codFee = $courierFeeData['actual_cod_fee'] ?? $order->actual_cod_fee;
+        if ($codFee === null && $assigned?->total_fee !== null && $assigned->delivery_fee !== null
+            && (float) $assigned->total_fee >= (float) $assigned->delivery_fee) {
+            $codFee = round((float) $assigned->total_fee - (float) $assigned->delivery_fee, 2);
+        }
+        $courierFeeData['actual_courier_fee'] = $deliveryFee;
+        $courierFeeData['actual_cod_fee'] = $codFee;
 
         $result = $this->orderAccountingService->processOrderDelivery($order, array_merge([
             'confirmed' => true,
@@ -560,6 +623,8 @@ class CarrybeeWebhookService
                 'order_matched' => $order !== null,
                 'mapped_status_id' => $statusMap[$event],
                 'invoice_id' => $payload['invoice_id'] ?? null,
+                'settlement_applied' => false,
+                'current_settlement_status' => $order ? ($order->is_carrybee_paid ? 'paid' : 'pending') : null,
             ],
         ];
     }
