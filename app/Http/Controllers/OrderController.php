@@ -1253,6 +1253,15 @@ class OrderController extends Controller
             ])
                 ->whereIn('id', $orderIds)
                 ->where('status', '!=', 1)
+                ->where(function ($query) {
+                    $query->where('orders.status', '!=', 7) // Cancelled
+                        ->orWhereHas('deliveryInformation', fn ($delivery) => $delivery
+                            ->whereRaw("TRIM(consignment_id) <> ''"))
+                        ->orWhereExists(fn ($webhook) => $webhook->selectRaw('1')
+                            ->from('carrybee_webhook_events')
+                            ->whereColumn('carrybee_webhook_events.order_id', 'orders.id')
+                            ->whereRaw("TRIM(carrybee_webhook_events.consignment_id) <> ''"));
+                })
                 ->latest()
                 ->paginate($perPage);
 
