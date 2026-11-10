@@ -592,13 +592,9 @@ class ProductController extends Controller
     public function listFeaturedProducts(Request $request)
     {
         try {
-            $query = Product::query()->with(['primaryImage', 'images', 'category', 'subCategory', 'vendor.division', 'vendor.district', 'brand', 'productDiscount']);
-
-
-
-            if ($request->filled('featured')) {
-                $query->where('featured', $request->featured);
-            }
+            $query = Product::query()
+                ->where('featured', 1)
+                ->with(['primaryImage', 'images', 'category', 'subCategory', 'vendor.division', 'vendor.district', 'brand', 'productDiscount']);
 
             if ($request->filled('is_active')) {
                 $query->where('is_active', (int) $request->is_active);
