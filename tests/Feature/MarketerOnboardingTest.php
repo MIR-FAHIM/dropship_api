@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\ApiToken;
 use App\Models\Category;
 use App\Models\LandingPageOrder;
 use App\Models\MarketerClient;
@@ -10,6 +11,7 @@ use App\Models\Order;
 use App\Models\OrderStatus;
 use App\Models\PartnerStore;
 use App\Models\Product;
+use App\Models\ProductClicks;
 use App\Models\ResellerProductPage;
 use App\Models\User;
 use App\Service\ApiTokenService;
@@ -241,6 +243,90 @@ class MarketerOnboardingTest extends TestCase
             'email' => 'second@example.com',
             'password' => '01987654321',
         ])->assertOk()->assertJsonPath('data.user.id', $secondId);
+    }
+
+    public function test_marketer_clients_endpoint_returns_metrics_summary_insights_and_supports_filtering(): void
+    {
+        $marketer = $this->user('marketer');
+        $dropshipperA = User::factory()->create(['user_type' => 'dropshipper', 'name' => 'Alpha Dropshipper', 'business_name' => 'Alpha Store']);
+        $dropshipperB = User::factory()->create(['user_type' => 'dropshipper', 'name' => 'Beta Dropshipper', 'business_name' => 'Beta Shop']);
+        $dropshipperC = User::factory()->create(['user_type' => 'dropshipper', 'name' => 'Gamma Dropshipper']);
+
+        $token = $this->token($marketer);
+
+        $linkA = MarketerClient::create([
+            'marketer_user_id' => $marketer->id,
+            'dropshipper_user_id' => $dropshipperA->id,
+            'active_dropshipper_user_id' => $dropshipperA->id,
+            'consent_version' => MarketerClient::CONSENT_VERSION,
+            'accepted_at' => now()->subDays(5),
+        ]);
+        $linkB = MarketerClient::create([
+            'marketer_user_id' => $marketer->id,
+            'dropshipper_user_id' => $dropshipperB->id,
+            'active_dropshipper_user_id' => $dropshipperB->id,
+            'consent_version' => MarketerClient::CONSENT_VERSION,
+            'accepted_at' => now()->subDays(10),
+        ]);
+        $linkC = MarketerClient::create([
+            'marketer_user_id' => $marketer->id,
+            'dropshipper_user_id' => $dropshipperC->id,
+            'active_dropshipper_user_id' => $dropshipperC->id,
+            'consent_version' => MarketerClient::CONSENT_VERSION,
+            'accepted_at' => now()->subDays(40),
+        ]);
+
+        // Dropshipper A: orders delivered, logged in recently
+        Order::create(['user_id' => $dropshipperA->id, 'marketer_client_id' => $linkA->id, 'status' => 9]);
+        Order::create(['user_id' => $dropshipperA->id, 'marketer_client_id' => $linkA->id, 'status' => 10]);
+        ApiToken::create([
+            'user_id' => $dropshipperA->id,
+            'token_hash' => hash('sha256', 'tokA'),
+            'name' => 'test',
+            'last_used_at' => now()->subHours(2),
+        ]);
+
+        // Dropshipper B: clicks, 1 placed order, moderate login
+        ProductClicks::create(['product_id' => 1, 'page' => 'product', 'clicked_by' => $dropshipperB->id, 'is_guest' => false]);
+        ProductClicks::create(['product_id' => 2, 'page' => 'product', 'clicked_by' => $dropshipperB->id, 'is_guest' => false]);
+        Order::create(['user_id' => $dropshipperB->id, 'marketer_client_id' => $linkB->id, 'status' => 1]);
+        ApiToken::create([
+            'user_id' => $dropshipperB->id,
+            'token_hash' => hash('sha256', 'tokB'),
+            'name' => 'test',
+            'last_used_at' => now()->subDays(15),
+        ]);
+
+        // 1. Fetch clients with default parameters
+        $res = $this->withToken($token)->getJson('/api/marketer/clients')->assertOk();
+        $res->assertJsonPath('data.total', 3)
+            ->assertJsonPath('data.summary.total_clients', 3)
+            ->assertJsonPath('data.summary.total_delivered_orders', 2)
+            ->assertJsonPath('data.summary.total_product_clicks', 2)
+            ->assertJsonPath('data.summary.recently_active_clients', 1)
+            ->assertJsonPath('data.summary.distribution.active', 1)
+            ->assertJsonPath('data.summary.distribution.moderate', 1)
+            ->assertJsonPath('data.summary.distribution.inactive', 1)
+            ->assertJsonPath('data.insights.top_performer.client_id', $linkA->id);
+
+        // 2. Search filter
+        $searchRes = $this->withToken($token)->getJson('/api/marketer/clients?search=Alpha')->assertOk();
+        $searchRes->assertJsonPath('data.total', 1)
+            ->assertJsonPath('data.data.0.dropshipper.name', 'Alpha Dropshipper');
+
+        // 3. Activity filter
+        $activeRes = $this->withToken($token)->getJson('/api/marketer/clients?activity=active')->assertOk();
+        $activeRes->assertJsonPath('data.total', 1)
+            ->assertJsonPath('data.data.0.dropshipper.name', 'Alpha Dropshipper');
+
+        // 4. Min orders filter
+        $minOrdersRes = $this->withToken($token)->getJson('/api/marketer/clients?min_orders=2')->assertOk();
+        $minOrdersRes->assertJsonPath('data.total', 1)
+            ->assertJsonPath('data.data.0.dropshipper.name', 'Alpha Dropshipper');
+
+        // 5. Sorting by clicks
+        $sortRes = $this->withToken($token)->getJson('/api/marketer/clients?sort_by=clicks&sort_direction=desc')->assertOk();
+        $sortRes->assertJsonPath('data.data.0.dropshipper.name', 'Beta Dropshipper');
     }
 
     private function user(string $type): User

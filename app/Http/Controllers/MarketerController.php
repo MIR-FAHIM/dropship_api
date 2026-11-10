@@ -2,10 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ApiToken;
+use App\Models\LoginSuccessLog;
 use App\Models\MarketerClient;
 use App\Models\MarketerInvitation;
 use App\Models\Order;
+use App\Models\ProductClicks;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -172,11 +176,251 @@ class MarketerController extends Controller
 
     public function clients(Request $request): JsonResponse
     {
+        $marketerId = $request->user()->id;
         $perPage = $this->perPage($request);
+        $search = trim((string) $request->input('search', ''));
+        $period = (string) $request->input('period', 'all'); // '7d', '30d', '90d', 'all'
+        $activity = (string) $request->input('activity', 'all'); // 'all', 'active', 'moderate', 'inactive'
+        $minOrders = $request->filled('min_orders') ? (int) $request->input('min_orders') : null;
+        $sortBy = (string) $request->input('sort_by', 'joined'); // 'clicks', 'orders', 'delivered', 'last_login', 'joined'
+        $sortDirection = strtolower((string) $request->input('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
 
-        return $this->success('Active clients fetched', MarketerClient::where('marketer_user_id', $request->user()->id)
-            ->whereNotNull('active_dropshipper_user_id')->select(['id', 'dropshipper_user_id', 'accepted_at'])
-            ->with('dropshipper:id,name')->latest('id')->paginate($perPage));
+        $allRelationships = MarketerClient::where('marketer_user_id', $marketerId)
+            ->whereNotNull('active_dropshipper_user_id')
+            ->with(['dropshipper' => function ($q) {
+                $q->select('id', 'name', 'business_name', 'email');
+            }])
+            ->get();
+
+        if ($allRelationships->isEmpty()) {
+            return $this->success('Active clients fetched', [
+                'data' => [],
+                'current_page' => 1,
+                'last_page' => 1,
+                'per_page' => $perPage,
+                'total' => 0,
+                'from' => null,
+                'to' => null,
+                'summary' => [
+                    'total_clients' => 0,
+                    'total_delivered_orders' => 0,
+                    'total_product_clicks' => 0,
+                    'recently_active_clients' => 0,
+                    'distribution' => [
+                        'active' => 0,
+                        'moderate' => 0,
+                        'inactive' => 0,
+                    ],
+                ],
+                'insights' => [
+                    'top_performer' => null,
+                    'high_interest_low_orders' => null,
+                    'inactive_clients' => 0,
+                ],
+            ]);
+        }
+
+        $clientIds = $allRelationships->pluck('id')->all();
+        $dropshipperIds = $allRelationships->pluck('dropshipper_user_id')->filter()->unique()->all();
+
+        $periodDate = match ($period) {
+            '7d' => now()->subDays(7),
+            '30d' => now()->subDays(30),
+            '90d' => now()->subDays(90),
+            default => null,
+        };
+
+        $clicksQuery = ProductClicks::whereIn('clicked_by', $dropshipperIds);
+        if ($periodDate) {
+            $clicksQuery->where('created_at', '>=', $periodDate);
+        }
+        $clicksMap = $clicksQuery->selectRaw('clicked_by, COUNT(*) as count')
+            ->groupBy('clicked_by')
+            ->pluck('count', 'clicked_by')
+            ->all();
+
+        $ordersQuery = Order::whereIn('marketer_client_id', $clientIds);
+        if ($periodDate) {
+            $ordersQuery->where('created_at', '>=', $periodDate);
+        }
+        $ordersStats = $ordersQuery->selectRaw(
+            'marketer_client_id, '
+            .'COUNT(*) as placed, '
+            .'COUNT(CASE WHEN status IN (?, ?) THEN 1 END) as delivered',
+            array_map('strval', Order::DROPSHIPPER_COMPLETED_STATUSES)
+        )->groupBy('marketer_client_id')->get()->keyBy('marketer_client_id');
+
+        $loginsMap = LoginSuccessLog::whereIn('user_id', $dropshipperIds)
+            ->selectRaw('user_id, MAX(COALESCE(logged_in_at, created_at)) as last_login')
+            ->groupBy('user_id')
+            ->pluck('last_login', 'user_id')
+            ->all();
+
+        $tokenLoginsMap = ApiToken::whereIn('user_id', $dropshipperIds)
+            ->selectRaw('user_id, MAX(COALESCE(last_used_at, created_at)) as last_token')
+            ->groupBy('user_id')
+            ->pluck('last_token', 'user_id')
+            ->all();
+
+        $sevenDaysAgo = now()->subDays(7);
+        $thirtyDaysAgo = now()->subDays(30);
+
+        $totalDelivered = 0;
+        $totalClicks = 0;
+        $activeCount = 0;
+        $moderateCount = 0;
+        $inactiveCount = 0;
+
+        $enrichedClients = $allRelationships->map(function ($rel) use (
+            $clicksMap, $ordersStats, $loginsMap, $tokenLoginsMap,
+            $sevenDaysAgo, $thirtyDaysAgo,
+            &$totalDelivered, &$totalClicks, &$activeCount, &$moderateCount, &$inactiveCount
+        ) {
+            $dropshipperId = $rel->dropshipper_user_id;
+            $clicks = (int) ($clicksMap[$dropshipperId] ?? 0);
+            $orderStat = $ordersStats->get($rel->id);
+            $placed = (int) ($orderStat?->placed ?? 0);
+            $delivered = (int) ($orderStat?->delivered ?? 0);
+
+            $lastLoginStr = $loginsMap[$dropshipperId] ?? $tokenLoginsMap[$dropshipperId] ?? null;
+            if ($lastLoginStr && isset($loginsMap[$dropshipperId], $tokenLoginsMap[$dropshipperId])) {
+                $lastLoginStr = max($loginsMap[$dropshipperId], $tokenLoginsMap[$dropshipperId]);
+            }
+            $lastLoginAt = $lastLoginStr ? Carbon::parse($lastLoginStr) : null;
+
+            $isRecentlyActive = ($lastLoginAt && $lastLoginAt->gte($sevenDaysAgo));
+            $isModeratelyActive = ($lastLoginAt && $lastLoginAt->gte($thirtyDaysAgo) && $lastLoginAt->lt($sevenDaysAgo));
+
+            if ($isRecentlyActive) {
+                $activityStatus = 'active';
+                $activeCount++;
+            } elseif ($isModeratelyActive) {
+                $activityStatus = 'moderate';
+                $moderateCount++;
+            } else {
+                $activityStatus = 'inactive';
+                $inactiveCount++;
+            }
+
+            $totalDelivered += $delivered;
+            $totalClicks += $clicks;
+
+            return [
+                'id' => $rel->id,
+                'dropshipper_user_id' => $rel->dropshipper_user_id,
+                'accepted_at' => $rel->accepted_at ? $rel->accepted_at->toIso8601String() : null,
+                'dropshipper' => [
+                    'id' => $rel->dropshipper?->id,
+                    'name' => $rel->dropshipper?->name ?? 'Unknown',
+                    'business_name' => $rel->dropshipper?->business_name,
+                ],
+                'metrics' => [
+                    'product_clicks' => $clicks,
+                    'placed_orders' => $placed,
+                    'delivered_orders' => $delivered,
+                    'last_login_at' => $lastLoginAt ? $lastLoginAt->toIso8601String() : null,
+                    'activity_status' => $activityStatus,
+                ],
+            ];
+        });
+
+        $topPerformer = $enrichedClients->sortByDesc(fn ($c) => ($c['metrics']['delivered_orders'] * 1000) + $c['metrics']['product_clicks'])->first();
+        $topPerformerInsight = null;
+        if ($topPerformer && ($topPerformer['metrics']['delivered_orders'] > 0 || $topPerformer['metrics']['product_clicks'] > 0)) {
+            $topName = $topPerformer['dropshipper']['business_name'] ?: $topPerformer['dropshipper']['name'];
+            $topPerformerInsight = [
+                'client_id' => $topPerformer['id'],
+                'client_name' => $topName,
+                'clicks' => $topPerformer['metrics']['product_clicks'],
+                'delivered' => $topPerformer['metrics']['delivered_orders'],
+                'message' => "{$topName} has the highest engagement with {$topPerformer['metrics']['product_clicks']} product clicks and {$topPerformer['metrics']['delivered_orders']} delivered orders.",
+            ];
+        }
+
+        $highInterest = $enrichedClients->filter(fn ($c) => $c['metrics']['product_clicks'] >= 5 && $c['metrics']['delivered_orders'] <= 2)
+            ->sortByDesc(fn ($c) => $c['metrics']['product_clicks'])->first();
+        $highInterestInsight = null;
+        if ($highInterest) {
+            $hiName = $highInterest['dropshipper']['business_name'] ?: $highInterest['dropshipper']['name'];
+            $highInterestInsight = [
+                'client_id' => $highInterest['id'],
+                'client_name' => $hiName,
+                'clicks' => $highInterest['metrics']['product_clicks'],
+                'delivered' => $highInterest['metrics']['delivered_orders'],
+                'message' => "{$hiName} received {$highInterest['metrics']['product_clicks']} product clicks with low order conversion. Follow up personally to assist them.",
+            ];
+        }
+
+        $summary = [
+            'total_clients' => $allRelationships->count(),
+            'total_delivered_orders' => $totalDelivered,
+            'total_product_clicks' => $totalClicks,
+            'recently_active_clients' => $activeCount,
+            'distribution' => [
+                'active' => $activeCount,
+                'moderate' => $moderateCount,
+                'inactive' => $inactiveCount,
+            ],
+        ];
+
+        $insights = [
+            'top_performer' => $topPerformerInsight,
+            'high_interest_low_orders' => $highInterestInsight,
+            'inactive_clients' => $inactiveCount,
+        ];
+
+        $filtered = $enrichedClients;
+        if ($search !== '') {
+            $needle = mb_strtolower($search);
+            $filtered = $filtered->filter(function ($c) use ($needle) {
+                $name = mb_strtolower($c['dropshipper']['name'] ?? '');
+                $bName = mb_strtolower($c['dropshipper']['business_name'] ?? '');
+                return str_contains($name, $needle) || str_contains($bName, $needle);
+            });
+        }
+
+        if ($activity !== 'all') {
+            $filtered = $filtered->filter(fn ($c) => $c['metrics']['activity_status'] === $activity);
+        }
+
+        if ($minOrders !== null) {
+            $filtered = $filtered->filter(fn ($c) => $c['metrics']['delivered_orders'] >= $minOrders);
+        }
+
+        $filtered = match ($sortBy) {
+            'clicks' => $sortDirection === 'asc'
+                ? $filtered->sortBy(fn ($c) => $c['metrics']['product_clicks'])
+                : $filtered->sortByDesc(fn ($c) => $c['metrics']['product_clicks']),
+            'orders' => $sortDirection === 'asc'
+                ? $filtered->sortBy(fn ($c) => $c['metrics']['placed_orders'])
+                : $filtered->sortByDesc(fn ($c) => $c['metrics']['placed_orders']),
+            'delivered' => $sortDirection === 'asc'
+                ? $filtered->sortBy(fn ($c) => $c['metrics']['delivered_orders'])
+                : $filtered->sortByDesc(fn ($c) => $c['metrics']['delivered_orders']),
+            'last_login' => $sortDirection === 'asc'
+                ? $filtered->sortBy(fn ($c) => $c['metrics']['last_login_at'] ?? '1970-01-01')
+                : $filtered->sortByDesc(fn ($c) => $c['metrics']['last_login_at'] ?? '1970-01-01'),
+            default => $sortDirection === 'asc'
+                ? $filtered->sortBy(fn ($c) => $c['accepted_at'] ?? '')
+                : $filtered->sortByDesc(fn ($c) => $c['accepted_at'] ?? ''),
+        };
+
+        $totalFiltered = $filtered->count();
+        $currentPage = max(1, (int) $request->input('page', 1));
+        $pagedItems = $filtered->slice(($currentPage - 1) * $perPage, $perPage)->values();
+        $lastPage = (int) max(1, ceil($totalFiltered / $perPage));
+
+        return $this->success('Active clients fetched', [
+            'data' => $pagedItems,
+            'current_page' => $currentPage,
+            'last_page' => $lastPage,
+            'per_page' => $perPage,
+            'total' => $totalFiltered,
+            'from' => $totalFiltered > 0 ? (($currentPage - 1) * $perPage + 1) : null,
+            'to' => $totalFiltered > 0 ? min($totalFiltered, $currentPage * $perPage) : null,
+            'summary' => $summary,
+            'insights' => $insights,
+        ]);
     }
 
     public function createClient(Request $request): JsonResponse
