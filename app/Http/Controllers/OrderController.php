@@ -432,6 +432,12 @@ class OrderController extends Controller
                 'items' => ['nullable', 'array'],
             ]);
 
+            $actor = $request->user();
+            if (!$actor || $actor->banned !== 0
+                || ((int) $actor->id !== (int) $validated['user_id'] && !$actor->canManagePlatformAccounts())) {
+                return $this->failed('Not allowed to place an order for this user', null, 403);
+            }
+
             if (empty($validated['area']) && !empty($validated['thana'])) {
                 $validated['area'] = $validated['thana'];
             }

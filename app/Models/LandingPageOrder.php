@@ -9,6 +9,20 @@ class LandingPageOrder extends Model
 {
     use HasFactory;
 
+    protected $hidden = ['marketer_client_id'];
+
+    protected static function booted(): void
+    {
+        static::creating(function (LandingPageOrder $order) {
+            $order->marketer_client_id = MarketerClient::attributionFor($order->reseller_id);
+        });
+    }
+
+    public function marketerClient()
+    {
+        return $this->belongsTo(MarketerClient::class);
+    }
+
     protected $fillable = [
         'reseller_product_page_id',
         'reseller_id',

@@ -12,6 +12,17 @@ class Order extends Model
     public const CARRYBEE_NON_PAYABLE_STATUSES = [7, 8, 11];
     public const DROPSHIPPER_COMPLETED_STATUSES = [9, 10];
 
+    protected $hidden = ['marketer_client_id'];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Order $order) {
+            if (!array_key_exists('marketer_client_id', $order->getAttributes())) {
+                $order->marketer_client_id = MarketerClient::attributionFor($order->user_id);
+            }
+        });
+    }
+
     protected $fillable = [
         'user_id',
         'order_number',

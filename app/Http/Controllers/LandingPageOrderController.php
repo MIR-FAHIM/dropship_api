@@ -75,7 +75,7 @@ class LandingPageOrderController extends Controller
         return $number;
     }
 
-    private function hydrateFromProductPage(array $data): array
+    private function hydrateFromProductPage(array $data, bool $usePageOwner = false): array
     {
         $page = ResellerProductPage::find($data['reseller_product_page_id']);
 
@@ -83,7 +83,7 @@ class LandingPageOrderController extends Controller
             return $data;
         }
 
-        $data['reseller_id'] = $data['reseller_id'] ?? $page->reseller_id;
+        $data['reseller_id'] = $usePageOwner ? $page->reseller_id : ($data['reseller_id'] ?? $page->reseller_id);
         $data['product_id'] = $data['product_id'] ?? $page->product_id;
         $data['selling_price'] = $data['selling_price']
             ?? $page->discount_price
@@ -279,7 +279,7 @@ class LandingPageOrderController extends Controller
                 'tracking_code' => ['nullable', 'string', 'max:100', 'unique:landing_page_orders,tracking_code'],
             ]);
 
-            $validated = $this->hydrateFromProductPage($validated);
+            $validated = $this->hydrateFromProductPage($validated, usePageOwner: true);
             $validated['quantity'] = $validated['quantity'] ?? 1;
             $validated['status'] = $validated['status'] ?? 'pending';
             $validated['source'] = $validated['source'] ?? 'landing_page';
@@ -406,13 +406,19 @@ class LandingPageOrderController extends Controller
         }
     }
 
-    public function passOrderToResellerBrain($id)
+    public function passOrderToResellerBrain(Request $request, $id)
     {
         try {
             $landingOrder = LandingPageOrder::with(['product', 'order.items'])->find($id);
 
             if (!$landingOrder) {
                 return $this->failed('Landing page order not found', null, 404);
+            }
+
+            $actor = $request->user();
+            if (!$actor || $actor->banned !== 0
+                || ((int) $actor->id !== (int) $landingOrder->reseller_id && !$actor->canManagePlatformAccounts())) {
+                return $this->failed('Not allowed to convert this landing page order', null, 403);
             }
 
             if ($landingOrder->order_id && $landingOrder->order) {
@@ -442,6 +448,11 @@ class LandingPageOrderController extends Controller
             }
 
             $order = DB::transaction(function () use ($landingOrder, $product, $quantity, $sellingPrice, $unitPrice, $adminPrice, $deliveryCharge) {
+                $existingOrderId = LandingPageOrder::whereKey($landingOrder->id)->lockForUpdate()->firstOrFail()->order_id;
+                if ($existingOrderId && ($existingOrder = Order::with('items')->find($existingOrderId))) {
+                    return $existingOrder;
+                }
+
                 $subtotal = round($sellingPrice * $quantity, 2);
                 $resellerProfit = round(($sellingPrice - $adminPrice) * $quantity, 2);
                 $total = round($subtotal + $deliveryCharge, 2);
@@ -456,7 +467,7 @@ class LandingPageOrderController extends Controller
                     ? Upazila::where('id', $landingOrder->upozella_id)->value('name')
                     : null;
 
-                $order = Order::create([
+                $order = new Order([
                     'user_id' => $landingOrder->reseller_id,
                     'order_number' => $this->uniqueOrderNumber(),
                     'status' => 1,
@@ -476,6 +487,10 @@ class LandingPageOrderController extends Controller
                     'vendor_id' => $product->vendor_id,
                     'note' => 'Created from landing page order #' . $landingOrder->id . ' tracking ' . $landingOrder->tracking_code,
                 ]);
+                // Preserve the original attribution, including an unattributed lead.
+                $order->marketer_client_id = $landingOrder->marketerClient()
+                    ->where('dropshipper_user_id', $landingOrder->reseller_id)->value('id');
+                $order->save();
 
                 OrderItem::create([
                     'order_id' => $order->id,
@@ -512,12 +527,17 @@ class LandingPageOrderController extends Controller
                 return $order->load(['items', 'user', 'vendor']);
             });
 
-            $this->notifyLandingOrderPassed($landingOrder->fresh(), $order);
+            if ($order->wasRecentlyCreated) {
+                $this->notifyLandingOrderPassed($landingOrder->fresh(), $order);
+            }
+            $message = $order->wasRecentlyCreated
+                ? 'Landing page order passed to ResellerBrain successfully'
+                : 'Landing page order already passed to ResellerBrain';
 
-            return $this->success('Landing page order passed to ResellerBrain successfully', [
+            return $this->success($message, [
                 'landing_page_order' => $landingOrder->fresh()->load($this->relations()),
                 'order' => $order,
-            ], 201);
+            ], $order->wasRecentlyCreated ? 201 : 200);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

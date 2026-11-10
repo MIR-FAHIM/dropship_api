@@ -189,6 +189,9 @@ class AuthController extends Controller
             }
 
             $scopes = ['basic'];
+            if ($user->user_type === 'dropshipper') {
+                $scopes[] = 'marketer-client-consent';
+            }
             if ($user->role === 'admin') {
                 $scopes[] = 'admin';
             }

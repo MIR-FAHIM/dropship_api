@@ -185,7 +185,7 @@ class UserController extends Controller
                 'business_name' => ['nullable', 'string', 'max:255'],
                 'email' => ['nullable', 'email', 'max:255', 'unique:users,email'],
                 'password' => ['required', 'string', 'min:6'],
-                'role' => ['nullable', Rule::in(['admin', 'vendor', 'customer'])],
+                'role' => ['nullable', Rule::in(['vendor', 'customer'])],
 
                 'mobile' => ['nullable', 'string', 'max:50'],
                 'optional_phone' => ['nullable', 'string', 'max:50'],
@@ -499,6 +499,12 @@ class UserController extends Controller
                 return $this->failed('User not found', null, 404);
             }
 
+            $actor = $request->user();
+            $isAdmin = $actor?->canManagePlatformAccounts();
+            if (!$isAdmin && (!$actor || $actor->banned !== 0 || (int) $actor->id !== (int) $user->id)) {
+                return $this->failed('Not allowed to update this user', null, 403);
+            }
+
             $validated = $request->validate([
                 'name' => ['nullable', 'string', 'max:255'],
                 'business_name' => ['nullable', 'string', 'max:255'],
@@ -525,6 +531,13 @@ class UserController extends Controller
 
                 'is_banned' => ['nullable', 'boolean'],
             ]);
+
+            if (!$isAdmin && (
+                (array_key_exists('role', $validated) && $validated['role'] !== $user->role)
+                || (isset($validated['is_banned']) && (int) $validated['is_banned'] !== $user->banned)
+            )) {
+                return $this->failed('Not allowed to change role or activation status', null, 403);
+            }
 
             $user->fill([
                 'name' => array_key_exists('name', $validated) ? $validated['name'] : $user->name,

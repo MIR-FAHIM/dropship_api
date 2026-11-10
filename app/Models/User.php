@@ -124,6 +124,14 @@ class User extends Model
         return $this->hasMany(ApiToken::class);
     }
 
+    public function canManagePlatformAccounts(): bool
+    {
+        return $this->banned === 0 && (bool) array_intersect(
+            [strtolower((string) $this->user_type), strtolower((string) $this->role)],
+            ['admin', 'superadmin'],
+        );
+    }
+
     public function vendor()
     {
         return $this->hasOne(Vendor::class);

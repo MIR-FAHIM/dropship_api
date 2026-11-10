@@ -63,6 +63,7 @@ class OrderCheckoutErrorLoggingTest extends TestCase
         $response = $this->withHeader('Authorization', 'Bearer ' . $token)
             ->postJson('/api/orders/checkout', [
                 'user_id' => $user->id,
+                'delivery_charge' => 50,
             ]);
 
         $response->assertStatus(404);
@@ -85,6 +86,7 @@ class OrderCheckoutErrorLoggingTest extends TestCase
         $response = $this->withHeader('Authorization', 'Bearer ' . $token)
             ->postJson('/api/orders/checkout', [
                 'user_id' => $user->id,
+                'delivery_charge' => 50,
             ]);
 
         $response->assertStatus(409);
@@ -135,6 +137,7 @@ class OrderCheckoutErrorLoggingTest extends TestCase
                 'customer_name'    => 'Ali',
                 'customer_phone'   => '01700000000',
                 'shipping_address' => 'Dhaka',
+                'delivery_charge' => 50,
             ]);
 
         $response->assertStatus(422)

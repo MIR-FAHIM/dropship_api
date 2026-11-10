@@ -39,6 +39,13 @@ public function handle(Request $request, Closure $next, $scope = null)
         return response()->json(['message'=>'Insufficient permission'], 403);
     }
 
+    $isMarketer = $apiToken->user->user_type === 'marketer';
+    $isMarketerPanel = $request->routeIs('marketer.panel.*');
+    if (($isMarketerPanel && (!$isMarketer || $apiToken->user->banned !== 0))
+        || ($isMarketer && !$isMarketerPanel && !$request->routeIs('auth.logout'))) {
+        return response()->json(['message' => 'Insufficient permission'], 403);
+    }
+
     // Attach user and token manually
     $request->attributes->set('api_user', $apiToken->user);
     $request->attributes->set('api_token', $apiToken);

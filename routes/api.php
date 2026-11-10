@@ -55,11 +55,12 @@ use App\Http\Controllers\FeedPostController;
 use App\Http\Controllers\PasswordResetOtpController;
 use App\Http\Controllers\WhatsAppWebhookController;
 use App\Http\Controllers\PartnerApiController;
+use App\Http\Controllers\MarketerController;
 use App\Models\TaskType;
 
 // Authentication endpoints
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
-Route::post('/auth/login-as-vendor', [AuthController::class, 'loginAsVendor']);
+Route::post('/auth/login-as-vendor', [AuthController::class, 'loginAsVendor'])->middleware('admin:accounts');
 Route::post('/auth/login-as-dropshipper', [AuthController::class, 'loginAsDropshipper']);
 Route::post('/dropshipper-register', [UserController::class, 'dropshipperRegister'])->withoutMiddleware('token');
 
@@ -73,7 +74,30 @@ Route::post('/auth/reset-password', [PasswordResetOtpController::class, 'resetPa
 Route::post('/auth/forgot-password-mobile', [AuthController::class, 'forgotPassword'])->withoutMiddleware('token');
 Route::post('/auth/reset-password-mobile', [AuthController::class, 'resetPassword'])->withoutMiddleware('token');
 
-Route::post('/auth/logout', [AuthController::class, 'logout']);
+Route::post('/auth/logout', [AuthController::class, 'logout'])->name('auth.logout');
+
+Route::prefix('admin/marketers')->name('admin.marketers.')->middleware('admin:accounts')->group(function () {
+    Route::get('/', [MarketerController::class, 'index'])->name('index');
+    Route::post('/', [MarketerController::class, 'create'])->name('create');
+    Route::patch('/{id}/suspension', [MarketerController::class, 'setSuspended'])->whereNumber('id')->name('suspension');
+    Route::get('/{id}/clients', [MarketerController::class, 'adminClients'])->whereNumber('id')->name('clients.index');
+    Route::patch('/clients/{id}/end', [MarketerController::class, 'endClient'])->whereNumber('id')->name('clients.end');
+});
+
+Route::prefix('marketer')->name('marketer.panel.')->group(function () {
+    Route::get('/clients', [MarketerController::class, 'clients'])->name('clients');
+    Route::get('/performance', [MarketerController::class, 'performance'])->name('performance');
+    Route::get('/invitations', [MarketerController::class, 'invitations'])->name('invitations.index');
+    Route::post('/invitations', [MarketerController::class, 'invite'])->middleware('throttle:10,1')->name('invitations.create');
+    Route::delete('/invitations/{id}', [MarketerController::class, 'revokeInvitation'])->whereNumber('id')->name('invitations.revoke');
+});
+
+Route::prefix('marketer-client')->group(function () {
+    Route::get('/relationship', [MarketerController::class, 'relationship']);
+    Route::post('/invitation/preview', [MarketerController::class, 'preview'])->middleware('throttle:15,1');
+    Route::post('/invitation/accept', [MarketerController::class, 'accept'])->middleware('throttle:15,1');
+    Route::patch('/{id}/end', [MarketerController::class, 'endClient'])->whereNumber('id');
+});
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
 Route::get('/auth/check-admin', [AuthController::class, 'checkAdmin'])->middleware('admin');
@@ -139,9 +163,9 @@ Route::prefix('users')->group(function () {
     Route::get('/details/{id}', [UserController::class, 'getUserDetails']);
     Route::get('/getBalance/{id}', [UserController::class, 'getUserBalance']);
     Route::put('/update/{id}', [UserController::class, 'updateUser']);
-    Route::patch('/ban/{id}', [UserController::class, 'banToggle']);
-    Route::patch('/unban/{id}', [UserController::class, 'unbanUser']);
-    Route::delete('/delete/{id}', [UserController::class, 'deleteUser']);
+    Route::patch('/ban/{id}', [UserController::class, 'banToggle'])->middleware('admin:accounts');
+    Route::patch('/unban/{id}', [UserController::class, 'unbanUser'])->middleware('admin:accounts');
+    Route::delete('/delete/{id}', [UserController::class, 'deleteUser'])->middleware('admin:accounts');
 });
 
 Route::prefix('categories')->group(function () {

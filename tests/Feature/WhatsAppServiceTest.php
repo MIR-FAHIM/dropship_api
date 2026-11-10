@@ -6,6 +6,7 @@ use App\Events\WhatsAppMessageReceived;
 use App\Jobs\SendWhatsAppActivationJob;
 use App\Models\User;
 use App\Models\WhatsAppMessageLog;
+use App\Service\ApiTokenService;
 use App\Service\MuthobartaSmsService;
 use App\Service\WhatsAppCloudService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -62,7 +63,9 @@ class WhatsAppServiceTest extends TestCase
 
         $dropshipper = $this->createDropshipper();
 
-        $response = $this->patchJson("/api/users/ban/{$dropshipper->id}");
+        $admin = User::factory()->create(['user_type' => 'admin', 'banned' => 0]);
+        $token = ApiTokenService::create($admin, ['basic'], 1, 'test')['plain'];
+        $response = $this->withToken($token)->patchJson("/api/users/ban/{$dropshipper->id}");
 
         $response->assertStatus(200);
         $this->assertDatabaseHas('users', [

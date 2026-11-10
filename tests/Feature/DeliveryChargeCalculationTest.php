@@ -93,7 +93,7 @@ class DeliveryChargeCalculationTest extends TestCase
 
     public function test_checkout_requires_delivery_charge_and_sets_dynamic_advance_amount(): void
     {
-        OrderStatus::create(['name' => 'Pending', 'type' => 'order', 'is_active' => true]);
+        OrderStatus::create(['id' => 1, 'name' => 'Pending', 'type' => 'order', 'is_active' => true]);
 
         [$dhakaDist, $ctgDist] = $this->setupLocations();
 
