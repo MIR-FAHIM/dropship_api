@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Product;
 use App\Models\ProductClicks;
 use App\Models\ResellerProductPage;
+use App\Service\ApiTokenService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -435,14 +436,15 @@ class ResellerProductPageController extends Controller
                 return $this->failed('Reseller product page not found', null, 404);
             }
 
-            // Record guest / user product click safely
+            // The guest flag identifies the landing-page source, not the viewer's login state.
             try {
                 if ($page->product_id) {
+                    $viewer = ApiTokenService::resolveUser($request->bearerToken());
                     ProductClicks::create([
                         'product_id' => $page->product_id,
                         'page' => 'reseller_product_page',
-                        'clicked_by' => $request->input('user_id'),
-                        'is_guest' => $request->filled('user_id') ? false : true,
+                        'clicked_by' => $viewer?->id,
+                        'is_guest' => true,
                         'ip_address' => $request->ip(),
                     ]);
                 }

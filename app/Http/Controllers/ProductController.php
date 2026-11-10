@@ -9,6 +9,7 @@ use App\Models\ProductImage;
 use App\Models\ProductCreateErrorLog;
 use App\Models\PriceUpdateLog;
 use App\Models\ResellerProductPage;
+use App\Service\ApiTokenService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
@@ -710,12 +711,12 @@ class ProductController extends Controller
                 return $this->failed('Product not found', null, 404);
             }
 
+            $viewer = ApiTokenService::resolveUser($request->bearerToken());
             ProductClicks::create([
                 'product_id' => $product->id,
                 'page' => $request->page ?? 'product_details',
-                'clicked_by' => $request->user_id,
-                'is_guest' => $request->user_id ? 0 : 1,
-               // 'ip_address' => $request->ip(),
+                'clicked_by' => $viewer?->id,
+                'is_guest' => false,
             ]);
 
             $resellerId = $request->input('reseller_id') ?? $request->input('user_id');

@@ -8,6 +8,17 @@ use App\Models\ApiToken;
 
 class ApiTokenService
 {
+    public static function resolveUser(?string $plain): ?User
+    {
+        if (!$plain) {
+            return null;
+        }
+
+        $token = ApiToken::with('user')->where('token_hash', hash('sha256', $plain))->first();
+
+        return $token?->isValid() ? $token->user : null;
+    }
+
     /**
      * Create a new API token for a user.
      * Returns array: ['plain' => string, 'token' => ApiToken]

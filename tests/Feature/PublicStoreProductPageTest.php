@@ -14,6 +14,7 @@ use App\Models\ResellerProductPage;
 use App\Models\ResellerStoreProfile;
 use App\Models\Review;
 use App\Models\User;
+use App\Service\ApiTokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -104,7 +105,49 @@ class PublicStoreProductPageTest extends TestCase
         $this->assertDatabaseHas('product_clicks', [
             'product_id' => $product->id,
             'page'       => 'reseller_product_page',
+            'clicked_by' => null,
             'is_guest'   => 1,
+        ]);
+    }
+
+    public function test_product_details_tracks_the_authenticated_viewer_not_the_query_user(): void
+    {
+        [$reseller, $product] = $this->createSeedData();
+        $viewer = User::factory()->create(['banned' => 0]);
+        $token = ApiTokenService::create($viewer, ['basic'])['plain'];
+
+        $this->withToken($token)->getJson("/api/products/details/{$product->id}?reseller_id={$reseller->id}&user_id={$reseller->id}")
+            ->assertOk();
+
+        $this->assertDatabaseHas('product_clicks', [
+            'product_id' => $product->id, 'page' => 'product_details', 'clicked_by' => $viewer->id, 'is_guest' => 0,
+        ]);
+    }
+
+    public function test_public_product_details_does_not_trust_a_revoked_token_or_query_user(): void
+    {
+        [$reseller, $product] = $this->createSeedData();
+        $token = ApiTokenService::create($reseller, ['basic']);
+        $token['token']->update(['is_revoked' => true]);
+
+        $this->withToken($token['plain'])->getJson("/api/products/details/{$product->id}?user_id={$reseller->id}")
+            ->assertOk();
+
+        $this->assertDatabaseHas('product_clicks', [
+            'product_id' => $product->id, 'page' => 'product_details', 'clicked_by' => null, 'is_guest' => 0,
+        ]);
+    }
+
+    public function test_authenticated_landing_page_click_keeps_the_landing_page_flag(): void
+    {
+        [, $product, , $page] = $this->createSeedData();
+        $viewer = User::factory()->create(['banned' => 0]);
+        $token = ApiTokenService::create($viewer, ['basic'])['plain'];
+
+        $this->withToken($token)->getJson("/api/reseller-product-pages/slug/{$page->slug}")->assertOk();
+
+        $this->assertDatabaseHas('product_clicks', [
+            'product_id' => $product->id, 'page' => 'reseller_product_page', 'clicked_by' => $viewer->id, 'is_guest' => 1,
         ]);
     }
 
