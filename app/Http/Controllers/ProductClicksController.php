@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ProductClicks;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 
@@ -186,6 +187,48 @@ class ProductClicksController extends Controller
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    public function dropshipperLeaderboard(Request $request)
+    {
+        $validated = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'start_date' => ['nullable', 'date_format:Y-m-d'],
+            'end_date' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:start_date'],
+        ]);
+
+        $clickTotals = ProductClicks::query()
+            ->select('clicked_by')
+            ->selectRaw('COUNT(*) AS total_clicks, COUNT(DISTINCT product_id) AS unique_products_clicked')
+            ->whereNotNull('clicked_by')
+            ->groupBy('clicked_by');
+
+        if (isset($validated['start_date'])) {
+            $clickTotals->where('created_at', '>=', Carbon::parse($validated['start_date'])->startOfDay());
+        }
+        if (isset($validated['end_date'])) {
+            $clickTotals->where('created_at', '<', Carbon::parse($validated['end_date'])->addDay()->startOfDay());
+        }
+
+        $leaderboard = User::query()
+            ->joinSub($clickTotals, 'click_totals', 'click_totals.clicked_by', '=', 'users.id')
+            ->where('users.user_type', 'dropshipper')
+            ->select('users.id', 'users.name', 'click_totals.total_clicks', 'click_totals.unique_products_clicked')
+            ->withCasts(['total_clicks' => 'integer', 'unique_products_clicked' => 'integer'])
+            ->orderByDesc('click_totals.total_clicks')
+            ->orderBy('users.id')
+            ->paginate($validated['per_page'] ?? 20)
+            ->withQueryString();
+
+        $rank = ($leaderboard->currentPage() - 1) * $leaderboard->perPage() + 1;
+        $leaderboard->through(function (User $dropshipper) use (&$rank) {
+            $dropshipper->rank = $rank++;
+
+            return $dropshipper;
+        });
+
+        return $this->success('Dropshipper clicks leaderboard fetched successfully', $leaderboard);
     }
 
     public function homeLeaderboard()

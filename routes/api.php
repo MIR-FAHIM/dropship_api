@@ -379,6 +379,7 @@ Route::prefix('product-clicks')->group(function () {
     Route::get('/report/daywise', [ProductClicksController::class, 'daywiseReport']);
     Route::get('/report/last-7-days', [ProductClicksController::class, 'last7DaysReport']);
     Route::get('/leaderboard', [ProductClicksController::class, 'leaderboard']);
+    Route::get('/leaderboard/dropshippers', [ProductClicksController::class, 'dropshipperLeaderboard'])->middleware('admin:orders');
     Route::get('/leaderboard/home', [ProductClicksController::class, 'homeLeaderboard'])->withoutMiddleware('token');
 });
 
