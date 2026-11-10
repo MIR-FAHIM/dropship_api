@@ -117,10 +117,12 @@ class MarketerController extends Controller
         $data = $request->validate([
             'code' => ['required', 'string', 'alpha_num:ascii', 'size:48'],
             'consent' => ['required', 'accepted'],
-            'consent_version' => ['required', 'in:'.MarketerClient::CONSENT_VERSION],
+            'consent_version' => ['nullable', 'in:'.MarketerClient::CONSENT_VERSION],
         ]);
 
-        $client = DB::transaction(function () use ($request, $data) {
+        $consentVersion = $data['consent_version'] ?? MarketerClient::CONSENT_VERSION;
+
+        $client = DB::transaction(function () use ($request, $data, $consentVersion) {
             $invite = $this->pendingInvitation($data['code'], lock: true);
             $marketer = User::where('user_type', 'marketer')->where('banned', 0)->lockForUpdate()->find($invite->marketer_user_id);
             $dropshipper = User::where('user_type', 'dropshipper')->where('banned', 0)->lockForUpdate()->find($request->user()->id);
@@ -131,7 +133,7 @@ class MarketerController extends Controller
                 'marketer_user_id' => $marketer->id,
                 'dropshipper_user_id' => $dropshipper->id,
                 'active_dropshipper_user_id' => $dropshipper->id,
-                'consent_version' => $data['consent_version'],
+                'consent_version' => $consentVersion,
                 'accepted_at' => now(),
             ]);
             $invite->update(['marketer_client_id' => $client->id]);
@@ -175,6 +177,74 @@ class MarketerController extends Controller
         return $this->success('Active clients fetched', MarketerClient::where('marketer_user_id', $request->user()->id)
             ->whereNotNull('active_dropshipper_user_id')->select(['id', 'dropshipper_user_id', 'accepted_at'])
             ->with('dropshipper:id,name')->latest('id')->paginate($perPage));
+    }
+
+    public function createClient(Request $request): JsonResponse
+    {
+        $request->merge([
+            'name' => is_string($request->input('name')) ? trim($request->input('name')) : $request->input('name'),
+            'email' => $this->normalizeEmail($request->input('email')),
+            'phone' => is_string($request->input('phone')) ? trim($request->input('phone')) : $request->input('phone'),
+        ]);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:191'],
+            'email' => ['required', 'email', 'max:191', 'unique:users,email'],
+            'phone' => ['required', 'string', 'max:20'],
+            'password' => ['nullable', 'string', 'min:4'],
+            'business_name' => ['nullable', 'string', 'max:255'],
+            'address' => ['nullable', 'string', 'max:300'],
+        ]);
+
+        $marketer = $request->user();
+        abort_unless($marketer?->user_type === 'marketer' && $marketer->banned === 0, 403, 'Active marketer account required');
+
+        if (!empty($data['password'])) {
+            $rawPassword = $data['password'];
+        } else {
+            $digits = preg_replace('/\D+/', '', $data['phone'] ?? '');
+            $rawPassword = strlen($digits) >= 6 ? $digits : '123456';
+        }
+
+        $result = DB::transaction(function () use ($data, $rawPassword, $marketer) {
+            $dropshipper = User::create([
+                'name' => $data['name'],
+                'business_name' => $data['business_name'] ?? null,
+                'email' => $data['email'],
+                'password' => Hash::make($rawPassword),
+                'phone' => $data['phone'],
+                'address' => $data['address'] ?? null,
+                'user_type' => 'dropshipper',
+                'banned' => 0,
+                'whatsapp_consent' => true,
+                'whatsapp_consent_source' => 'marketer_created',
+                'whatsapp_consented_at' => now(),
+            ]);
+
+            $client = MarketerClient::create([
+                'marketer_user_id' => $marketer->id,
+                'dropshipper_user_id' => $dropshipper->id,
+                'active_dropshipper_user_id' => $dropshipper->id,
+                'consent_version' => MarketerClient::CONSENT_VERSION,
+                'accepted_at' => now(),
+            ]);
+
+            return [
+                'client' => $client,
+                'dropshipper' => $dropshipper,
+            ];
+        });
+
+        return $this->success('Dropshipper created and linked successfully', [
+            'id' => $result['client']->id,
+            'dropshipper' => [
+                'id' => $result['dropshipper']->id,
+                'name' => $result['dropshipper']->name,
+                'email' => $result['dropshipper']->email,
+                'phone' => $result['dropshipper']->phone,
+            ],
+            'accepted_at' => $result['client']->accepted_at,
+        ], 201);
     }
 
     public function relationship(Request $request): JsonResponse

@@ -86,6 +86,8 @@ Route::prefix('admin/marketers')->name('admin.marketers.')->middleware('admin:ac
 
 Route::prefix('marketer')->name('marketer.panel.')->group(function () {
     Route::get('/clients', [MarketerController::class, 'clients'])->name('clients');
+    Route::post('/clients/create', [MarketerController::class, 'createClient'])->name('clients.create');
+    Route::post('/clients', [MarketerController::class, 'createClient'])->name('clients.store');
     Route::get('/performance', [MarketerController::class, 'performance'])->name('performance');
     Route::get('/invitations', [MarketerController::class, 'invitations'])->name('invitations.index');
     Route::post('/invitations', [MarketerController::class, 'invite'])->middleware('throttle:10,1')->name('invitations.create');

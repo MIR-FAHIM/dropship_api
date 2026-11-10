@@ -166,6 +166,83 @@ class MarketerOnboardingTest extends TestCase
         ]);
     }
 
+    public function test_marketer_can_directly_create_dropshipper_account_and_link_as_active_client(): void
+    {
+        $marketer = $this->user('marketer');
+        $marketerToken = $this->token($marketer);
+        $dropshipper = $this->user('dropshipper');
+
+        // Non-marketer cannot create dropshipper
+        $this->withToken($this->token($dropshipper))->postJson('/api/marketer/clients/create', [
+            'name' => 'New Dropshipper',
+            'email' => 'newdrop@example.com',
+            'phone' => '01812345678',
+        ])->assertForbidden();
+
+        // Marketer creates dropshipper with custom password
+        $response = $this->withToken($marketerToken)->postJson('/api/marketer/clients/create', [
+            'name' => 'New Dropshipper',
+            'email' => 'NEWDROP@example.com',
+            'phone' => '01812345678',
+            'password' => 'secret123',
+            'business_name' => 'Drop Store',
+        ])->assertCreated();
+
+        $dropshipperId = $response->json('data.dropshipper.id');
+        $this->assertNotNull($dropshipperId);
+        $this->assertEquals('newdrop@example.com', $response->json('data.dropshipper.email'));
+
+        $createdUser = User::findOrFail($dropshipperId);
+        $this->assertEquals('dropshipper', $createdUser->user_type);
+        $this->assertEquals(0, $createdUser->banned);
+        $this->assertEquals('01812345678', $createdUser->phone);
+        $this->assertEquals('Drop Store', $createdUser->business_name);
+
+        // Verify active MarketerClient relationship was created
+        $this->assertDatabaseHas('marketer_clients', [
+            'marketer_user_id' => $marketer->id,
+            'dropshipper_user_id' => $dropshipperId,
+            'active_dropshipper_user_id' => $dropshipperId,
+        ]);
+
+        // Dropshipper appears in marketer's clients list
+        $this->withToken($marketerToken)->getJson('/api/marketer/clients')
+            ->assertOk()
+            ->assertJsonPath('data.data.0.dropshipper.name', 'New Dropshipper');
+
+        // Created dropshipper can log in immediately with their password
+        $this->postJson('/api/auth/login', [
+            'email' => 'newdrop@example.com',
+            'password' => 'secret123',
+        ])->assertOk()->assertJsonPath('data.user.id', $dropshipperId);
+
+        // Duplicate email fails validation
+        $this->withToken($marketerToken)->postJson('/api/marketer/clients/create', [
+            'name' => 'Duplicate Dropshipper',
+            'email' => 'newdrop@example.com',
+            'phone' => '01899999999',
+        ])->assertUnprocessable();
+
+        // Alias endpoint /api/marketer/clients works as well (auto-generated password fallback)
+        $aliasResponse = $this->withToken($marketerToken)->postJson('/api/marketer/clients', [
+            'name' => 'Second Dropshipper',
+            'email' => 'second@example.com',
+            'phone' => '01987654321',
+        ])->assertCreated();
+
+        $secondId = $aliasResponse->json('data.dropshipper.id');
+        $this->assertDatabaseHas('marketer_clients', [
+            'marketer_user_id' => $marketer->id,
+            'dropshipper_user_id' => $secondId,
+            'active_dropshipper_user_id' => $secondId,
+        ]);
+        // Auto-generated password from phone digits works for login
+        $this->postJson('/api/auth/login', [
+            'email' => 'second@example.com',
+            'password' => '01987654321',
+        ])->assertOk()->assertJsonPath('data.user.id', $secondId);
+    }
+
     private function user(string $type): User
     {
         return User::factory()->create(['user_type' => $type, 'banned' => 0]);
