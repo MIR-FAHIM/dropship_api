@@ -1462,6 +1462,8 @@ class OrderController extends Controller
                 'note' => ['nullable', 'string'],
                 // Admin-only: reason for a change the journey rules would otherwise block.
                 'override_reason' => ['nullable', 'string', 'max:500'],
+                // Admin ticked "yes, everything is done" on the completion checklist.
+                'completion_confirmed' => ['nullable', 'boolean'],
             ]);
 
             // Only admins and this order's vendor may change its status.
@@ -1478,7 +1480,30 @@ class OrderController extends Controller
 
             $transitions = app(OrderStatusTransitionService::class);
             $overrideReason = trim((string) ($validated['override_reason'] ?? ''));
-            $check = $transitions->checkManual($order, $statusId, $isAdmin, $overrideReason);
+
+            // Completed = everything about the order is done. An admin must confirm the
+            // completion checklist; unfinished items block it unless a reason is given.
+            $completing = $statusId === 9 && $previousStatusId !== 9 && !$transitions->isFinal($previousStatusId);
+            if ($completing) {
+                if (!$isAdmin) {
+                    return $this->failed('Only an admin can mark an order Completed.', ['code' => OrderStatusTransitionService::CODE_NOT_ALLOWED], 422);
+                }
+
+                $completion = app(\App\Service\OrderCompletionCheckService::class)->check($order);
+                if (!$request->boolean('completion_confirmed')) {
+                    return $this->failed('Confirm the completion checklist before completing this order.', ['code' => 'completion_check_required'] + $completion, 422);
+                }
+                if (!$completion['all_done'] && $overrideReason === '') {
+                    return $this->failed('Not everything is done for this order: ' . implode('; ', $completion['pending']) . '.', ['code' => 'completion_blocked'] + $completion, 422);
+                }
+
+                $check = ['code' => OrderStatusTransitionService::CODE_OK, 'message' => 'Completion checklist confirmed'];
+                $validated['note'] = trim('Completion checklist confirmed by admin'
+                    . ($completion['all_done'] ? '' : ' with pending items (' . implode('; ', $completion['pending']) . '). Override: ' . $overrideReason)
+                    . (!empty($validated['note']) ? ' | ' . $validated['note'] : ''));
+            } else {
+                $check = $transitions->checkManual($order, $statusId, $isAdmin, $overrideReason);
+            }
 
             if ($check['code'] === OrderStatusTransitionService::CODE_UNCHANGED) {
                 return $this->success('Order status unchanged', $order);
@@ -1867,6 +1892,24 @@ class OrderController extends Controller
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * GET /orders/{id}/completion-check
+     * Checklist an admin confirms before marking an order Completed.
+     */
+    public function completionCheck($id)
+    {
+        $order = Order::find($id);
+        if (!$order) {
+            return $this->failed('Order not found', null, 404);
+        }
+
+        return $this->success('Completion checklist', [
+            'order_id' => $order->id,
+            'order_number' => $order->order_number,
+            'status' => (int) $order->status,
+        ] + app(\App\Service\OrderCompletionCheckService::class)->check($order));
     }
 
     /**

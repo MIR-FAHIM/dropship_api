@@ -263,6 +263,7 @@ Route::prefix('orders')->group(function () {
     Route::get('/vendor/{vendorId}', [OrderController::class, 'vendorOrderList']);
     Route::get('/details/{id}', [OrderController::class, 'getOrderDetails']);
     Route::get('/{id}/courier-events', [OrderController::class, 'courierEvents']);
+    Route::get('/{id}/completion-check', [OrderController::class, 'completionCheck'])->middleware('admin:orders');
     Route::post('/{id}/courier-review/approve', [OrderController::class, 'approveCourierReview'])->middleware('admin:orders');
     Route::get('/status-summary', [OrderController::class, 'orderStatusSummary']);
     Route::post('update/status/{id}', [OrderController::class, 'updateOrderStatus']);

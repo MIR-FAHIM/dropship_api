@@ -334,12 +334,88 @@ class CarrybeeStatusJourneyTest extends TestCase
         $this->assertSame(3, (int) $order->fresh()->status);
     }
 
-    public function test_completed_is_not_manual_on_consignment_orders(): void
+    public function test_completing_needs_the_checklist_and_everything_done(): void
     {
         $order = $this->makeOrder(6);
+        $url = "/api/orders/update/status/{$order->id}";
 
-        $this->postJson("/api/orders/update/status/{$order->id}", ['status_id' => 9], $this->headers($this->admin))
-            ->assertStatus(422)->assertJsonPath('errors.code', 'override_required');
+        // The checklist itself: delivered is done, the rest is pending.
+        $this->getJson("/api/orders/{$order->id}/completion-check", $this->headers($this->admin))
+            ->assertOk()
+            ->assertJsonPath('data.all_done', false)
+            ->assertJsonPath('data.checks.0.key', 'delivered')
+            ->assertJsonPath('data.checks.0.done', true)
+            ->assertJsonPath('data.checks.1.key', 'carrybee_paid')
+            ->assertJsonPath('data.checks.1.done', false);
+        $this->getJson("/api/orders/{$order->id}/completion-check", $this->headers($this->vendorUser))->assertForbidden();
+
+        // Vendors can't complete.
+        $this->postJson($url, ['status_id' => 9, 'completion_confirmed' => true], $this->headers($this->vendorUser))
+            ->assertStatus(422)->assertJsonPath('errors.code', 'not_allowed');
+
+        // Admin without confirming the checklist is sent to it.
+        $this->postJson($url, ['status_id' => 9], $this->headers($this->admin))
+            ->assertStatus(422)->assertJsonPath('errors.code', 'completion_check_required');
+
+        // Confirmed, but things are still pending: blocked, with the list.
+        $this->postJson($url, ['status_id' => 9, 'completion_confirmed' => true], $this->headers($this->admin))
+            ->assertStatus(422)
+            ->assertJsonPath('errors.code', 'completion_blocked')
+            ->assertJsonPath('errors.pending.0', 'CarryBee paid the COD');
+        $this->assertSame(6, (int) $order->fresh()->status);
+
+        // An override reason lets the admin complete anyway, and is recorded.
+        $this->postJson($url, ['status_id' => 9, 'completion_confirmed' => true, 'override_reason' => 'Settled in cash offline'], $this->headers($this->admin))
+            ->assertOk();
+        $history = OrderStatusHistory::where('order_id', $order->id)->latest('id')->first();
+        $this->assertSame(9, (int) $order->fresh()->status);
+        $this->assertStringContainsString('with pending items', $history->note);
+        $this->assertStringContainsString('Settled in cash offline', $history->note);
+    }
+
+    public function test_completing_when_everything_is_done(): void
+    {
+        $order = $this->makeOrder(5);
+        $this->fire($order, 'order.delivered', ['collected_amount' => '870']);
+        $this->fire($order, 'order.paid', ['invoice_id' => 'IXDONE1']);
+        OrderSettlement::where('order_id', $order->id)->update(['status' => OrderSettlement::STATUS_SETTLED]);
+        $order->refresh();
+        $this->assertSame(10, (int) $order->status);
+
+        $this->getJson("/api/orders/{$order->id}/completion-check", $this->headers($this->admin))
+            ->assertOk()->assertJsonPath('data.all_done', true);
+
+        $this->postJson("/api/orders/update/status/{$order->id}", ['status_id' => 9, 'completion_confirmed' => true], $this->headers($this->admin))
+            ->assertOk();
+
+        $history = OrderStatusHistory::where('order_id', $order->id)->latest('id')->first();
+        $this->assertSame(9, (int) $order->fresh()->status);
+        $this->assertSame('Completion checklist confirmed by admin', $history->note);
+        $this->assertSame($this->admin->id, (int) $history->changed_by);
+    }
+
+    public function test_own_account_vendor_needs_an_approved_invoice_to_complete(): void
+    {
+        $this->vendor->update(['has_own_delivery_account' => true]);
+        $order = $this->makeOrder(5);
+        $this->fire($order, 'order.delivered', ['collected_amount' => '870']);
+        $this->fire($order, 'order.paid', ['invoice_id' => 'IXOWN']);
+        OrderSettlement::where('order_id', $order->id)->update(['status' => OrderSettlement::STATUS_SETTLED]);
+
+        $check = fn () => collect($this->getJson("/api/orders/{$order->id}/completion-check", $this->headers($this->admin))->json('data.checks'))
+            ->firstWhere('key', 'vendor_invoice');
+
+        $this->assertTrue($check()['required']);
+        $this->assertFalse($check()['done']);
+
+        $invoice = \App\Models\SettlementInvoice::create([
+            'invoice_number' => 'INV-T-1', 'vendor_id' => $this->vendor->id, 'orders_count' => 1,
+            'order_ids' => [$order->id], 'status' => \App\Models\SettlementInvoice::STATUS_PAID, 'total_amount_owed' => 100,
+        ]);
+        $this->assertFalse($check()['done'], 'paid but not approved yet');
+
+        $invoice->update(['status' => \App\Models\SettlementInvoice::STATUS_APPROVED]);
+        $this->assertTrue($check()['done']);
     }
 
     public function test_non_consignment_order_moves_forward_manually(): void
