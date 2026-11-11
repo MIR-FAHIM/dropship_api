@@ -1281,6 +1281,12 @@ class OrderController extends Controller
                 ->latest()
                 ->paginate($perPage);
 
+            // Admin note only for admins or the vendor this list belongs to; this
+            // route takes any vendorId, so other users must not get it.
+            if ($this->isOrdersAdmin($request) || $this->isVendor($request, (int) $vendorId)) {
+                $orders->getCollection()->each->makeVisible(Order::ADMIN_NOTE_FIELDS);
+            }
+
             return $this->success('Vendor orders fetched successfully', $orders);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
@@ -1860,20 +1866,34 @@ class OrderController extends Controller
         return (bool) array_intersect($roles, ['admin', 'superadmin']);
     }
 
-    /** True when the requester is the vendor (shop) this order belongs to. */
-    private function isOrderVendor(Request $request, Order $order): bool
+    /** The vendor (shop) id owned by the requesting user, or null. */
+    private function requesterVendorId(Request $request): ?int
     {
         $user = $request->attributes->get('api_user') ?? $request->user();
         if (!$user || (int) ($user->banned ?? 0) === 1) {
-            return false;
+            return null;
         }
 
         $vendorId = \App\Models\Vendor::where('user_id', $user->id)->value('id');
+
+        return $vendorId ? (int) $vendorId : null;
+    }
+
+    /** True when the requester owns the given vendor (shop) id. */
+    private function isVendor(Request $request, int $vendorId): bool
+    {
+        return $vendorId > 0 && $this->requesterVendorId($request) === $vendorId;
+    }
+
+    /** True when the requester is the vendor (shop) this order belongs to. */
+    private function isOrderVendor(Request $request, Order $order): bool
+    {
+        $vendorId = $this->requesterVendorId($request);
         if (!$vendorId) {
             return false;
         }
 
-        return (int) $order->vendor_id === (int) $vendorId
+        return (int) $order->vendor_id === $vendorId
             || $order->items()->where('shop_id', $vendorId)->exists();
     }
 }
