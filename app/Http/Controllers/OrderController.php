@@ -1258,6 +1258,10 @@ class OrderController extends Controller
                         'shop',
                         'product:id,vendor_id,thumbnail_img',
                         'product.primaryImage:id,file_name,external_link',
+                        // The variant the customer picked (e.g. Color: Pink), via items.attribute_id.
+                        'productAttribute:id,product_id,attribute_id,attribute_value_id',
+                        'productAttribute.attribute:id,name',
+                        'productAttribute.value:id,value,color_code',
                     ]);
                 },
                 'statusHistory.status',
