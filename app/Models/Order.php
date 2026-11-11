@@ -161,6 +161,22 @@ class Order extends Model
     }
 
     /**
+     * The order's advance payment wallet record (reseller_transactions.type = 'order_advance').
+     *
+     * An order can hold up to two such rows (the unique index is order_id + type + trx_type):
+     * an MFS submission (credit) and a wallet payment (debit). When a wallet payment
+     * supersedes a pending MFS one, the MFS row is marked rejected and the debit row is
+     * newer, so the latest row by id is always the current one.
+     */
+    public function advanceTransaction()
+    {
+        return $this->hasOne(ResellerTransaction::class, 'order_id')
+            ->ofMany(['id' => 'max'], function ($query) {
+                $query->where('type', 'order_advance');
+            });
+    }
+
+    /**
      * Determines whether an actual delivery consignment has been created or linked to this order.
      */
     public function hasConsignment(): bool
