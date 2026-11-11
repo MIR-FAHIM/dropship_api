@@ -1425,7 +1425,8 @@ class OrderController extends Controller
                 $order->advance_decision_block_reason = $this->orderAccountingService->advanceDecisionBlockReason($order);
             }
 
-            if ($this->isOrdersAdmin($request)) {
+            // Admin note: admins and the order's own vendor see it; resellers never do.
+            if ($this->isOrdersAdmin($request) || $this->isOrderVendor($request, $order)) {
                 $order->makeVisible(Order::ADMIN_NOTE_FIELDS);
             }
 
@@ -1857,5 +1858,22 @@ class OrderController extends Controller
         ]);
 
         return (bool) array_intersect($roles, ['admin', 'superadmin']);
+    }
+
+    /** True when the requester is the vendor (shop) this order belongs to. */
+    private function isOrderVendor(Request $request, Order $order): bool
+    {
+        $user = $request->attributes->get('api_user') ?? $request->user();
+        if (!$user || (int) ($user->banned ?? 0) === 1) {
+            return false;
+        }
+
+        $vendorId = \App\Models\Vendor::where('user_id', $user->id)->value('id');
+        if (!$vendorId) {
+            return false;
+        }
+
+        return (int) $order->vendor_id === (int) $vendorId
+            || $order->items()->where('shop_id', $vendorId)->exists();
     }
 }
