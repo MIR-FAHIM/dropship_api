@@ -384,6 +384,37 @@ class VendorController extends Controller
     }
 
     /**
+     * PATCH /vendors/{id}/carrybee-store
+     * Admin sets the vendor's default CarryBee store. It is auto-selected in
+     * the "Draft to CarryBee Order" modal. Send null to clear it.
+     */
+    public function setDefaultCarrybeeStore(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate([
+                'carryb_store_id' => ['nullable', 'integer', 'min:1'],
+            ]);
+
+            $vendor = Vendor::find($id);
+            if (!$vendor) {
+                return $this->failed('Vendor not found', null, 404);
+            }
+
+            $vendor->carryb_store_id = $validated['carryb_store_id'] ?? null;
+            $vendor->save();
+
+            return $this->success('Default CarryBee store saved', [
+                'id' => $vendor->id,
+                'carryb_store_id' => $vendor->carryb_store_id,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * PATCH /vendors/is-active/{id}
      */
     public function isActiveVendor(Request $request, $id)

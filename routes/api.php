@@ -164,6 +164,7 @@ Route::prefix('users')->group(function () {
     Route::post('/login-as-dropshipper', [AuthController::class, 'loginAsDropshipper']);
     Route::get('/details/{id}', [UserController::class, 'getUserDetails']);
     Route::get('/getBalance/{id}', [UserController::class, 'getUserBalance']);
+    Route::get('/{id}/payout-review', [UserController::class, 'payoutReview'])->middleware('admin:orders');
     Route::put('/update/{id}', [UserController::class, 'updateUser']);
     Route::patch('/ban/{id}', [UserController::class, 'banToggle'])->middleware('admin:accounts');
     Route::patch('/unban/{id}', [UserController::class, 'unbanUser'])->middleware('admin:accounts');
@@ -458,6 +459,7 @@ Route::prefix('vendors')->group(function () {
     Route::get('/profile/{id}', [VendorController::class, 'getVendorProfile'])->withoutMiddleware('token');
     Route::put('/update/{id}', [VendorController::class, 'updateVendor']);
     Route::patch('/is-active/{id}', [VendorController::class, 'isActiveVendor']);
+    Route::patch('/{id}/carrybee-store', [VendorController::class, 'setDefaultCarrybeeStore'])->middleware('admin:orders');
     Route::delete('/remove/{id}', [VendorController::class, 'removeVendor']);
     Route::get('/products/{vendor_id}', [VendorController::class, 'getVendorProductList'])->withoutMiddleware('token');
     Route::get('/dashboard/report/{vendor_id}', [VendorController::class, 'getVendorDashboardReport'])->withoutMiddleware('token');

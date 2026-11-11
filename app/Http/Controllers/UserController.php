@@ -488,6 +488,65 @@ class UserController extends Controller
     }
 
     /**
+     * GET /users/{id}/payout-review
+     * Admin pre-check before paying a dropshipper profit directly: current
+     * wallet balance, withdraw requests and order advance payments.
+     */
+    public function payoutReview($id)
+    {
+        try {
+            $user = User::select('id', 'name', 'phone')->find($id);
+            if (!$user) {
+                return $this->failed('User not found', null, 404);
+            }
+
+            $completed = ResellerTransaction::where('reseller_id', $user->id)->where('status', 'completed');
+            $credit = (float) (clone $completed)->where('trx_type', 'credit')->sum('amount');
+            $debit = (float) (clone $completed)->where('trx_type', 'debit')->sum('amount');
+
+            // pending/approved = not paid out yet
+            $openStatuses = ['pending', 'approved'];
+            $withdrawQuery = \App\Models\WithdrawRequest::where('user_id', $user->id);
+            $recentWithdraws = (clone $withdrawQuery)
+                ->orderByDesc('id')
+                ->limit(5)
+                ->get(['id', 'amount', 'status', 'payment_method', 'bank_reference', 'created_at', 'transferred_at']);
+
+            $advanceQuery = Order::where('user_id', $user->id)
+                ->where('advance_amount', '>', 0)
+                ->whereNotIn('advance_status', ['none']);
+            $recentAdvances = (clone $advanceQuery)
+                ->orderByDesc('id')
+                ->limit(5)
+                ->get(['id', 'order_number', 'advance_amount', 'advance_status', 'advance_payment_method', 'advance_trx_id', 'advance_verified_at', 'created_at']);
+
+            return $this->success('Payout review fetched successfully', [
+                'user' => $user,
+                'balance' => [
+                    'credit' => round($credit, 2),
+                    'debit' => round($debit, 2),
+                    'balance' => round($credit - $debit, 2),
+                ],
+                'withdraws' => [
+                    'open_count' => (clone $withdrawQuery)->whereIn('status', $openStatuses)->count(),
+                    'open_amount' => round((float) (clone $withdrawQuery)->whereIn('status', $openStatuses)->sum('amount'), 2),
+                    'total_count' => (clone $withdrawQuery)->count(),
+                    'recent' => $recentWithdraws,
+                ],
+                'advances' => [
+                    'total_count' => (clone $advanceQuery)->count(),
+                    'approved_amount' => round((float) (clone $advanceQuery)->where('advance_status', 'approved')->sum('advance_amount'), 2),
+                    'pending_count' => (clone $advanceQuery)->whereIn('advance_status', ['pending', 'submitted'])->count(),
+                    'pending_amount' => round((float) (clone $advanceQuery)->whereIn('advance_status', ['pending', 'submitted'])->sum('advance_amount'), 2),
+                    'recent' => $recentAdvances,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * PUT /users/update/{id}
      */
     public function updateUser(Request $request, $id)

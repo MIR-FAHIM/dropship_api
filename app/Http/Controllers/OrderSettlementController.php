@@ -798,7 +798,12 @@ class OrderSettlementController extends Controller
                 'payment_method' => 'nullable|string|in:wallet,bank,bkash,nagad,cash',
                 'trx_id' => 'nullable|string|max:100',
                 'note' => 'nullable|string',
+                // Admin must confirm they reviewed balance, withdraws and advances.
+                'payout_review_confirmed' => 'accepted',
+            ], [
+                'payout_review_confirmed.accepted' => 'Confirm you reviewed the dropshipper balance, withdraw requests and advance payments before paying.',
             ]);
+            unset($validated['payout_review_confirmed']);
 
             $adminUserId = $request->user()?->id ?: (int) $request->input('created_by');
             $result = $this->accountingService->disburseDropshipperProfitDirectly($order, $validated, $adminUserId);
