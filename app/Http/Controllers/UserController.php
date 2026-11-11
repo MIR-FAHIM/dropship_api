@@ -510,14 +510,18 @@ class UserController extends Controller
             $recentWithdraws = (clone $withdrawQuery)
                 ->orderByDesc('id')
                 ->limit(5)
+                ->toBase()
                 ->get(['id', 'amount', 'status', 'payment_method', 'bank_reference', 'created_at', 'transferred_at']);
 
             $advanceQuery = Order::where('user_id', $user->id)
                 ->where('advance_amount', '>', 0)
                 ->whereNotIn('advance_status', ['none']);
+            // toBase(): plain rows, so Order's $appends accessors (which need
+            // status, relations, etc.) don't run on this partial column set.
             $recentAdvances = (clone $advanceQuery)
                 ->orderByDesc('id')
                 ->limit(5)
+                ->toBase()
                 ->get(['id', 'order_number', 'advance_amount', 'advance_status', 'advance_payment_method', 'advance_trx_id', 'advance_verified_at', 'created_at']);
 
             return $this->success('Payout review fetched successfully', [
