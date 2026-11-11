@@ -1252,7 +1252,13 @@ class OrderController extends Controller
             $orders = Order::with([
                 'items' => function ($query) use ($vendorId) {
                     // Only return items that belong to this vendor's shop
-                    $query->where('shop_id', $vendorId)->with('shop');
+                    // Product is limited to the columns the list needs: vendor_id (to decide
+                    // whether the vendor panel can link to it) and the thumbnail.
+                    $query->where('shop_id', $vendorId)->with([
+                        'shop',
+                        'product:id,vendor_id,thumbnail_img',
+                        'product.primaryImage:id,file_name,external_link',
+                    ]);
                 },
                 'statusHistory.status',
                 'deliveryInformation',
