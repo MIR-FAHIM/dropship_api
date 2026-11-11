@@ -379,6 +379,58 @@ class CarrybeeStatusJourneyTest extends TestCase
         $this->artisan('carrybee:catch-up')->expectsOutputToContain('Checked 0')->assertSuccessful();
     }
 
+    public function test_catch_up_does_not_treat_unpaid_with_invoice_as_paid(): void
+    {
+        DeliveryCompany::create(['company_name' => 'CarryBee', 'is_active' => true, 'api_key' => 'id', 'secret_key' => 'secret', 'client_context' => 'ctx']);
+        $order = $this->makeOrder(6);
+
+        foreach (['Not Paid', 'Unpaid', 'Partially paid', 'Payment pending', ''] as $paymentStatus) {
+            $this->info($order)->forceFill(['courier_checked_at' => null, 'courier_stage_at' => null])->save();
+            Http::fake(['developers.carrybee.com/*' => Http::response(['error' => false, 'data' => [
+                'transfer_status' => 'Delivered', 'collected_amount' => '870', 'invoice_id' => 'IXPENDING',
+                'payment_status' => $paymentStatus, 'updated_at' => '2026-11-10T10:11:12+00:00',
+            ]])]);
+
+            $this->artisan('carrybee:catch-up')->assertSuccessful();
+
+            $order->refresh();
+            $this->assertSame(6, (int) $order->status, "payment_status '{$paymentStatus}' must not mark paid");
+            $this->assertNull($order->carrybee_paid_at);
+            $this->assertSame(0, OrderSettlement::where('order_id', $order->id)->count());
+        }
+    }
+
+    public function test_dry_run_changes_nothing(): void
+    {
+        DeliveryCompany::create(['company_name' => 'CarryBee', 'is_active' => true, 'api_key' => 'id', 'secret_key' => 'secret', 'client_context' => 'ctx']);
+        $order = $this->makeOrder(5);
+        Http::fake(['developers.carrybee.com/*' => Http::response(['error' => false, 'data' => [
+            'transfer_status' => 'Delivered', 'invoice_id' => 'IX1', 'payment_status' => 'Paid', 'updated_at' => '2026-11-10T10:11:12+00:00',
+        ]])]);
+
+        $exit = \Illuminate\Support\Facades\Artisan::call('carrybee:catch-up', ['--dry-run' => true]);
+        $output = \Illuminate\Support\Facades\Artisan::output();
+        $this->assertSame(0, $exit);
+        $this->assertStringContainsString('payment_status="Paid"', $output);
+        $this->assertStringContainsString('would apply: order.delivered, order.paid', $output);
+
+        $this->assertSame(5, (int) $order->fresh()->status);
+        $this->assertNull($this->info($order)->courier_checked_at);
+    }
+
+    public function test_paid_on_completed_order_only_records_invoice(): void
+    {
+        $order = $this->makeOrder(9);
+
+        $result = $this->fire($order, 'order.paid', ['invoice_id' => 'IXDONE']);
+
+        $order->refresh();
+        $this->assertSame(9, (int) $order->status);
+        $this->assertSame('IXDONE', $order->carrybee_invoice_id);
+        $this->assertSame(0, OrderSettlement::where('order_id', $order->id)->count());
+        $this->assertStringContainsString('settlement unchanged', $result['data']['status']);
+    }
+
     public function test_unknown_transfer_status_changes_nothing(): void
     {
         DeliveryCompany::create(['company_name' => 'CarryBee', 'is_active' => true, 'api_key' => 'id', 'secret_key' => 'secret', 'client_context' => 'ctx']);

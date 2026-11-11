@@ -190,8 +190,26 @@ class CarrybeeWebhookService
                 return ['ok' => true, 'http_code' => 202, 'message' => $webhookEvent->message, 'data' => ['event_id' => $webhookEvent->id, 'order_id' => $order->id]];
             }
 
-            $notes[] = $this->applyStatusTransition($order, 10, $payload, $source);
-            $this->handleOrderPaidEvent($order, $webhookEvent, $payload, $assigned);
+            if ($this->transitions->isFinal((int) $order->status)) {
+                // Completed already (e.g. settled by hand): just record CarryBee's invoice.
+                $invoiceId = (string) Arr::get($payload, 'invoice_id', '');
+                $order->forceFill([
+                    'carrybee_invoice_id' => $invoiceId !== '' ? $invoiceId : $order->carrybee_invoice_id,
+                    'carrybee_paid_at' => $order->carrybee_paid_at ?? ($this->eventTime($payload) ?? now()),
+                    'carrybee_disbursed_to' => $order->carrybee_disbursed_to ?? ($this->hasOwnDeliveryAccount($order->loadMissing(['items.product.vendor', 'vendor'])) ? 'vendor' : 'platform'),
+                ])->save();
+                if ($assigned) {
+                    $assigned->forceFill([
+                        'carrybee_invoice_id' => $invoiceId !== '' ? $invoiceId : $assigned->carrybee_invoice_id,
+                        'carrybee_paid_at' => $assigned->carrybee_paid_at ?? $order->carrybee_paid_at,
+                    ])->save();
+                }
+                $webhookEvent->invoice_id = $invoiceId ?: $webhookEvent->invoice_id;
+                $notes[] = 'CarryBee payment recorded on a completed order; settlement unchanged';
+            } else {
+                $notes[] = $this->applyStatusTransition($order, 10, $payload, $source);
+                $this->handleOrderPaidEvent($order, $webhookEvent, $payload, $assigned);
+            }
         } elseif ($event === 'order.pickup-cancelled' && $this->transitions->rank((int) $order->status) > 3) {
             $notes[] = 'Pickup cancelled after pickup; status kept';
         } elseif ($mappedStatusId !== null) {

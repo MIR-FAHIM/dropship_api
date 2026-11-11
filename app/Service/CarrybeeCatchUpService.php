@@ -18,6 +18,11 @@ use Throwable;
  */
 class CarrybeeCatchUpService
 {
+    /** CarryBee payment_status values that mean the COD was paid out (compared lower-cased, exact). */
+    private const PAID_PAYMENT_STATUSES = ['paid'];
+
+    private bool $dryRun = false;
+
     public function __construct(
         private readonly CarrybeeCredentialResolver $credentials,
         private readonly CarrybeeWebhookService $webhooks,
@@ -27,19 +32,21 @@ class CarrybeeCatchUpService
     /**
      * @return array{checked: int, updated: int, failed: int, details: array<int, array>}
      */
-    public function run(?int $limit = null, ?string $consignmentId = null): array
+    public function run(?int $limit = null, ?string $consignmentId = null, bool $dryRun = false): array
     {
+        $this->dryRun = $dryRun;
         $quietSince = now()->subHours(max(1, (int) config('carrybee.catch_up.quiet_hours', 6)));
         $activeStatuses = (array) config('carrybee.catch_up.active_statuses', [3, 4, 5, 6, 12, 13]);
 
         $query = DeliveryAssignedInfo::query()
             ->whereNotNull('consignment_id')
-            ->whereRaw("TRIM(consignment_id) <> ''")
-            ->whereHas('order', fn ($q) => $q->whereIn('status', array_map('strval', $activeStatuses)));
+            ->whereRaw("TRIM(consignment_id) <> ''");
 
         if ($consignmentId) {
+            // A named consignment is looked up whatever its status (useful with --dry-run).
             $query->where('consignment_id', $consignmentId);
         } else {
+            $query->whereHas('order', fn ($q) => $q->whereIn('status', array_map('strval', $activeStatuses)));
             $query->where(fn ($q) => $q->whereNull('courier_stage_at')->orWhere('courier_stage_at', '<', $quietSince))
                 ->where(fn ($q) => $q->whereNull('courier_checked_at')->orWhere('courier_checked_at', '<', $quietSince));
         }
@@ -74,8 +81,10 @@ class CarrybeeCatchUpService
         $base = ['consignment_id' => $assigned->consignment_id, 'order_id' => $assigned->order_id, 'updated' => false];
 
         $resolved = $this->credentials->forVendor($order?->vendor_id);
-        // Mark as checked either way so a broken account doesn't block the queue.
-        $assigned->forceFill(['courier_checked_at' => now()])->save();
+        if (!$this->dryRun) {
+            // Mark as checked either way so a broken account doesn't block the queue.
+            $assigned->forceFill(['courier_checked_at' => now()])->save();
+        }
 
         if (!$resolved['service']) {
             return $base + ['error' => $resolved['error']];
@@ -88,6 +97,19 @@ class CarrybeeCatchUpService
 
         $data = (array) Arr::get($response, 'body.data', []);
         $payloads = $this->payloadsFromDetails($data, $assigned);
+
+        if ($this->dryRun) {
+            // Show CarryBee's raw answer and what we would do, without changing anything.
+            return $base + ['events' => [
+                'order ' . ($order?->order_number ?? '?') . ' status ' . ($order?->status ?? '?'),
+                'CarryBee transfer_status=' . json_encode($data['transfer_status'] ?? null)
+                    . ' payment_status=' . json_encode($data['payment_status'] ?? null)
+                    . ' invoice_id=' . json_encode($data['invoice_id'] ?? null)
+                    . ' collected=' . json_encode($data['collected_amount'] ?? null),
+                'would apply: ' . ($payloads ? implode(', ', array_column($payloads, 'event')) : 'nothing'),
+            ]];
+        }
+
         if ($payloads === []) {
             return $base + ['note' => 'Unknown transfer_status: ' . ($data['transfer_status'] ?? '—')];
         }
@@ -134,9 +156,11 @@ class CarrybeeCatchUpService
             ], fn ($v) => $v !== null);
         }
 
+        // Paid only when CarryBee says exactly "paid" AND gives an invoice. A loose
+        // "contains paid" check matched values like "Not Paid" and settled unpaid orders.
         $invoiceId = trim((string) ($data['invoice_id'] ?? ''));
-        $paymentStatus = Str::lower((string) ($data['payment_status'] ?? ''));
-        if ($event !== 'order.paid' && $invoiceId !== '' && str_contains($paymentStatus, 'paid') && !str_contains($paymentStatus, 'unpaid')) {
+        $paymentStatus = Str::lower(trim((string) ($data['payment_status'] ?? '')));
+        if ($event !== 'order.paid' && $invoiceId !== '' && in_array($paymentStatus, self::PAID_PAYMENT_STATUSES, true)) {
             $payloads[] = $common + ['event' => 'order.paid', 'invoice_id' => $invoiceId];
         }
 
