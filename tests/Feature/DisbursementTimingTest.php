@@ -40,7 +40,7 @@ class DisbursementTimingTest extends TestCase
             OrderStatus::updateOrCreate(['id' => $id], ['name' => $name, 'type' => 'other', 'is_active' => true]);
         }
 
-        $admin = User::factory()->create(['email' => 'timing_admin@test.com', 'user_type' => 'admin', 'role' => 'admin']);
+        $admin = User::factory()->create(['email' => 'timing_admin@test.com', 'user_type' => 'admin', 'role' => 'admin', 'banned' => 0]);
         $this->adminToken = ApiTokenService::create($admin, ['basic', 'admin'], 60, 'tok')['plain'];
 
         $this->reseller = User::factory()->create(['email' => 'timing_reseller@test.com', 'user_type' => 'dropshipper']);
@@ -167,11 +167,19 @@ class DisbursementTimingTest extends TestCase
             'collectable_amount' => 900,
         ]);
 
+        // CarryBee owns Delivered on consignment orders: a plain manual change is refused...
+        $this->withHeader('Authorization', 'Bearer ' . $this->adminToken)
+            ->postJson('/api/orders/update/status/' . $order->id, ['status_id' => 6])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.code', 'override_required');
+
+        // ...and even an admin override doesn't start settlement without CarryBee's "paid".
         $response = $this->withHeader('Authorization', 'Bearer ' . $this->adminToken)
-            ->postJson('/api/orders/update/status/' . $order->id, ['status_id' => 6]);
+            ->postJson('/api/orders/update/status/' . $order->id, ['status_id' => 6, 'override_reason' => 'Rider confirmed by phone']);
         $response->assertStatus(200);
 
         $order->refresh();
+        $this->assertEquals(6, (int) $order->status);
         $this->assertEquals(0, OrderSettlement::where('order_id', $order->id)->count());
     }
 }

@@ -8,38 +8,83 @@ use App\Models\DeliveryAssignedInfo;
 use App\Models\Order;
 use App\Models\OrderStatus;
 use App\Models\OrderStatusHistory;
-use App\Models\Transaction;
+use Carbon\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
+/**
+ * Applies CarryBee webhook events (https://hackmd.io/_wLl0AtKRHGKBIIsF_xssg?view)
+ * to orders: courier tracking, issue flags, status journey and settlement.
+ *
+ * Entry points:
+ *  - process()        real webhook (signature checked)
+ *  - processTrusted() catch-up job and admin reprocess (already trusted payloads)
+ */
 class CarrybeeWebhookService
 {
+    /** Events that always get a status-history row, even without a status change. */
+    private const NOTEWORTHY_EVENTS = [
+        'order.create-failed',
+        'order.pickup-failed',
+        'order.delivery-on-hold',
+        'order.delivery-failed',
+        'order.exchange',
+    ];
+
     public function __construct(
         private readonly NotificationService $notificationService,
-        private readonly OrderAccountingService $orderAccountingService
+        private readonly OrderAccountingService $orderAccountingService,
+        private readonly OrderStatusTransitionService $transitions,
     ) {
     }
 
     public function process(array $payload, string $rawBody, string $signature, array $headers = [], bool $isTest = false): array
     {
-        $event = (string) ($payload['event'] ?? '');
-        if ($event === '') {
-            return [
-                'ok' => false,
-                'http_code' => 422,
-                'message' => 'Invalid payload: event is required',
-            ];
+        if ((string) ($payload['event'] ?? '') === '') {
+            return ['ok' => false, 'http_code' => 422, 'message' => 'Invalid payload: event is required'];
         }
 
         if (!$isTest && !$this->isValidSignature($rawBody, $signature)) {
-            return [
-                'ok' => false,
-                'http_code' => 401,
-                'message' => 'Invalid webhook signature',
-            ];
+            // Keep a trace for the webhook health board (wrong secret on a CarryBee account).
+            // A later valid delivery of the same event still processes normally.
+            CarrybeeWebhookEvent::firstOrCreate(
+                ['fingerprint' => $this->buildFingerprint($payload)],
+                [
+                    'event' => (string) $payload['event'],
+                    'store_id' => Arr::get($payload, 'store_id'),
+                    'consignment_id' => Arr::get($payload, 'consignment_id'),
+                    'merchant_order_id' => Arr::get($payload, 'merchant_order_id'),
+                    'event_time' => Arr::get($payload, 'timestamptz'),
+                    'payload' => $payload,
+                    'signature_valid' => false,
+                    'processing_status' => 'rejected',
+                    'message' => 'Invalid webhook signature',
+                ]
+            );
+
+            return ['ok' => false, 'http_code' => 401, 'message' => 'Invalid webhook signature'];
         }
 
+        return $this->handleVerified($payload, $headers, OrderStatusHistory::SOURCE_WEBHOOK);
+    }
+
+    /**
+     * For payloads we built or already verified: the catch-up job (from CarryBee's
+     * order details API) and the admin "reprocess" action.
+     */
+    public function processTrusted(array $payload, string $source = OrderStatusHistory::SOURCE_CATCH_UP): array
+    {
+        if ((string) ($payload['event'] ?? '') === '') {
+            return ['ok' => false, 'http_code' => 422, 'message' => 'Invalid payload: event is required'];
+        }
+
+        return $this->handleVerified($payload, ['x-resellerbrain-source' => [$source]], $source);
+    }
+
+    private function handleVerified(array $payload, array $headers, string $source): array
+    {
+        $event = (string) $payload['event'];
         $fingerprint = $this->buildFingerprint($payload);
         $webhookEvent = CarrybeeWebhookEvent::where('fingerprint', $fingerprint)->first();
 
@@ -51,13 +96,9 @@ class CarrybeeWebhookService
                 $webhookEvent->message = 'Duplicate webhook ignored';
                 $webhookEvent->save();
 
-                return [
-                    'ok' => true,
-                    'http_code' => 200,
-                    'message' => 'Duplicate webhook ignored',
-                    'data' => ['event_id' => $webhookEvent->id],
-                ];
+                return ['ok' => true, 'http_code' => 200, 'message' => 'Duplicate webhook ignored', 'data' => ['event_id' => $webhookEvent->id]];
             }
+            $webhookEvent->save(); // keep the retry count
         } else {
             $webhookEvent = CarrybeeWebhookEvent::create([
                 'fingerprint' => $fingerprint,
@@ -76,20 +117,15 @@ class CarrybeeWebhookService
         $webhookEvent->signature_valid = true;
 
         $eventStatusMap = (array) config('carrybee.event_status_map', []);
-        $mappedStatusId = $eventStatusMap[$event] ?? null;
         if (!array_key_exists($event, $eventStatusMap)) {
             $webhookEvent->processing_status = 'ignored';
             $webhookEvent->message = 'Unsupported event: ' . $event;
             $webhookEvent->processed_at = now();
             $webhookEvent->save();
 
-            return [
-                'ok' => true,
-                'http_code' => 200,
-                'message' => 'Event ignored (unsupported)',
-                'data' => ['event_id' => $webhookEvent->id],
-            ];
+            return ['ok' => true, 'http_code' => 200, 'message' => 'Event ignored (unsupported)', 'data' => ['event_id' => $webhookEvent->id]];
         }
+        $mappedStatusId = $eventStatusMap[$event];
 
         $order = $this->resolveOrder($payload);
         if (!$order) {
@@ -98,28 +134,18 @@ class CarrybeeWebhookService
             $webhookEvent->processed_at = now();
             $webhookEvent->save();
 
-            return [
-                'ok' => true,
-                'http_code' => 202,
-                'message' => 'Order not found, event stored',
-                'data' => ['event_id' => $webhookEvent->id],
-            ];
+            return ['ok' => true, 'http_code' => 202, 'message' => 'Order not found, event stored', 'data' => ['event_id' => $webhookEvent->id]];
         }
 
         try {
-            return DB::transaction(function () use ($order, $webhookEvent, $event, $mappedStatusId, $payload) {
+            return DB::transaction(function () use ($order, $webhookEvent, $event, $mappedStatusId, $payload, $source) {
                 $order = Order::lockForUpdate()->findOrFail($order->id);
                 $eventRecord = CarrybeeWebhookEvent::lockForUpdate()->findOrFail($webhookEvent->id);
                 if ($eventRecord->processed_at !== null && $eventRecord->signature_valid) {
-                    return [
-                        'ok' => true,
-                        'http_code' => 200,
-                        'message' => 'Duplicate webhook ignored',
-                        'data' => ['event_id' => $eventRecord->id],
-                    ];
+                    return ['ok' => true, 'http_code' => 200, 'message' => 'Duplicate webhook ignored', 'data' => ['event_id' => $eventRecord->id]];
                 }
 
-                return $this->processMatchedEvent($order, $eventRecord, $event, $mappedStatusId, $payload);
+                return $this->processMatchedEvent($order, $eventRecord, $event, $mappedStatusId, $payload, $source);
             });
         } catch (Throwable $e) {
             report($e);
@@ -132,47 +158,58 @@ class CarrybeeWebhookService
                 'message' => 'Processing failed; the webhook may be retried.',
             ]);
 
-            return [
-                'ok' => false,
-                'http_code' => 500,
-                'message' => 'Webhook processing failed',
-                'data' => ['event_id' => $webhookEvent->id],
-            ];
+            return ['ok' => false, 'http_code' => 500, 'message' => 'Webhook processing failed', 'data' => ['event_id' => $webhookEvent->id]];
         }
     }
 
-    private function processMatchedEvent(Order $order, CarrybeeWebhookEvent $webhookEvent, string $event, ?int $mappedStatusId, array $payload): array
+    private function processMatchedEvent(Order $order, CarrybeeWebhookEvent $webhookEvent, string $event, ?int $mappedStatusId, array $payload, string $source): array
     {
         $webhookEvent->signature_valid = true;
         $webhookEvent->order_id = $order->id;
         $webhookEvent->mapped_status_id = $mappedStatusId;
 
-        // Specific processing for CarryBee order.paid event
+        $assigned = DeliveryAssignedInfo::where('order_id', $order->id)->first();
+        $isNewest = $this->updateTracking($assigned, $event, $payload);
+        $this->applyEventDetails($order, $assigned, $event, $payload, $isNewest);
+
+        $notes = [];
+
+        // order.paid: move to Carrybee Paid first so history reads 10 -> 9.
         if ($event === 'order.paid') {
-            if (in_array((int) $order->status, Order::CARRYBEE_NON_PAYABLE_STATUSES, true)) {
+            $nonPayable = array_merge(Order::CARRYBEE_NON_PAYABLE_STATUSES, [12]);
+            if (in_array((int) $order->status, $nonPayable, true)) {
                 $webhookEvent->processing_status = 'ignored';
                 $webhookEvent->message = 'Payment event received for a non-payable order; manual review required.';
                 $webhookEvent->processed_at = now();
                 $webhookEvent->save();
+                $this->notifyAdmins(
+                    'CarryBee paid a cancelled/returned order',
+                    "Order {$order->order_number} got a CarryBee payment (invoice " . ($payload['invoice_id'] ?? '—') . ') while cancelled/returned. Please review.'
+                );
 
-                return [
-                    'ok' => true,
-                    'http_code' => 202,
-                    'message' => $webhookEvent->message,
-                    'data' => ['event_id' => $webhookEvent->id, 'order_id' => $order->id],
-                ];
+                return ['ok' => true, 'http_code' => 202, 'message' => $webhookEvent->message, 'data' => ['event_id' => $webhookEvent->id, 'order_id' => $order->id]];
             }
 
-            $this->handleOrderPaidEvent($order, $webhookEvent, $payload);
+            $notes[] = $this->applyStatusTransition($order, 10, $payload, $source);
+            $this->handleOrderPaidEvent($order, $webhookEvent, $payload, $assigned);
+        } elseif ($event === 'order.pickup-cancelled' && $this->transitions->rank((int) $order->status) > 3) {
+            $notes[] = 'Pickup cancelled after pickup; status kept';
+        } elseif ($mappedStatusId !== null) {
+            $notes[] = $this->applyStatusTransition($order, (int) $mappedStatusId, $payload, $source);
         }
 
-        $statusMessage = 'No status mutation required';
-        if ($mappedStatusId !== null) {
-            $statusMessage = $this->applyStatusTransition($order, (int) $mappedStatusId, $payload);
+        $statusChanged = in_array('Order status updated', $notes, true);
+        if (!$statusChanged && in_array($event, self::NOTEWORTHY_EVENTS, true)) {
+            OrderStatusHistory::create([
+                'order_id' => $order->id,
+                'status_id' => (int) $order->status,
+                'note' => $this->buildHistoryNote($payload),
+                'changed_by' => null,
+                'source' => $source,
+            ]);
         }
 
-        $this->syncDeliveryAssignmentData($order, $payload, $mappedStatusId);
-
+        $statusMessage = $notes ? implode('; ', $notes) : 'Tracking updated';
         $webhookEvent->processing_status = 'processed';
         $webhookEvent->message = $statusMessage;
         $webhookEvent->processed_at = now();
@@ -193,111 +230,189 @@ class CarrybeeWebhookService
         ];
     }
 
-    private function buildFingerprint(array $payload): string
+    /**
+     * Courier stage / attempt / rider, only when this event is not older than the
+     * last one stored (CarryBee can deliver events out of order).
+     */
+    private function updateTracking(?DeliveryAssignedInfo $assigned, string $event, array $payload): bool
     {
-        $key = implode('|', [
-            (string) Arr::get($payload, 'event', ''),
-            (string) Arr::get($payload, 'store_id', ''),
-            (string) Arr::get($payload, 'consignment_id', ''),
-            (string) Arr::get($payload, 'merchant_order_id', ''),
-            (string) Arr::get($payload, 'timestamptz', ''),
-        ]);
-
-        return hash('sha256', $key);
-    }
-
-    private function isValidSignature(string $rawBody, string $received): bool
-    {
-        $secret = (string) config('carrybee.webhook.secret', '');
-        if ($secret === '') {
-            return false;
-        }
-
-        $received = trim($received, " \t\n\r\0\x0B\"'");
-        if ($received === '') {
-            return false;
-        }
-
-        if (str_starts_with($received, 'sha256=')) {
-            $received = substr($received, 7);
-        }
-
-        if (hash_equals($secret, $received)) {
+        if (!$assigned) {
             return true;
         }
 
-        $computed = hash_hmac('sha256', $rawBody, $secret);
-        return hash_equals($computed, $received);
+        $eventAt = $this->eventTime($payload);
+        $isNewest = $assigned->courier_stage_at === null || $eventAt === null || $eventAt->gte($assigned->courier_stage_at);
+
+        if ($isNewest) {
+            $assigned->courier_stage = $event;
+            $assigned->courier_stage_at = $eventAt ?? now();
+            if (Arr::has($payload, 'attempt') && $payload['attempt'] !== null) {
+                $assigned->attempt = (int) $payload['attempt'];
+            }
+        }
+
+        // transfer_status_id mirrors the mapped status (kept for existing UI).
+        $map = (array) config('carrybee.event_status_map', []);
+        if (($map[$event] ?? null) !== null) {
+            $assigned->transfer_status_id = $map[$event];
+        }
+
+        $assigned->save();
+
+        return $isNewest;
     }
 
-    private function resolveOrder(array $payload): ?Order
+    /** Fees, collected amounts, rider, issue flags and review holds. */
+    private function applyEventDetails(Order $order, ?DeliveryAssignedInfo $assigned, string $event, array $payload, bool $isNewest): void
     {
-        $orderId = Arr::get($payload, 'order_id');
-        if (!empty($orderId)) {
-            $order = Order::find($orderId);
-            if ($order) {
-                return $order;
+        $settled = in_array((int) $order->status, [9, 10], true);
+
+        // Fees: order.created / order.updated carry the authoritative figures.
+        if (in_array($event, ['order.created', 'order.updated'], true)) {
+            $deliveryFee = Arr::get($payload, 'delivery_fee');
+            $codFee = Arr::get($payload, 'cod_fee');
+            if ($assigned) {
+                if (Arr::has($payload, 'collectable_amount')) {
+                    $assigned->collectable_amount = (float) $payload['collectable_amount'];
+                }
+                if ($deliveryFee !== null) {
+                    $assigned->delivery_fee = (float) $deliveryFee;
+                }
+                if ($codFee !== null) {
+                    $assigned->cod_fee = (float) $codFee;
+                }
+                if ($deliveryFee !== null && $codFee !== null) {
+                    $assigned->total_fee = round((float) $deliveryFee + (float) $codFee, 2);
+                }
+            }
+            if (!$settled) {
+                if ($deliveryFee !== null) {
+                    $order->actual_courier_fee = round((float) $deliveryFee, 2);
+                }
+                if ($codFee !== null) {
+                    $order->actual_cod_fee = round((float) $codFee, 2);
+                }
+                if ($deliveryFee !== null || $codFee !== null) {
+                    $order->actual_courier_cost = round((float) ($order->actual_courier_fee ?? 0) + (float) ($order->actual_cod_fee ?? 0), 2);
+                    $order->save();
+                }
             }
         }
 
-        $consignmentId = Arr::get($payload, 'consignment_id');
-        if (!empty($consignmentId)) {
-            $assigned = DeliveryAssignedInfo::where('consignment_id', $consignmentId)->first();
-            if ($assigned?->order_id) {
-                return Order::find($assigned->order_id);
+        if (!$assigned) {
+            if ($event === 'order.create-failed') {
+                $this->notifyCreateFailed($order, $payload);
             }
+
+            return;
         }
 
-        $merchantOrderId = Arr::get($payload, 'merchant_order_id');
-        if (!empty($merchantOrderId)) {
-            $assigned = DeliveryAssignedInfo::where('merchant_order_id', $merchantOrderId)->first();
-            if ($assigned?->order_id) {
-                return Order::find($assigned->order_id);
-            }
+        switch ($event) {
+            case 'order.created':
+                if ($assigned->issue_flag === 'create_failed') {
+                    $this->clearIssue($assigned);
+                }
+                break;
 
-            $draft = CarryBeeOrderCreateForm::where('merchant_order_id', $merchantOrderId)->first();
-            if ($draft?->order_id) {
-                return Order::find($draft->order_id);
-            }
+            case 'order.create-failed':
+                $this->raiseIssue($assigned, 'create_failed', $this->describeCauses($payload));
+                $this->notifyCreateFailed($order, $payload);
+                break;
 
-            // Fallback: match directly with order_number
-            $orderByNumber = Order::where('order_number', $merchantOrderId)->first();
-            if ($orderByNumber) {
-                return $orderByNumber;
-            }
+            case 'order.pickup-failed':
+                $this->raiseIssue($assigned, 'pickup', $this->reasonText($payload) ?: 'Pickup failed');
+                $this->notifyVendor($order, 'CarryBee pickup failed', "Pickup failed for order {$order->order_number}. Please keep the parcel ready.");
+                break;
+
+            case 'order.picked':
+                if ($isNewest && $assigned->issue_flag === 'pickup') {
+                    $this->clearIssue($assigned);
+                }
+                break;
+
+            case 'order.assigned-for-delivery':
+                $assigned->rider_name = Arr::get($payload, 'agent_name') ?: $assigned->rider_name;
+                $assigned->rider_phone = Arr::get($payload, 'agent_phone') ?: $assigned->rider_phone;
+                if ($isNewest && $assigned->issue_flag === 'delivery') {
+                    $this->clearIssue($assigned);
+                }
+                break;
+
+            case 'order.delivery-on-hold':
+            case 'order.delivery-failed':
+                $label = $event === 'order.delivery-failed' ? 'Delivery failed' : 'Delivery on hold';
+                $reason = $this->reasonText($payload) ?: $label;
+                $attempt = (int) (Arr::get($payload, 'attempt') ?? $assigned->attempt ?? 1);
+                $this->raiseIssue($assigned, 'delivery', $reason);
+                $this->notifyUser($order->user_id, $label, "{$label} for order {$order->order_number} (attempt {$attempt}): {$reason}. Please contact your customer.");
+                if ($event === 'order.delivery-failed' && $attempt >= 2) {
+                    $this->notifyAdmins('Repeated delivery failure', "Order {$order->order_number} failed delivery attempt {$attempt}: {$reason}.");
+                }
+                break;
+
+            case 'order.delivered':
+            case 'order.partial-delivery':
+            case 'order.paid-return':
+                if (Arr::has($payload, 'collected_amount')) {
+                    $assigned->collected_amount = (float) $payload['collected_amount'];
+                }
+                if ($event !== 'order.paid-return' && $assigned->issue_flag === 'delivery') {
+                    $this->clearIssue($assigned);
+                }
+                if ($event === 'order.partial-delivery') {
+                    $this->holdForReview($order, $assigned, 'Partial delivery: ' . ($this->reasonText($payload) ?: 'collected ' . ($payload['collected_amount'] ?? '?') . ' Tk'));
+                } elseif ($event === 'order.delivered' && Arr::has($payload, 'collected_amount')) {
+                    $collected = (float) $payload['collected_amount'];
+                    $expected = (float) ($assigned->collectable_amount ?? $order->total ?? 0);
+                    if (abs($collected - $expected) >= 1) {
+                        $this->holdForReview($order, $assigned, "Collected {$collected} Tk, expected {$expected} Tk");
+                    }
+                }
+                break;
         }
 
-        return null;
+        $assigned->save();
     }
 
-    private function applyStatusTransition(Order $order, int $targetStatusId, array $payload): string
+    private function raiseIssue(DeliveryAssignedInfo $assigned, string $flag, string $reason): void
+    {
+        $assigned->issue_flag = $flag;
+        $assigned->issue_reason = mb_substr($reason, 0, 1000);
+    }
+
+    private function clearIssue(DeliveryAssignedInfo $assigned): void
+    {
+        $assigned->issue_flag = null;
+        $assigned->issue_reason = null;
+    }
+
+    private function holdForReview(Order $order, DeliveryAssignedInfo $assigned, string $reason): void
+    {
+        if (!$assigned->needs_review) {
+            $this->notifyAdmins('Order needs courier review', "Order {$order->order_number}: {$reason}. Settlement is held until you approve it.");
+        }
+        $assigned->needs_review = true;
+        $assigned->review_reason = mb_substr($reason, 0, 255);
+    }
+
+    private function applyStatusTransition(Order $order, int $targetStatusId, array $payload, string $source): string
     {
         $currentStatusId = (int) $order->status;
         $previousPaymentStatus = $order->payment_status;
-        $rankMap = (array) config('carrybee.status_rank_map', []);
-        $currentRank = (int) ($rankMap[$currentStatusId] ?? $currentStatusId);
-        $targetRank = (int) ($rankMap[$targetStatusId] ?? $targetStatusId);
 
-        if ($targetRank < $currentRank) {
-            return 'Skipped status regression';
+        $blocked = $this->transitions->automaticBlockReason($order, $targetStatusId);
+        if ($blocked !== null) {
+            return $blocked;
         }
 
-        if ($targetStatusId !== $currentStatusId) {
-            $order->status = $targetStatusId;
-        }
-
-        if (in_array($targetStatusId, [6, 9])) {
+        if (in_array($targetStatusId, [6, 9, 13], true)) {
             $order->payment_status = 'paid';
 
             if ($order->hasConsignment()) {
-                // Real CarryBee logistics: capture whatever fee figures this
-                // event carries, but don't start the disbursement journey yet.
-                // That only begins once CarryBee's own "order.paid" webhook
-                // confirms the COD was actually collected - see
-                // handleOrderPaidEvent(), which is the sole trigger for
-                // processOrderDelivery() on consignment orders.
-                $deliveryFee = Arr::get($payload, 'delivery_fee', null);
-                $codFee = Arr::get($payload, 'cod_fee', null);
+                // Real CarryBee logistics: capture fee figures, but settlement only
+                // starts on CarryBee's own "order.paid" (handleOrderPaidEvent).
+                $deliveryFee = Arr::get($payload, 'delivery_fee');
+                $codFee = Arr::get($payload, 'cod_fee');
                 if ($deliveryFee !== null) {
                     $order->actual_courier_fee = round((float) $deliveryFee, 2);
                 }
@@ -305,202 +420,113 @@ class CarrybeeWebhookService
                     $order->actual_cod_fee = round((float) $codFee, 2);
                 }
             } else {
-                // No consignment - no "paid" webhook will ever arrive for this
-                // order, so this delivered/completed signal is the only one
-                // we'll get. Settle now.
-                $courierFeeData = [
-                    'actual_courier_fee' => Arr::get($payload, 'delivery_fee', null),
-                    'actual_cod_fee' => Arr::get($payload, 'cod_fee', null),
+                // No consignment means no "paid" webhook will come: settle now.
+                $this->orderAccountingService->processOrderDelivery($order, [
+                    'actual_courier_fee' => Arr::get($payload, 'delivery_fee'),
+                    'actual_cod_fee' => Arr::get($payload, 'cod_fee'),
                     'confirmed' => true,
                     'payout_status' => 'received',
-                ];
-                $this->orderAccountingService->processOrderDelivery($order, $courierFeeData);
+                ]);
             }
-        } elseif (in_array($targetStatusId, [7, 8])) {
+        } elseif (in_array($targetStatusId, [7, 8], true)) {
+            // Money is reversed only on cancel or when the parcel is back with the vendor
+            // (order.returned-to-merchant), never on the first "returning" event (12).
             $this->orderAccountingService->processOrderReversal($order, 'CarryBee delivery returned/cancelled');
         }
 
-        $order->save();
+        if ($targetStatusId === $currentStatusId) {
+            $order->save();
 
-        if ($targetStatusId !== $currentStatusId) {
-            OrderStatusHistory::create([
-                'order_id' => $order->id,
-                'status_id' => $targetStatusId,
-                'note' => $this->buildHistoryNote($payload),
-                'changed_by' => null,
-            ]);
-
-            $this->notifyWebhookOrderStatusUpdated($order, $targetStatusId);
+            return 'Order status unchanged';
         }
+
+        $this->transitions->apply($order, $targetStatusId, $source, null, $this->buildHistoryNote($payload));
+        $this->notifyWebhookOrderStatusUpdated($order, $targetStatusId);
 
         if ($targetStatusId === 9 && $previousPaymentStatus !== 'paid') {
             $this->notifyWebhookPaymentCompleted($order);
         }
 
-        if ($targetStatusId !== $currentStatusId) {
-            return 'Order status updated';
-        }
-
-        return 'Order status unchanged';
+        return 'Order status updated';
     }
 
-    private function notifyWebhookOrderStatusUpdated(Order $order, int $statusId): void
+    private function handleOrderPaidEvent(Order $order, CarrybeeWebhookEvent $webhookEvent, array $payload, ?DeliveryAssignedInfo $assigned): void
     {
-        $order->loadMissing('vendor.user');
-        $statusName = OrderStatus::where('id', $statusId)->value('name') ?: 'Status ' . $statusId;
+        $invoiceId = (string) Arr::get($payload, 'invoice_id', '');
+        $paidAt = $this->eventTime($payload) ?? now();
 
-        $this->notificationService->createNotificationSafely([
-            'title'      => 'Order Status Updated',
-            'subtitle'   => "CarryBee updated order {$order->order_number} to {$statusName}.",
-            'created_by' => null,
-            'send_to'    => $order->user_id,
-            'is_seen'    => false,
-            'type'       => 'order',
-            'is_active'  => true,
-            'image'      => null,
-            'module'     => 'order',
-        ]);
+        $order->loadMissing(['items.product.vendor', 'vendor']);
+        $disbursedTo = $this->hasOwnDeliveryAccount($order) ? 'vendor' : 'platform';
+        $previousPaymentStatus = $order->payment_status;
 
-        if ($order->vendor?->user_id) {
-            $this->notificationService->createNotificationSafely([
-                'title'      => 'Vendor Order Status Updated',
-                'subtitle'   => "CarryBee updated order {$order->order_number} to {$statusName}.",
-                'created_by' => null,
-                'send_to'    => $order->vendor->user_id,
-                'is_seen'    => false,
-                'type'       => 'order',
-                'is_active'  => true,
-                'image'      => null,
-                'module'     => 'order',
+        if ($invoiceId !== '') {
+            $webhookEvent->invoice_id = $invoiceId;
+            $order->carrybee_invoice_id = $invoiceId;
+        }
+        $webhookEvent->disbursed_to = $disbursedTo;
+        $webhookEvent->admin_acknowledged = false;
+
+        // The authoritative "CarryBee collected the COD and paid it out" signal.
+        $order->carrybee_paid_at = $paidAt;
+        $order->carrybee_disbursed_to = $disbursedTo;
+        $order->courier_payout_status = 'received';
+        $order->courier_cost_confirmed = true;
+        $order->payment_status = 'paid';
+        $order->save();
+
+        if ($assigned) {
+            if ($invoiceId !== '') {
+                $assigned->carrybee_invoice_id = $invoiceId;
+            }
+            $assigned->carrybee_paid_at = $paidAt;
+            $assigned->transfer_status_id = 10;
+            $assigned->save();
+        }
+
+        $invoiceDisplay = $invoiceId !== '' ? "ইনভয়েস #{$invoiceId}" : 'ইনভয়েস';
+        $disbursedText = $disbursedTo === 'vendor' ? 'ভেন্ডরের নিজস্ব CarryBee অ্যাকাউন্টে' : 'প্ল্যাটফর্ম অ্যাকাউন্টে';
+
+        if ($assigned?->needs_review) {
+            // Partial delivery / amount mismatch: record the payment, hold settlement
+            // until an admin approves (approveCourierReview).
+            $this->notificationService->createAdminNotifications([
+                'title' => 'CarryBee paid — settlement held for review',
+                'subtitle' => "CarryBee {$invoiceDisplay}: order #{$order->order_number} paid, but it needs review ({$assigned->review_reason}). Approve it to start settlement.",
+                'created_by' => null, 'is_seen' => false, 'type' => 'carrybee_paid', 'is_active' => true, 'image' => null, 'module' => 'order',
             ]);
-        }
 
-        $this->notificationService->createAdminNotifications([
-            'title'      => 'CarryBee Order Status Updated',
-            'subtitle'   => "Order {$order->order_number} updated to {$statusName}.",
-            'created_by' => null,
-            'is_seen'    => false,
-            'type'       => 'order',
-            'is_active'  => true,
-            'image'      => null,
-            'module'     => 'order',
-        ]);
-    }
-
-    private function notifyWebhookPaymentCompleted(Order $order): void
-    {
-        $amount = number_format((float) $order->total, 2, '.', '');
-
-        $this->notificationService->createNotificationSafely([
-            'title'      => 'Order Payment Completed',
-            'subtitle'   => "CarryBee marked payment collected for order {$order->order_number}. Amount {$amount} BDT.",
-            'created_by' => null,
-            'send_to'    => $order->user_id,
-            'is_seen'    => false,
-            'type'       => 'payment',
-            'is_active'  => true,
-            'image'      => null,
-            'module'     => 'order',
-        ]);
-
-        $this->notificationService->createAdminNotifications([
-            'title'      => 'Order Payment Completed',
-            'subtitle'   => "CarryBee marked payment collected for order {$order->order_number}. Amount {$amount} BDT.",
-            'created_by' => null,
-            'is_seen'    => false,
-            'type'       => 'payment',
-            'is_active'  => true,
-            'image'      => null,
-            'module'     => 'order',
-        ]);
-    }
-
-    private function ensureCreditTransactionForCompletedOrder(Order $order): void
-    {
-        $hasCredit = Transaction::where('order_id', $order->id)
-            ->where('trx_type', 'credit')
-            ->where('type', 'order_status')
-            ->exists();
-
-        if ($hasCredit) {
             return;
         }
 
-        Transaction::create([
-            'amount' => $order->total,
-            'trx_type' => 'credit',
-            'status' => 'completed',
-            'source' => 'cod',
-            'order_id' => $order->id,
-            'type' => 'order_status',
-            'note' => 'Credit transaction for order #' . $order->order_number,
+        $result = $this->triggerDisbursementForPaidOrder($order, [
+            'actual_courier_fee' => Arr::get($payload, 'delivery_fee'),
+            'actual_cod_fee' => Arr::get($payload, 'cod_fee'),
+        ], $previousPaymentStatus);
+        $webhookEvent->disbursed_amount = (float) ($result['courier_net_payout'] ?? 0.00);
+
+        $this->notificationService->createAdminNotifications([
+            'title'      => 'CarryBee পেমেন্ট পরিশোধ (Order Paid)',
+            'subtitle'   => "CarryBee {$invoiceDisplay} দ্বারা অর্ডার #{$order->order_number} এর টাকা {$disbursedText} জমা হয়েছে।",
+            'created_by' => null,
+            'is_seen'    => false,
+            'type'       => 'carrybee_paid',
+            'is_active'  => true,
+            'image'      => null,
+            'module'     => 'order',
         ]);
-    }
-
-    private function syncDeliveryAssignmentData(Order $order, array $payload, ?int $mappedStatusId): void
-    {
-        $assigned = DeliveryAssignedInfo::where('order_id', $order->id)->first();
-        if (!$assigned) {
-            return;
-        }
-
-        if (Arr::has($payload, 'collectable_amount')) {
-            $assigned->collectable_amount = (float) Arr::get($payload, 'collectable_amount', 0);
-        }
-
-        if (Arr::has($payload, 'delivery_fee')) {
-            $assigned->delivery_fee = (float) Arr::get($payload, 'delivery_fee', 0);
-        }
-
-        if (Arr::has($payload, 'total_fee')) {
-            $assigned->total_fee = (float) Arr::get($payload, 'total_fee', 0);
-        }
-
-        if ($mappedStatusId !== null) {
-            $assigned->transfer_status_id = $mappedStatusId;
-        }
-
-        $assigned->save();
-    }
-
-    private function buildHistoryNote(array $payload): string
-    {
-        $event = (string) Arr::get($payload, 'event', 'unknown');
-        $attempt = Arr::get($payload, 'attempt');
-        $reason = Arr::get($payload, 'reason');
-        $remarks = Arr::get($payload, 'remarks');
-
-        $parts = ['CarryBee webhook: ' . $event];
-
-        if ($attempt !== null) {
-            $parts[] = 'attempt=' . $attempt;
-        }
-
-        if ($reason !== null && $reason !== '') {
-            $parts[] = 'reason=' . $reason;
-        }
-
-        if ($remarks !== null && $remarks !== '') {
-            $parts[] = 'remarks=' . $remarks;
-        }
-
-        return implode(' | ', $parts);
     }
 
     /**
-     * The single place that actually starts the disbursement journey once an
-     * order is confirmed CarryBee-paid - called from the real webhook
-     * (handleOrderPaidEvent) and from the admin's manual "mark as paid"
-     * reconciliation action (CarrybeeWebhookController::manualOrderPayment),
-     * so both paths run the exact same settlement + completion logic instead
-     * of two separately-maintained copies.
+     * The single place that starts the disbursement journey once an order is
+     * confirmed CarryBee-paid: the webhook, the admin's manual "mark as paid" and
+     * the admin's approval of a held review all run this.
      */
     public function triggerDisbursementForPaidOrder(Order $order, array $courierFeeData = [], ?string $previousPaymentStatus = null): array
     {
         $previousPaymentStatus = $previousPaymentStatus ?? $order->payment_status;
         $assigned = $order->deliveryInformation;
         $deliveryFee = $courierFeeData['actual_courier_fee'] ?? $order->actual_courier_fee ?? $assigned?->delivery_fee;
-        $codFee = $courierFeeData['actual_cod_fee'] ?? $order->actual_cod_fee;
+        $codFee = $courierFeeData['actual_cod_fee'] ?? $order->actual_cod_fee ?? $assigned?->cod_fee;
         if ($codFee === null && $assigned?->total_fee !== null && $assigned->delivery_fee !== null
             && (float) $assigned->total_fee >= (float) $assigned->delivery_fee) {
             $codFee = round((float) $assigned->total_fee - (float) $assigned->delivery_fee, 2);
@@ -522,85 +548,44 @@ class CarrybeeWebhookService
         return $result;
     }
 
-    private function handleOrderPaidEvent(Order $order, CarrybeeWebhookEvent $webhookEvent, array $payload): void
+    /**
+     * Admin approves a held courier review (partial delivery / amount mismatch).
+     * Starts settlement if CarryBee has already paid.
+     */
+    public function approveCourierReview(Order $order, ?int $adminId, ?string $note = null): array
     {
-        $invoiceId = (string) Arr::get($payload, 'invoice_id', '');
-        $timestamptz = Arr::get($payload, 'timestamptz');
-        $paidAt = $timestamptz ? \Carbon\Carbon::parse($timestamptz) : now();
-
-        $order->loadMissing(['items.product.vendor', 'vendor']);
-
-        // Determine if disbursement went to vendor or platform
-        $hasOwnDeliveryAccount = false;
-        if ($order->vendor && (bool) $order->vendor->has_own_delivery_account) {
-            $hasOwnDeliveryAccount = true;
-        } else {
-            foreach ($order->items as $item) {
-                if ($item->product?->vendor?->has_own_delivery_account) {
-                    $hasOwnDeliveryAccount = true;
-                    break;
-                }
+        return DB::transaction(function () use ($order, $adminId, $note) {
+            $order = Order::with('deliveryInformation')->lockForUpdate()->findOrFail($order->id);
+            $assigned = $order->deliveryInformation;
+            if (!$assigned || !$assigned->needs_review) {
+                return ['ok' => false, 'message' => 'This order has no courier review waiting.'];
             }
-        }
 
-        $disbursedTo = $hasOwnDeliveryAccount ? 'vendor' : 'platform';
-        $previousPaymentStatus = $order->payment_status;
-
-        // Update Webhook Event
-        if ($invoiceId !== '') {
-            $webhookEvent->invoice_id = $invoiceId;
-        }
-        $webhookEvent->disbursed_to = $disbursedTo;
-        $webhookEvent->admin_acknowledged = false;
-
-        // Update Order - this IS the authoritative "CarryBee actually collected
-        // the COD and the funds are available" signal.
-        if ($invoiceId !== '') {
-            $order->carrybee_invoice_id = $invoiceId;
-        }
-        $order->carrybee_paid_at = $paidAt;
-        $order->carrybee_disbursed_to = $disbursedTo;
-        $order->courier_payout_status = 'received';
-        $order->courier_cost_confirmed = true;
-        $order->payment_status = 'paid';
-        $order->save();
-
-        // Update DeliveryAssignedInfo
-        $assigned = DeliveryAssignedInfo::where('order_id', $order->id)->first();
-        if ($assigned) {
-            if ($invoiceId !== '') {
-                $assigned->carrybee_invoice_id = $invoiceId;
-            }
-            $assigned->carrybee_paid_at = $paidAt;
-            $assigned->transfer_status_id = 10;
+            $reason = $assigned->review_reason;
+            $assigned->needs_review = false;
+            $assigned->review_reason = null;
             $assigned->save();
-        }
 
-        // This is the single trigger for the disbursement journey on
-        // consignment orders: vendor/reseller/platform settlement rows are
-        // only created once we get here, never merely on "delivered". Prefer
-        // this event's own fee figures; processOrderDelivery() falls back to
-        // whatever "delivered" already captured, or the shipping-fee estimate.
-        $courierFeeData = [
-            'actual_courier_fee' => Arr::get($payload, 'delivery_fee', null),
-            'actual_cod_fee' => Arr::get($payload, 'cod_fee', null),
-        ];
-        $result = $this->triggerDisbursementForPaidOrder($order, $courierFeeData, $previousPaymentStatus);
-        $webhookEvent->disbursed_amount = (float) ($result['courier_net_payout'] ?? 0.00);
+            OrderStatusHistory::create([
+                'order_id' => $order->id,
+                'status_id' => (int) $order->status,
+                'note' => 'Courier review approved (' . $reason . ')' . ($note ? ' - ' . $note : ''),
+                'changed_by' => $adminId,
+                'source' => OrderStatusHistory::SOURCE_MANUAL,
+            ]);
 
-        // Notify Admins
-        $disbursedText = $disbursedTo === 'vendor' ? 'ভেন্ডরের নিজস্ব CarryBee অ্যাকাউন্টে' : 'প্ল্যাটফর্ম অ্যাকাউন্টে';
-        $invoiceDisplay = $invoiceId !== '' ? "ইনভয়েস #{$invoiceId}" : 'ইনভয়েস';
-        $this->notificationService->createAdminNotifications([
-            'title'      => 'CarryBee পেমেন্ট পরিশোধ (Order Paid)',
-            'subtitle'   => "CarryBee {$invoiceDisplay} দ্বারা অর্ডার #{$order->order_number} এর টাকা {$disbursedText} জমা হয়েছে।",
-            'created_by' => null,
-            'is_seen'    => false,
-            'type'       => 'carrybee_paid',
-            'is_active'  => true,
-            'image'      => null,
-            'module'     => 'order',
-        ]);
+            $settlementStarted = false;
+            if ((int) $order->status === 10 && $order->is_carrybee_paid) {
+                $this->triggerDisbursementForPaidOrder($order);
+                $settlementStarted = true;
+            }
+
+            return [
+                'ok' => true,
+                'message' => $settlementStarted ? 'Review approved and settlement started.' : 'Review approved. Settlement will start when CarryBee pays.',
+                'settlement_started' => $settlementStarted,
+            ];
+        });
     }
 
     public function processTestWebhook(array $payload): array
@@ -627,5 +612,214 @@ class CarrybeeWebhookService
                 'current_settlement_status' => $order ? ($order->is_carrybee_paid ? 'paid' : 'pending') : null,
             ],
         ];
+    }
+
+    /* ---------------- helpers ---------------- */
+
+    private function buildFingerprint(array $payload): string
+    {
+        $key = implode('|', [
+            (string) Arr::get($payload, 'event', ''),
+            (string) Arr::get($payload, 'store_id', ''),
+            (string) Arr::get($payload, 'consignment_id', ''),
+            (string) Arr::get($payload, 'merchant_order_id', ''),
+            (string) Arr::get($payload, 'timestamptz', ''),
+        ]);
+
+        return hash('sha256', $key);
+    }
+
+    private function isValidSignature(string $rawBody, string $received): bool
+    {
+        $secret = (string) config('carrybee.webhook.secret', '');
+        if ($secret === '') {
+            return false;
+        }
+
+        // CarryBee sends the merchant-chosen secret as-is; its docs wrap it in quotes.
+        $received = trim($received, " \t\n\r\0\x0B\"'");
+        if ($received === '') {
+            return false;
+        }
+
+        if (str_starts_with($received, 'sha256=')) {
+            $received = substr($received, 7);
+        }
+
+        if (hash_equals($secret, $received)) {
+            return true;
+        }
+
+        return hash_equals(hash_hmac('sha256', $rawBody, $secret), $received);
+    }
+
+    private function resolveOrder(array $payload): ?Order
+    {
+        $orderId = Arr::get($payload, 'order_id');
+        if (!empty($orderId) && ($order = Order::find($orderId))) {
+            return $order;
+        }
+
+        $consignmentId = Arr::get($payload, 'consignment_id');
+        if (!empty($consignmentId)) {
+            $assigned = DeliveryAssignedInfo::where('consignment_id', $consignmentId)->first();
+            if ($assigned?->order_id) {
+                return Order::find($assigned->order_id);
+            }
+        }
+
+        $merchantOrderId = Arr::get($payload, 'merchant_order_id');
+        if (!empty($merchantOrderId)) {
+            $assigned = DeliveryAssignedInfo::where('merchant_order_id', $merchantOrderId)->first();
+            if ($assigned?->order_id) {
+                return Order::find($assigned->order_id);
+            }
+
+            $draft = CarryBeeOrderCreateForm::where('merchant_order_id', $merchantOrderId)->first();
+            if ($draft?->order_id) {
+                return Order::find($draft->order_id);
+            }
+
+            if ($orderByNumber = Order::where('order_number', $merchantOrderId)->first()) {
+                return $orderByNumber;
+            }
+        }
+
+        return null;
+    }
+
+    private function eventTime(array $payload): ?Carbon
+    {
+        $value = Arr::get($payload, 'timestamptz');
+        if (empty($value)) {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private function hasOwnDeliveryAccount(Order $order): bool
+    {
+        if ($order->vendor && (bool) $order->vendor->has_own_delivery_account) {
+            return true;
+        }
+        foreach ($order->items as $item) {
+            if ($item->product?->vendor?->has_own_delivery_account) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function reasonText(array $payload): string
+    {
+        return trim(implode(' - ', array_filter([
+            trim((string) Arr::get($payload, 'reason', '')),
+            trim((string) Arr::get($payload, 'remarks', '')),
+        ])));
+    }
+
+    private function describeCauses(array $payload): string
+    {
+        $parts = [];
+        if ($reason = trim((string) Arr::get($payload, 'reason', ''))) {
+            $parts[] = $reason;
+        }
+        foreach ((array) Arr::get($payload, 'causes', []) as $field => $errors) {
+            $types = collect((array) $errors)->map(fn ($e) => is_array($e) ? ($e['type'] ?? 'invalid') : (string) $e)->implode(', ');
+            $parts[] = "{$field}: {$types}";
+        }
+
+        return $parts ? implode('; ', $parts) : 'CarryBee could not create the consignment';
+    }
+
+    private function buildHistoryNote(array $payload): string
+    {
+        $event = (string) Arr::get($payload, 'event', 'unknown');
+        $parts = ['CarryBee webhook: ' . $event];
+
+        if (($attempt = Arr::get($payload, 'attempt')) !== null) {
+            $parts[] = 'attempt=' . $attempt;
+        }
+        if (($reason = Arr::get($payload, 'reason')) !== null && $reason !== '') {
+            $parts[] = 'reason=' . $reason;
+        }
+        if (($remarks = Arr::get($payload, 'remarks')) !== null && $remarks !== '') {
+            $parts[] = 'remarks=' . $remarks;
+        }
+        if (($collected = Arr::get($payload, 'collected_amount')) !== null) {
+            $parts[] = 'collected=' . $collected;
+        }
+        if ($event === 'order.create-failed') {
+            $parts[] = $this->describeCauses($payload);
+        }
+
+        return implode(' | ', $parts);
+    }
+
+    /* ---------------- notifications ---------------- */
+
+    private function notifyUser(?int $userId, string $title, string $subtitle): void
+    {
+        if (!$userId) {
+            return;
+        }
+        $this->notificationService->createNotificationSafely([
+            'title' => $title, 'subtitle' => $subtitle, 'created_by' => null, 'send_to' => $userId,
+            'is_seen' => false, 'type' => 'order', 'is_active' => true, 'image' => null, 'module' => 'order',
+        ]);
+    }
+
+    private function notifyVendor(Order $order, string $title, string $subtitle): void
+    {
+        $order->loadMissing('vendor');
+        $this->notifyUser($order->vendor?->user_id, $title, $subtitle);
+    }
+
+    private function notifyAdmins(string $title, string $subtitle): void
+    {
+        $this->notificationService->createAdminNotifications([
+            'title' => $title, 'subtitle' => $subtitle, 'created_by' => null,
+            'is_seen' => false, 'type' => 'order', 'is_active' => true, 'image' => null, 'module' => 'order',
+        ]);
+    }
+
+    private function notifyCreateFailed(Order $order, array $payload): void
+    {
+        $reason = $this->describeCauses($payload);
+        $this->notifyAdmins('CarryBee consignment failed', "Order {$order->order_number}: {$reason}");
+        $this->notifyVendor($order, 'CarryBee consignment failed', "Order {$order->order_number} could not be booked with CarryBee: {$reason}");
+    }
+
+    private function notifyWebhookOrderStatusUpdated(Order $order, int $statusId): void
+    {
+        $order->loadMissing('vendor.user');
+        $statusName = OrderStatus::where('id', $statusId)->value('name') ?: 'Status ' . $statusId;
+
+        $this->notifyUser($order->user_id, 'Order Status Updated', "CarryBee updated order {$order->order_number} to {$statusName}.");
+        if ($order->vendor?->user_id) {
+            $this->notifyUser($order->vendor->user_id, 'Vendor Order Status Updated', "CarryBee updated order {$order->order_number} to {$statusName}.");
+        }
+        $this->notifyAdmins('CarryBee Order Status Updated', "Order {$order->order_number} updated to {$statusName}.");
+    }
+
+    private function notifyWebhookPaymentCompleted(Order $order): void
+    {
+        $amount = number_format((float) $order->total, 2, '.', '');
+        $subtitle = "CarryBee marked payment collected for order {$order->order_number}. Amount {$amount} BDT.";
+
+        $this->notificationService->createNotificationSafely([
+            'title' => 'Order Payment Completed', 'subtitle' => $subtitle, 'created_by' => null, 'send_to' => $order->user_id,
+            'is_seen' => false, 'type' => 'payment', 'is_active' => true, 'image' => null, 'module' => 'order',
+        ]);
+        $this->notificationService->createAdminNotifications([
+            'title' => 'Order Payment Completed', 'subtitle' => $subtitle, 'created_by' => null,
+            'is_seen' => false, 'type' => 'payment', 'is_active' => true, 'image' => null, 'module' => 'order',
+        ]);
     }
 }

@@ -430,6 +430,7 @@ class PartnerApiController extends Controller
                 'status_id' => 1,
                 'note' => "Order ingested via Partner API from Store: {$store->store_name} (Ext ID: {$externalOrderId})",
                 'changed_by' => $dropshipper->id,
+                'source' => \App\Models\OrderStatusHistory::SOURCE_SYSTEM,
             ]);
 
             // Create line items & decrement stock

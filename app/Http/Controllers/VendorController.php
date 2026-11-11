@@ -391,8 +391,14 @@ class VendorController extends Controller
     public function setDefaultCarrybeeStore(Request $request, $id)
     {
         try {
+            $storeId = $request->input('carryb_store_id');
+            if (is_int($storeId) || is_float($storeId)) {
+                $request->merge(['carryb_store_id' => (string) $storeId]);
+            }
+
             $validated = $request->validate([
-                'carryb_store_id' => ['nullable', 'integer', 'min:1'],
+                // CarryBee store ids are strings (e.g. "abcd-1234"); numeric ids are cast below.
+                'carryb_store_id' => ['nullable', 'string', 'max:64'],
             ]);
 
             $vendor = Vendor::find($id);
@@ -400,7 +406,8 @@ class VendorController extends Controller
                 return $this->failed('Vendor not found', null, 404);
             }
 
-            $vendor->carryb_store_id = $validated['carryb_store_id'] ?? null;
+            $storeId = trim((string) ($validated['carryb_store_id'] ?? ''));
+            $vendor->carryb_store_id = $storeId === '' ? null : $storeId;
             $vendor->save();
 
             return $this->success('Default CarryBee store saved', [

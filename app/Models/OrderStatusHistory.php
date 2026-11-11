@@ -14,7 +14,13 @@ class OrderStatusHistory extends Model
         'status_id',
         'note',
         'changed_by',
+        'source',
     ];
+
+    public const SOURCE_MANUAL = 'manual';
+    public const SOURCE_WEBHOOK = 'webhook';
+    public const SOURCE_CATCH_UP = 'catch-up';
+    public const SOURCE_SYSTEM = 'system';
 
     public function order()
     {

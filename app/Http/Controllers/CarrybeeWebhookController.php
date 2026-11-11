@@ -176,6 +176,108 @@ class CarrybeeWebhookController extends Controller
     }
 
     /**
+     * Re-run a stored event that failed or found no order (e.g. after fixing a consignment link).
+     * POST /api/delivery-companies/carrybee/webhook-events/{id}/reprocess
+     */
+    public function reprocessEvent(int $id): JsonResponse
+    {
+        $event = CarrybeeWebhookEvent::find($id);
+        if (!$event) {
+            return response()->json(['status' => 'failed', 'message' => 'Webhook event not found.'], 404);
+        }
+        if ($event->processing_status === 'processed') {
+            return response()->json(['status' => 'failed', 'message' => 'This event was already processed.'], 422);
+        }
+        // A rejected event failed the signature check: its payload may not be from CarryBee.
+        if ($event->processing_status === 'rejected' || !$event->signature_valid) {
+            return response()->json(['status' => 'failed', 'message' => 'This event failed the signature check and cannot be trusted. Fix the secret so CarryBee resends it, or run "Sync from CarryBee".'], 422);
+        }
+        if (!is_array($event->payload) || empty($event->payload['event'])) {
+            return response()->json(['status' => 'failed', 'message' => 'This event has no usable payload.'], 422);
+        }
+
+        // Clear the "done" marker so the normal pipeline runs it again.
+        $event->forceFill(['processed_at' => null, 'processing_status' => 'received', 'signature_valid' => true])->save();
+        $result = $this->webhookService->processTrusted($event->payload, OrderStatusHistory::SOURCE_WEBHOOK);
+
+        return response()->json([
+            'status' => $result['ok'] ? 'success' : 'failed',
+            'message' => $result['message'],
+            'data' => $result['data'] ?? null,
+        ], $result['ok'] ? 200 : $result['http_code']);
+    }
+
+    /**
+     * Per-store webhook health for the last N days: is each CarryBee account sending us events?
+     * GET /api/delivery-companies/carrybee/webhook-health?days=7
+     */
+    public function webhookHealth(Request $request): JsonResponse
+    {
+        $days = max(1, min(90, (int) $request->get('days', 7)));
+        $since = now()->subDays($days);
+
+        $rows = CarrybeeWebhookEvent::query()
+            ->where('created_at', '>=', $since)
+            ->selectRaw("COALESCE(store_id, '') as store_id, processing_status, COUNT(*) as total, MAX(created_at) as last_seen")
+            ->groupBy('store_id', 'processing_status')
+            ->get();
+
+        $byStore = [];
+        foreach ($rows as $row) {
+            $key = (string) $row->store_id;
+            $byStore[$key] ??= ['store_id' => $key ?: null, 'total' => 0, 'by_status' => [], 'last_seen' => null];
+            $byStore[$key]['total'] += (int) $row->total;
+            $byStore[$key]['by_status'][$row->processing_status] = (int) $row->total;
+            if ($byStore[$key]['last_seen'] === null || $row->last_seen > $byStore[$key]['last_seen']) {
+                $byStore[$key]['last_seen'] = $row->last_seen;
+            }
+        }
+
+        // Vendors that should be sending events from their own CarryBee account.
+        $vendors = \App\Models\Vendor::where('has_own_delivery_account', true)
+            ->get(['id', 'shop_name', 'carryb_store_id']);
+        $vendorHealth = $vendors->map(function ($vendor) use ($byStore) {
+            $stats = $vendor->carryb_store_id !== null ? ($byStore[(string) $vendor->carryb_store_id] ?? null) : null;
+
+            return [
+                'vendor_id' => $vendor->id,
+                'shop_name' => $vendor->shop_name,
+                'carryb_store_id' => $vendor->carryb_store_id,
+                'events' => $stats['total'] ?? 0,
+                'last_seen' => $stats['last_seen'] ?? null,
+                'by_status' => $stats['by_status'] ?? [],
+                'healthy' => ($stats['total'] ?? 0) > 0 && (($stats['by_status']['rejected'] ?? 0) === 0),
+            ];
+        })->values();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'days' => $days,
+                'stores' => array_values($byStore),
+                'own_account_vendors' => $vendorHealth,
+                'secret_configured' => (string) config('carrybee.webhook.secret', '') !== '',
+            ],
+        ]);
+    }
+
+    /**
+     * Run the catch-up now (all quiet consignments, or one consignment).
+     * POST /api/delivery-companies/carrybee/catch-up {consignment_id?}
+     */
+    public function runCatchUp(Request $request, \App\Service\CarrybeeCatchUpService $catchUp): JsonResponse
+    {
+        $validated = $request->validate([
+            'consignment_id' => ['nullable', 'string', 'max:64'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $summary = $catchUp->run($validated['limit'] ?? 20, $validated['consignment_id'] ?? null);
+
+        return response()->json(['status' => 'success', 'message' => "Checked {$summary['checked']}, updated {$summary['updated']}.", 'data' => $summary]);
+    }
+
+    /**
      * Manually mark or reset an order's CarryBee payment status.
      * POST /api/delivery-companies/carrybee/manual-order-payment/{id}
      */
@@ -274,6 +376,7 @@ class CarrybeeWebhookController extends Controller
                 'status_id' => (int) $order->status,
                 'note' => 'Manual Action: Marked as CarryBee Paid (Invoice: ' . $invoiceId . ', Disbursed To: ' . $disbursedTo . ')' . (!empty($validated['note']) ? ' - ' . $validated['note'] : ''),
                 'changed_by' => $adminUser?->id,
+                'source' => OrderStatusHistory::SOURCE_MANUAL,
             ]);
 
             return response()->json([
@@ -314,6 +417,7 @@ class CarrybeeWebhookController extends Controller
                 'status_id' => (int) $order->status,
                 'note' => 'Manual Action: Reset CarryBee Paid status back to unpaid/pending' . (!empty($validated['note']) ? ' - ' . $validated['note'] : ''),
                 'changed_by' => $adminUser?->id,
+                'source' => OrderStatusHistory::SOURCE_MANUAL,
             ]);
 
             return response()->json([

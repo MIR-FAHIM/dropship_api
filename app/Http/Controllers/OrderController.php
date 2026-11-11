@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use App\Service\NotificationService;
 use App\Service\OrderAccountingService;
+use App\Service\OrderStatusTransitionService;
 use App\Service\CarrybeeService;
 use App\Service\CompanyTransactionService;
 use App\Service\MuthobartaSmsService;
@@ -654,6 +655,7 @@ class OrderController extends Controller
                 'status_id' => 1,
                 'note' => 'Order created via checkout',
                 'changed_by' => $validated['user_id'],
+                'source' => OrderStatusHistory::SOURCE_SYSTEM,
             ]);
 
             foreach ($resolvedItems as $ci) {
@@ -1176,6 +1178,7 @@ class OrderController extends Controller
                     'status_id' => $orderPayload['status'],
                     'note' => "Product replaced: #{$replacement['previous_product_id']} ({$replacement['previous_sku']}) to #{$product->id} ({$product->sku}).",
                     'changed_by' => $request->user()->id,
+                    'source' => OrderStatusHistory::SOURCE_MANUAL,
                 ]);
             }
 
@@ -1457,22 +1460,38 @@ class OrderController extends Controller
             $validated = $request->validate([
                 'status_id' => ['required', 'integer', 'exists:order_statuses,id'],
                 'note' => ['nullable', 'string'],
+                // Admin-only: reason for a change the journey rules would otherwise block.
+                'override_reason' => ['nullable', 'string', 'max:500'],
             ]);
+
+            // Only admins and this order's vendor may change its status.
+            $requester = $request->attributes->get('api_user') ?? $request->user();
+            $isAdmin = $this->isOrdersAdmin($request);
+            if (!$isAdmin && !$this->isOrderVendor($request, $order)) {
+                return $this->failed('You are not allowed to change this order\'s status.', null, 403);
+            }
 
             $previousStatusId = (int) $order->status;
             $previousPaymentStatus = $order->payment_status;
             $statusId = (int) $validated['status_id'];
             $statusName = OrderStatus::where('id', $statusId)->value('name') ?: 'Status ' . $statusId;
 
-            $order->status = $statusId;
-            $order->save();
+            $transitions = app(OrderStatusTransitionService::class);
+            $overrideReason = trim((string) ($validated['override_reason'] ?? ''));
+            $check = $transitions->checkManual($order, $statusId, $isAdmin, $overrideReason);
 
-            OrderStatusHistory::create([
-                'order_id' => $order->id,
-                'status_id' => $statusId,
-                'note' => $validated['note'] ?? null,
-                'changed_by' => null,
-            ]);
+            if ($check['code'] === OrderStatusTransitionService::CODE_UNCHANGED) {
+                return $this->success('Order status unchanged', $order);
+            }
+            if ($check['code'] !== OrderStatusTransitionService::CODE_OK) {
+                return $this->failed($check['message'], ['code' => $check['code']], 422);
+            }
+
+            $note = $validated['note'] ?? null;
+            if ($overrideReason !== '' && $check['message'] === 'Allowed by admin override') {
+                $note = trim('Admin override: ' . $overrideReason . ($note ? ' | ' . $note : ''));
+            }
+            $transitions->apply($order, $statusId, OrderStatusHistory::SOURCE_MANUAL, $requester?->id, $note);
 
             if ($previousStatusId !== $statusId) {
                 $order->loadMissing('vendor.user');
@@ -1848,6 +1867,90 @@ class OrderController extends Controller
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * GET /orders/{id}/courier-events
+     * CarryBee timeline for one order, for admins, its vendor and its dropshipper.
+     */
+    public function courierEvents(Request $request, $id)
+    {
+        $order = Order::with('deliveryInformation')->find($id);
+        if (!$order) {
+            return $this->failed('Order not found', null, 404);
+        }
+
+        $user = $request->attributes->get('api_user') ?? $request->user();
+        $isOwner = $user && (int) $order->user_id === (int) $user->id;
+        if (!$this->isOrdersAdmin($request) && !$this->isOrderVendor($request, $order) && !$isOwner) {
+            return $this->failed('You are not allowed to view this order.', null, 403);
+        }
+
+        $labels = (array) config('carrybee.event_labels', []);
+        $events = \App\Models\CarrybeeWebhookEvent::where('order_id', $order->id)
+            ->where('signature_valid', true)
+            ->whereNotIn('processing_status', ['rejected'])
+            ->orderByRaw('COALESCE(event_time, created_at)')
+            ->get(['id', 'event', 'event_time', 'created_at', 'payload', 'processing_status'])
+            ->map(function ($event) use ($labels) {
+                $payload = is_array($event->payload) ? $event->payload : [];
+
+                return [
+                    'id' => $event->id,
+                    'event' => $event->event,
+                    'label' => $labels[$event->event] ?? $event->event,
+                    'time' => $event->event_time ?: $event->created_at?->toIso8601String(),
+                    'attempt' => $payload['attempt'] ?? null,
+                    'reason' => $payload['reason'] ?? null,
+                    'remarks' => $payload['remarks'] ?? null,
+                    'rider_name' => $payload['agent_name'] ?? null,
+                    'rider_phone' => $payload['agent_phone'] ?? null,
+                    'collected_amount' => $payload['collected_amount'] ?? null,
+                    'source' => $payload['source'] ?? 'webhook',
+                ];
+            })
+            ->values();
+
+        $info = $order->deliveryInformation;
+
+        return $this->success('Courier events fetched', [
+            'consignment_id' => $info?->consignment_id,
+            'tracking' => $info ? [
+                'stage' => $info->courier_stage,
+                'stage_label' => $info->courier_stage ? ($labels[$info->courier_stage] ?? $info->courier_stage) : null,
+                'stage_at' => $info->courier_stage_at?->toIso8601String(),
+                'attempt' => $info->attempt,
+                'rider_name' => $info->rider_name,
+                'rider_phone' => $info->rider_phone,
+                'issue_flag' => $info->issue_flag,
+                'issue_reason' => $info->issue_reason,
+                'collected_amount' => $info->collected_amount,
+                'needs_review' => (bool) $info->needs_review,
+                'review_reason' => $info->review_reason,
+                'checked_at' => $info->courier_checked_at?->toIso8601String(),
+            ] : null,
+            'events' => $events,
+        ]);
+    }
+
+    /**
+     * POST /orders/{id}/courier-review/approve  {note?}
+     * Admin clears a partial-delivery / amount-mismatch hold; settlement starts if CarryBee already paid.
+     */
+    public function approveCourierReview(Request $request, $id)
+    {
+        $validated = $request->validate(['note' => ['nullable', 'string', 'max:500']]);
+        $order = Order::find($id);
+        if (!$order) {
+            return $this->failed('Order not found', null, 404);
+        }
+
+        $admin = $request->attributes->get('api_user') ?? $request->user();
+        $result = app(\App\Service\CarrybeeWebhookService::class)->approveCourierReview($order, $admin?->id, $validated['note'] ?? null);
+
+        return $result['ok']
+            ? $this->success($result['message'], ['settlement_started' => $result['settlement_started']])
+            : $this->failed($result['message'], null, 422);
     }
 
     /** Same role rule as the `admin:orders` middleware. */

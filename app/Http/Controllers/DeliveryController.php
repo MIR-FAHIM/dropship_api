@@ -78,7 +78,8 @@ class DeliveryController extends Controller
                 'note' => $validated['note'] ?? null,
             ]);
 
-            Order::where('id', $validated['order_id'])->update(['status' => 'assigned deliveryman']);
+            // The assignment is tracked in assign_delivery_men. Don't write the text
+            // 'assigned deliveryman' into orders.status: it isn't an order_statuses id.
 
             return $this->success('Delivery man assigned successfully', $assignment->load(['deliveryMan', 'order']), 201);
         } catch (\Illuminate\Validation\ValidationException $e) {

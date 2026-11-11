@@ -2113,6 +2113,7 @@ class OrderAccountingService
             'status_id' => 9,
             'note' => 'All stakeholder settlements completed (CarryBee Courier, Dropshipper & Supplier). Order marked as Completed.',
             'changed_by' => null,
+            'source' => OrderStatusHistory::SOURCE_SYSTEM,
         ]);
 
         return true;

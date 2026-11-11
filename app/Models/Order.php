@@ -9,6 +9,7 @@ class Order extends Model
 {
     use HasFactory;
 
+    // 12 Return in Transit is also non-payable; see CarrybeeWebhookService (order.paid).
     public const CARRYBEE_NON_PAYABLE_STATUSES = [7, 8, 11];
     public const DROPSHIPPER_COMPLETED_STATUSES = [9, 10];
 

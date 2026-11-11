@@ -514,6 +514,7 @@ class LandingPageOrderController extends Controller
                     'status_id' => 1,
                     'note' => 'Order created from landing page order #' . $landingOrder->id,
                     'changed_by' => $landingOrder->reseller_id,
+                    'source' => \App\Models\OrderStatusHistory::SOURCE_SYSTEM,
                 ]);
 
                 $landingOrder->update([

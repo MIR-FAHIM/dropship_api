@@ -576,6 +576,7 @@ class OrderStakeBreakdownTest extends TestCase
             'payment_method' => 'bkash',
             'trx_id' => 'BK789456123',
             'note' => 'Direct bKash disbursement by admin',
+            'payout_review_confirmed' => true,
         ]);
 
         $response->assertStatus(200);
@@ -603,6 +604,7 @@ class OrderStakeBreakdownTest extends TestCase
             'payment_method' => 'bkash',
             'trx_id' => 'BK789456124',
             'note' => 'Accidental second disbursement attempt',
+            'payout_review_confirmed' => true,
         ]);
 
         $secondResponse->assertStatus(400);

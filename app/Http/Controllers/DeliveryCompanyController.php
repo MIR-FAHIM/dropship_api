@@ -135,47 +135,9 @@ class DeliveryCompanyController extends Controller
      */
     private function carrybeeService($vendorId = null)
     {
-        // Check if vendor exists and has own delivery account enabled
-        $vendor = !empty($vendorId) ? Vendor::where('id', $vendorId)->first() : null;
+        $resolved = app(\App\Service\CarrybeeCredentialResolver::class)->forVendor($vendorId);
 
-        if ($vendor && $vendor->has_own_delivery_account) {
-            $vendorUserIds = array_unique(array_filter([$vendor->user_id, $vendor->id, (int) $vendorId]));
-            $vendorCredential = VendorCarryBeeCredintial::where('is_active', true)
-                ->whereIn('vendor_id', $vendorUserIds)
-                ->latest()
-                ->first();
-
-            if (!$vendorCredential) {
-                return $this->failed('No active Carrybee credentials found for this vendor', null, 404);
-            }
-
-            if (!$vendorCredential->client_id || !$vendorCredential->client_secret || !$vendorCredential->client_context) {
-                return $this->failed('Vendor Carrybee credentials are incomplete', null, 422);
-            }
-
-            return new CarrybeeService($vendorCredential->client_id, $vendorCredential->client_secret, $vendorCredential->client_context);
-        }
-
-        // If vendorId corresponds directly to a DeliveryCompany record (and is not an existing vendor)
-        $credential = null;
-        if (empty($vendor) && !empty($vendorId) && is_numeric($vendorId)) {
-            $credential = DeliveryCompany::where('id', $vendorId)->where('is_active', true)->first();
-        }
-
-        // Fallback to global active DeliveryCompany credentials
-        if (!$credential) {
-            $credential = DeliveryCompany::where('is_active', true)->latest()->first();
-        }
-
-        if (!$credential) {
-            return $this->failed('No active Carrybee credentials found', null, 404);
-        }
-
-        if (!$credential->api_key || !$credential->secret_key || !$credential->client_context) {
-            return $this->failed('Carrybee credentials are incomplete', null, 422);
-        }
-
-        return new CarrybeeService($credential->api_key, $credential->secret_key, $credential->client_context);
+        return $resolved['service'] ?? $this->failed($resolved['error'], null, $resolved['http_code']);
     }
 
     /**

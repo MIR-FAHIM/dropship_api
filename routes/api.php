@@ -262,6 +262,8 @@ Route::prefix('orders')->group(function () {
     Route::get('/completed/{userId}', [OrderController::class, 'completedOrdersByUser']);
     Route::get('/vendor/{vendorId}', [OrderController::class, 'vendorOrderList']);
     Route::get('/details/{id}', [OrderController::class, 'getOrderDetails']);
+    Route::get('/{id}/courier-events', [OrderController::class, 'courierEvents']);
+    Route::post('/{id}/courier-review/approve', [OrderController::class, 'approveCourierReview'])->middleware('admin:orders');
     Route::get('/status-summary', [OrderController::class, 'orderStatusSummary']);
     Route::post('update/status/{id}', [OrderController::class, 'updateOrderStatus']);
     Route::post('/{id}/manual-carrybee-payment', [CarrybeeWebhookController::class, 'manualOrderPayment']);
@@ -553,10 +555,13 @@ Route::prefix('delivery-companies')->group(function () {
     Route::post('/carrybee/{vendorId}/address-details', [DeliveryCompanyController::class, 'carrybeeAddressDetails']);
     // Carrybee Webhook & Payment Notification Endpoints
     Route::post('/carrybee/webhook', [CarrybeeWebhookController::class, 'handle'])->withoutMiddleware('token');
-    Route::get('/carrybee/unacknowledged-paid-orders', [CarrybeeWebhookController::class, 'getUnacknowledgedPaidOrders']);
-    Route::post('/carrybee/acknowledge-paid-order/{id}', [CarrybeeWebhookController::class, 'acknowledgePaidOrder']);
-    Route::post('/carrybee/test-webhook', [CarrybeeWebhookController::class, 'testWebhook']);
-    Route::get('/carrybee/webhook-events', [CarrybeeWebhookController::class, 'getWebhookEvents']);
+    Route::get('/carrybee/unacknowledged-paid-orders', [CarrybeeWebhookController::class, 'getUnacknowledgedPaidOrders'])->middleware('admin:orders');
+    Route::post('/carrybee/acknowledge-paid-order/{id}', [CarrybeeWebhookController::class, 'acknowledgePaidOrder'])->middleware('admin:orders');
+    Route::post('/carrybee/test-webhook', [CarrybeeWebhookController::class, 'testWebhook'])->middleware('admin:orders');
+    Route::get('/carrybee/webhook-events', [CarrybeeWebhookController::class, 'getWebhookEvents'])->middleware('admin:orders');
+    Route::post('/carrybee/webhook-events/{id}/reprocess', [CarrybeeWebhookController::class, 'reprocessEvent'])->middleware('admin:orders');
+    Route::get('/carrybee/webhook-health', [CarrybeeWebhookController::class, 'webhookHealth'])->middleware('admin:orders');
+    Route::post('/carrybee/catch-up', [CarrybeeWebhookController::class, 'runCatchUp'])->middleware('admin:orders');
     Route::post('/carrybee/manual-order-payment/{id}', [CarrybeeWebhookController::class, 'manualOrderPayment'])->middleware('admin:accounts');
     // Order Drafts
     Route::post('/carrybee/order-drafts', [DeliveryCompanyController::class, 'orderDraftSave']);
