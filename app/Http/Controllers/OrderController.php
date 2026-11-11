@@ -1289,6 +1289,9 @@ class OrderController extends Controller
                 ])->withCasts(['completed_order_count' => 'integer']),
                 'vendor',
                 'items.shop',
+                // Thumbnail only: keep the product payload small on the list endpoint.
+                'items.product:id,thumbnail_img',
+                'items.product.primaryImage:id,file_name,external_link',
                 'deliveryInformation',
                 'advanceTransaction',
                 'advanceRefundTransaction',
