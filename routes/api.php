@@ -290,7 +290,7 @@ Route::prefix('order-settlements')->group(function () {
     // Financial stake breakdown, editable adjustments, multi-order vendor invoice, and direct dropshipper disbursement
     Route::get('/orders/{orderId}/breakdown', [OrderSettlementController::class, 'getOrderBreakdown']);
     Route::post('/orders/{orderId}/update-breakdown', [OrderSettlementController::class, 'updateOrderBreakdown']);
-    Route::post('/orders/{orderId}/disburse-reseller-profit', [OrderSettlementController::class, 'disburseDropshipperProfit']);
+    Route::post('/orders/{orderId}/disburse-reseller-profit', [OrderSettlementController::class, 'disburseDropshipperProfit'])->middleware('admin:orders');
     Route::post('/vendor-invoice', [OrderSettlementController::class, 'createVendorInvoice']);
     Route::get('/vendor-invoices', [OrderSettlementController::class, 'listVendorInvoices']);
     Route::get('/vendor-invoices/{id}', [OrderSettlementController::class, 'vendorInvoiceDetails']);

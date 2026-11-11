@@ -795,7 +795,8 @@ class OrderSettlementController extends Controller
 
             $validated = $request->validate([
                 'amount' => 'nullable|numeric|min:0.01',
-                'payment_method' => 'nullable|string|in:wallet,bank,bkash,nagad,cash',
+                // Matches the admin modal's options (rocket, bank_transfer were missing).
+                'payment_method' => 'nullable|string|in:wallet,bank,bank_transfer,bkash,nagad,rocket,cash',
                 'trx_id' => 'nullable|string|max:100',
                 'note' => 'nullable|string',
                 // Admin must confirm they reviewed balance, withdraws and advances.
