@@ -251,6 +251,7 @@ Route::prefix('orders')->group(function () {
     Route::post('/{id}/pay-advance', [OrderController::class, 'payAdvance']);
     Route::post('/{id}/approve-advance', [OrderController::class, 'approveAdvance'])->middleware('admin:orders');
     Route::post('/{id}/reject-advance', [OrderController::class, 'rejectAdvance'])->middleware('admin:orders');
+    Route::patch('/{id}/admin-note', [OrderController::class, 'updateAdminNote'])->middleware('admin:orders');
     Route::get('/list/{userId}', [OrderController::class, 'listOrdersByUser']);
     Route::get('/all/orders', [OrderController::class, 'allOrders']);
     Route::get('/replacement-products', [OrderController::class, 'replacementProducts'])->middleware('admin:orders');

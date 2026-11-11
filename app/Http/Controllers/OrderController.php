@@ -1393,7 +1393,7 @@ class OrderController extends Controller
     /**
      * GET /orders/details/{id}
      */
-    public function getOrderDetails($id)
+    public function getOrderDetails(Request $request, $id)
     {
         try {
             $order = Order::with([
@@ -1423,6 +1423,10 @@ class OrderController extends Controller
             $order->item_replacement_block_reason = $this->itemReplacementBlockReason($order);
             if (in_array($order->advance_status, ['pending', 'submitted', 'approved', 'rejected'], true)) {
                 $order->advance_decision_block_reason = $this->orderAccountingService->advanceDecisionBlockReason($order);
+            }
+
+            if ($this->isOrdersAdmin($request)) {
+                $order->makeVisible(Order::ADMIN_NOTE_FIELDS);
             }
 
             return $this->success('Order fetched successfully', $order);
@@ -1800,5 +1804,58 @@ class OrderController extends Controller
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * PATCH /orders/{id}/admin-note
+     * Save the internal admin note. Allowed even when the order is locked,
+     * since it doesn't touch items, prices or delivery info.
+     */
+    public function updateAdminNote(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate([
+                'admin_note' => ['nullable', 'string', 'max:5000'],
+            ]);
+
+            $order = Order::find($id);
+            if (!$order) {
+                return $this->failed('Order not found', null, 404);
+            }
+
+            $user = $request->attributes->get('api_user') ?? $request->user();
+            $note = trim((string) ($validated['admin_note'] ?? ''));
+
+            $order->forceFill([
+                'admin_note' => $note === '' ? null : $note,
+                'admin_note_updated_by' => $user?->id,
+                'admin_note_updated_at' => now(),
+            ])->save();
+
+            return $this->success(
+                'Admin note saved',
+                $order->only(Order::ADMIN_NOTE_FIELDS)
+            );
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed($e->getMessage(), $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /** Same role rule as the `admin:orders` middleware. */
+    private function isOrdersAdmin(Request $request): bool
+    {
+        $user = $request->attributes->get('api_user') ?? $request->user();
+        if (!$user || (int) ($user->banned ?? 0) === 1) {
+            return false;
+        }
+
+        $roles = array_filter([
+            strtolower((string) ($user->user_type ?? '')),
+            strtolower((string) ($user->role ?? '')),
+        ]);
+
+        return (bool) array_intersect($roles, ['admin', 'superadmin']);
     }
 }

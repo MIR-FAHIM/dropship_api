@@ -12,7 +12,10 @@ class Order extends Model
     public const CARRYBEE_NON_PAYABLE_STATUSES = [7, 8, 11];
     public const DROPSHIPPER_COMPLETED_STATUSES = [9, 10];
 
-    protected $hidden = ['marketer_client_id'];
+    // Internal admin note fields: hidden by default, made visible only for admins.
+    public const ADMIN_NOTE_FIELDS = ['admin_note', 'admin_note_updated_by', 'admin_note_updated_at'];
+
+    protected $hidden = ['marketer_client_id', 'admin_note', 'admin_note_updated_by', 'admin_note_updated_at'];
 
     protected static function booted(): void
     {
@@ -70,6 +73,9 @@ class Order extends Model
         'carrybee_disbursed_to',
 
         'note',
+        'admin_note',
+        'admin_note_updated_by',
+        'admin_note_updated_at',
     ];
 
     protected $casts = [
@@ -87,6 +93,7 @@ class Order extends Model
         'courier_cost_confirmed' => 'boolean',
         'courier_net_payout' => 'float',
         'carrybee_paid_at' => 'datetime',
+        'admin_note_updated_at' => 'datetime',
         'lat' => 'float',
         'lon' => 'float',
     ];
