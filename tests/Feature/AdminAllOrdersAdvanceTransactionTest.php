@@ -86,7 +86,14 @@ class AdminAllOrdersAdvanceTransactionTest extends TestCase
         $this->assertSame('debit', $advance['trx_type']);
         $this->assertSame('completed', $advance['status']);
 
+        $refund = $orders['ORD-ADV-001']['advance_refund_transaction'];
+        $this->assertNotNull($refund);
+        $this->assertSame('advance_refund', $refund['type']);
+        $this->assertSame('REF-ADV-X', $refund['trx_id']);
+
         $this->assertArrayHasKey('advance_transaction', $orders['ORD-ADV-002']);
         $this->assertNull($orders['ORD-ADV-002']['advance_transaction']);
+        $this->assertArrayHasKey('advance_refund_transaction', $orders['ORD-ADV-002']);
+        $this->assertNull($orders['ORD-ADV-002']['advance_refund_transaction']);
     }
 }

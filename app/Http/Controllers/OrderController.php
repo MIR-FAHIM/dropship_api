@@ -1291,6 +1291,7 @@ class OrderController extends Controller
                 'items.shop',
                 'deliveryInformation',
                 'advanceTransaction',
+                'advanceRefundTransaction',
             ]);
 
             // Vendor filter: support vendor_id or vendor

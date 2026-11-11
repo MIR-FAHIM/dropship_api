@@ -177,6 +177,20 @@ class Order extends Model
     }
 
     /**
+     * The advance release/refund wallet record (reseller_transactions.type = 'advance_refund').
+     * Created once by OrderAccountingService::refundOrderAdvance() when the order is delivered
+     * (advance released) or cancelled (advance refunded). advance_status stays 'approved'
+     * afterwards, so this row is the only signal that the advance is no longer held.
+     */
+    public function advanceRefundTransaction()
+    {
+        return $this->hasOne(ResellerTransaction::class, 'order_id')
+            ->ofMany(['id' => 'max'], function ($query) {
+                $query->where('type', 'advance_refund');
+            });
+    }
+
+    /**
      * Determines whether an actual delivery consignment has been created or linked to this order.
      */
     public function hasConsignment(): bool
