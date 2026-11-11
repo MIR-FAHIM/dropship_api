@@ -400,6 +400,29 @@ class CarrybeeStatusJourneyTest extends TestCase
         }
     }
 
+    public function test_catch_up_fills_invoice_for_orders_marked_paid_by_hand(): void
+    {
+        DeliveryCompany::create(['company_name' => 'CarryBee', 'is_active' => true, 'api_key' => 'id', 'secret_key' => 'secret', 'client_context' => 'ctx']);
+        $paidByHand = $this->makeOrder(10);
+        $completedByHand = $this->makeOrder(9);
+        $alreadyInvoiced = $this->makeOrder(10);
+        $alreadyInvoiced->forceFill(['carrybee_invoice_id' => 'IXOLD'])->save();
+
+        Http::fake(['developers.carrybee.com/*' => Http::response(['error' => false, 'data' => [
+            'transfer_status' => 'Delivered', 'collected_amount' => '870', 'invoice_id' => 'IXHAND',
+            'payment_status' => 'Paid', 'updated_at' => '2026-11-10T10:11:12+00:00',
+        ]])]);
+
+        $this->artisan('carrybee:catch-up')->expectsOutputToContain('Checked 2')->assertSuccessful();
+
+        $this->assertSame('IXHAND', $paidByHand->fresh()->carrybee_invoice_id);
+        $this->assertNotNull($paidByHand->fresh()->carrybee_paid_at);
+        $this->assertSame(9, (int) $completedByHand->fresh()->status);
+        $this->assertSame('IXHAND', $completedByHand->fresh()->carrybee_invoice_id);
+        $this->assertSame(0, OrderSettlement::where('order_id', $completedByHand->id)->count(), 'completed order settlement untouched');
+        $this->assertSame('IXOLD', $alreadyInvoiced->fresh()->carrybee_invoice_id);
+    }
+
     public function test_dry_run_changes_nothing(): void
     {
         DeliveryCompany::create(['company_name' => 'CarryBee', 'is_active' => true, 'api_key' => 'id', 'secret_key' => 'secret', 'client_context' => 'ctx']);

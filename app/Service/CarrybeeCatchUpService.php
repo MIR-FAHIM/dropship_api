@@ -46,7 +46,10 @@ class CarrybeeCatchUpService
             // A named consignment is looked up whatever its status (useful with --dry-run).
             $query->where('consignment_id', $consignmentId);
         } else {
-            $query->whereHas('order', fn ($q) => $q->whereIn('status', array_map('strval', $activeStatuses)));
+            // Still moving, or marked Carrybee Paid / Completed by hand without CarryBee's invoice.
+            $query->whereHas('order', fn ($q) => $q->whereIn('status', array_map('strval', $activeStatuses))
+                ->orWhere(fn ($paid) => $paid->whereIn('status', ['9', '10'])
+                    ->where(fn ($noInvoice) => $noInvoice->whereNull('carrybee_invoice_id')->orWhere('carrybee_invoice_id', ''))));
             $query->where(fn ($q) => $q->whereNull('courier_stage_at')->orWhere('courier_stage_at', '<', $quietSince))
                 ->where(fn ($q) => $q->whereNull('courier_checked_at')->orWhere('courier_checked_at', '<', $quietSince));
         }
