@@ -142,6 +142,11 @@ class User extends Model
         return $this->hasMany(Order::class);
     }
 
+    public function bankAccounts()
+    {
+        return $this->hasMany(UserBankAccount::class, 'user_id');
+    }
+
     public function kycDocuments()
     {
         return $this->hasMany(DocumentKyc::class);

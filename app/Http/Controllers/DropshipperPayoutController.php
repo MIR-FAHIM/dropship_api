@@ -154,7 +154,12 @@ class DropshipperPayoutController extends Controller
     /** GET /dropshipper-payouts/{id} — admin, or the dropshipper it belongs to. */
     public function show(Request $request, $id)
     {
-        $invoice = SettlementInvoice::with(['dropshipper:id,name,phone,email,address', 'creator:id,name', 'payer:id,name'])
+        $invoice = SettlementInvoice::with([
+            'dropshipper:id,name,phone,email,address',
+            'dropshipper.bankAccounts:id,user_id,bank_name,acc_name,type,account_no,branch,route,address,is_active,payment_method_id',
+            'creator:id,name',
+            'payer:id,name',
+        ])
             ->where('type', SettlementInvoice::TYPE_DROPSHIPPER_PAYOUT)
             ->where(fn ($q) => is_numeric($id) ? $q->where('id', $id) : $q->where('invoice_number', $id))
             ->first();
