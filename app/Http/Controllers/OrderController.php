@@ -1333,6 +1333,24 @@ class OrderController extends Controller
                 $query->where('status', $request->get('status'));
             }
 
+            // Dropshipper filter (the reseller who placed the order)
+            $dropshipperId = $request->get('dropshipper_id') ?? $request->get('user_id');
+            if (!empty($dropshipperId) && $dropshipperId !== 'all') {
+                $query->where('user_id', (int) $dropshipperId);
+            }
+
+            // Order date range (YYYY-MM-DD, inclusive), counted in Bangladesh time:
+            // created_at is stored in UTC, so convert the Dhaka day boundaries.
+            $dateTz = 'Asia/Dhaka';
+            foreach (['date_from' => 'startOfDay', 'date_to' => 'endOfDay'] as $param => $edge) {
+                $value = $request->get($param);
+                if (empty($value) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $value)) {
+                    continue;
+                }
+                $boundary = \Carbon\Carbon::createFromFormat('Y-m-d', $value, $dateTz)->{$edge}()->utc();
+                $query->where('created_at', $param === 'date_from' ? '>=' : '<=', $boundary);
+            }
+
             // Search filter across order_number, customer, and dropshipper
             if ($request->filled('search')) {
                 $search = trim($request->get('search'));
