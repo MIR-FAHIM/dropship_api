@@ -1740,7 +1740,7 @@ class OrderAccountingService
     public function submitVendorInvoicePayment(int $invoiceId, array $data, int $userId): SettlementInvoice
     {
         return DB::transaction(function () use ($invoiceId, $data, $userId) {
-            $invoice = SettlementInvoice::lockForUpdate()->findOrFail($invoiceId);
+            $invoice = SettlementInvoice::where('type', '!=', SettlementInvoice::TYPE_DROPSHIPPER_PAYOUT)->lockForUpdate()->findOrFail($invoiceId);
 
             if ($invoice->status === SettlementInvoice::STATUS_PAID || $invoice->status === SettlementInvoice::STATUS_APPROVED) {
                 throw new \InvalidArgumentException("This invoice is already paid and settled.");
@@ -1816,7 +1816,7 @@ class OrderAccountingService
     public function approveVendorInvoice(int $invoiceId, ?string $adminTrxId = null, ?int $adminUserId = null): SettlementInvoice
     {
         return DB::transaction(function () use ($invoiceId, $adminTrxId, $adminUserId) {
-            $invoice = SettlementInvoice::lockForUpdate()->findOrFail($invoiceId);
+            $invoice = SettlementInvoice::where('type', '!=', SettlementInvoice::TYPE_DROPSHIPPER_PAYOUT)->lockForUpdate()->findOrFail($invoiceId);
 
             $trxId = $adminTrxId ?: ($invoice->trx_id ?: $invoice->invoice_number);
 
@@ -1862,7 +1862,7 @@ class OrderAccountingService
     public function rejectVendorInvoice(int $invoiceId, string $reason, ?int $adminUserId = null): SettlementInvoice
     {
         return DB::transaction(function () use ($invoiceId, $reason, $adminUserId) {
-            $invoice = SettlementInvoice::lockForUpdate()->findOrFail($invoiceId);
+            $invoice = SettlementInvoice::where('type', '!=', SettlementInvoice::TYPE_DROPSHIPPER_PAYOUT)->lockForUpdate()->findOrFail($invoiceId);
 
             $invoice->update([
                 'status' => SettlementInvoice::STATUS_REJECTED,

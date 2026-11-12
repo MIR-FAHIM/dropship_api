@@ -45,6 +45,7 @@ use App\Http\Controllers\UserBankAccountController;
 use App\Http\Controllers\WithdrawController;
 use App\Http\Controllers\SupportTicketController;
 use App\Http\Controllers\CarrybeeWebhookController;
+use App\Http\Controllers\DropshipperPayoutController;
 use App\Http\Controllers\LandingPageOrderController;
 use App\Http\Controllers\MuthobartaSmsController;
 use App\Http\Controllers\ResellerProductPageController;
@@ -270,6 +271,17 @@ Route::prefix('orders')->group(function () {
     Route::post('/{id}/manual-carrybee-payment', [CarrybeeWebhookController::class, 'manualOrderPayment']);
     // Item status update (for vendor/admin workflows)
     Route::patch('/item/status/{id}', [OrderController::class, 'updateOrderItemStatus']);
+});
+
+// Dropshipper payout invoices: one invoice pays a dropshipper's profit for many orders.
+Route::prefix('dropshipper-payouts')->group(function () {
+    Route::get('/payable-orders', [DropshipperPayoutController::class, 'payableOrders'])->middleware('admin:orders');
+    Route::post('/', [DropshipperPayoutController::class, 'store'])->middleware('admin:orders');
+    Route::post('/{id}/pay', [DropshipperPayoutController::class, 'pay'])->middleware('admin:orders');
+    Route::post('/{id}/cancel', [DropshipperPayoutController::class, 'cancel'])->middleware('admin:orders');
+    // Admin sees all; a dropshipper sees only their own.
+    Route::get('/', [DropshipperPayoutController::class, 'index']);
+    Route::get('/{id}', [DropshipperPayoutController::class, 'show']);
 });
 
 Route::prefix('wallet')->group(function () {

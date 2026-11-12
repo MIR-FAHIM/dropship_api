@@ -13,10 +13,16 @@ class SettlementInvoice extends Model
     const STATUS_PAID = 'paid';
     const STATUS_APPROVED = 'approved';
     const STATUS_REJECTED = 'rejected';
+    const STATUS_CANCELLED = 'cancelled';
+
+    const TYPE_VENDOR_SETTLEMENT = 'vendor_settlement';
+    const TYPE_DROPSHIPPER_PAYOUT = 'dropshipper_payout';
 
     protected $fillable = [
         'invoice_number',
         'vendor_id',
+        'dropshipper_id',
+        'receiver_account',
         'user_id',
         'type',
         'orders_count',
@@ -70,6 +76,11 @@ class SettlementInvoice extends Model
     public function vendor()
     {
         return $this->belongsTo(Vendor::class, 'vendor_id');
+    }
+
+    public function dropshipper()
+    {
+        return $this->belongsTo(User::class, 'dropshipper_id');
     }
 
     public function creator()

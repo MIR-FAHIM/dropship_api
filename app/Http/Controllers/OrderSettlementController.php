@@ -619,7 +619,10 @@ class OrderSettlementController extends Controller
     public function listVendorInvoices(Request $request)
     {
         try {
-            $query = SettlementInvoice::with(['vendor', 'creator', 'payer', 'approver', 'rejecter'])->orderByDesc('id');
+            // Vendor invoices only: dropshipper payout invoices share this table.
+            $query = SettlementInvoice::with(['vendor', 'creator', 'payer', 'approver', 'rejecter'])
+                ->where('type', '!=', SettlementInvoice::TYPE_DROPSHIPPER_PAYOUT)
+                ->orderByDesc('id');
 
             $user = $request->attributes->get('api_user') ?? $request->user();
             $resolvedVendorId = null;
@@ -673,7 +676,8 @@ class OrderSettlementController extends Controller
     public function vendorInvoiceDetails(Request $request, $id)
     {
         try {
-            $query = SettlementInvoice::with(['vendor', 'creator', 'payer', 'approver', 'rejecter']);
+            $query = SettlementInvoice::with(['vendor', 'creator', 'payer', 'approver', 'rejecter'])
+                ->where('type', '!=', SettlementInvoice::TYPE_DROPSHIPPER_PAYOUT);
             if (is_numeric($id)) {
                 $invoice = $query->find($id);
             } else {
