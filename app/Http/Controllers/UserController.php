@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Order;
 use App\Models\User;
+use App\Models\UserEditLog;
 use App\Models\RegistrationErrorLog;
 use App\Models\ResellerTransaction;
 use App\Jobs\SendWhatsAppActivationJob;
@@ -12,6 +13,7 @@ use App\Service\MuthobartaSmsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class UserController extends Controller
@@ -546,6 +548,67 @@ class UserController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * PATCH /users/edituserprofile/{id}
+     * Admin edits a dropshipper profile and records a before/after audit entry.
+     */
+    public function editUserProfile(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate([
+                'name' => ['sometimes', 'required', 'string', 'max:255'],
+                'email' => ['sometimes', 'required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($id)],
+                'phone' => ['sometimes', 'nullable', 'string', 'max:20'],
+                'address' => ['sometimes', 'nullable', 'string', 'max:300'],
+                'password' => ['sometimes', 'required', 'string', 'min:8'],
+            ]);
+
+            $user = User::where('user_type', 'dropshipper')->find($id);
+            if (!$user) {
+                return $this->failed('Dropshipper not found', null, 404);
+            }
+
+            $actor = $request->attributes->get('api_user') ?? $request->user();
+            $previous = [];
+            $updated = [];
+
+            DB::transaction(function () use ($user, $validated, $actor, &$previous, &$updated) {
+                foreach (['name', 'email', 'phone', 'address'] as $field) {
+                    if (array_key_exists($field, $validated) && $user->{$field} !== $validated[$field]) {
+                        $previous[$field] = $user->{$field};
+                        $updated[$field] = $validated[$field];
+                        $user->{$field} = $validated[$field];
+                    }
+                }
+
+                if (array_key_exists('password', $validated)) {
+                    // Never persist a password or password hash in the audit log.
+                    $previous['password'] = '[redacted]';
+                    $updated['password'] = '[changed]';
+                    $user->password = Hash::make($validated['password']);
+                }
+
+                if ($updated) {
+                    $user->save();
+                    UserEditLog::create([
+                        'user_id' => $user->id,
+                        'edited_by' => $actor->id,
+                        'previous_values' => $previous,
+                        'new_values' => $updated,
+                        'created_at' => now(),
+                    ]);
+                }
+            });
+
+            return $this->success('Dropshipper profile updated successfully', $user->only(['id', 'name', 'email', 'phone', 'address', 'user_type']));
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            report($e);
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }

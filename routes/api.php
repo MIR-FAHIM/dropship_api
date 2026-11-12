@@ -166,6 +166,7 @@ Route::prefix('users')->group(function () {
     Route::get('/details/{id}', [UserController::class, 'getUserDetails']);
     Route::get('/getBalance/{id}', [UserController::class, 'getUserBalance']);
     Route::get('/{id}/payout-review', [UserController::class, 'payoutReview'])->middleware('admin:orders');
+    Route::patch('/edituserprofile/{id}', [UserController::class, 'editUserProfile'])->middleware('admin:accounts');
     Route::put('/update/{id}', [UserController::class, 'updateUser']);
     Route::patch('/ban/{id}', [UserController::class, 'banToggle'])->middleware('admin:accounts');
     Route::patch('/unban/{id}', [UserController::class, 'unbanUser'])->middleware('admin:accounts');
