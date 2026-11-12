@@ -107,6 +107,25 @@ class Order extends Model
     ];
 
     /**
+     * Orders loaded with a few columns (e.g. `order:id,order_number`) are summaries
+     * inside another record. The computed fields above need `status` and run a query
+     * per order, so they are left out for those rows instead of crashing.
+     */
+    public function toArray()
+    {
+        if ($this->exists && !array_key_exists('status', $this->attributes)) {
+            return (clone $this)->setAppends([])->toArrayWithoutAppendGuard();
+        }
+
+        return parent::toArray();
+    }
+
+    private function toArrayWithoutAppendGuard(): array
+    {
+        return parent::toArray();
+    }
+
+    /**
      * Order belongs to a customer
      */
     public function user()
