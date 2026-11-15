@@ -207,6 +207,7 @@ class AuthController extends Controller
                 'token_type' => 'Bearer',
                 'expires_at' => $created['token']->expires_at,
                 'token_id' => $created['token']->id,
+                'user_type' => $user->user_type,
                 'user' => $user,
             ], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
