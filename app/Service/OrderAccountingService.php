@@ -1165,12 +1165,14 @@ class OrderAccountingService
             'items.product.vendor',
             'items.product.primaryImage',
             'deliveryInformation',
+            'orderStatus',
             'user'
         ]);
 
-        $orderTotal = round((float) ($order->total ?? 0), 2);
-        $customerShippingCharge = round((float) ($order->shipping_fee ?? 0), 2);
-        $advanceAmount = round((float) ($order->advance_amount ?? 0), 2);
+        $cancelledOrReturned = $this->isCancelledOrReturned($order);
+        $orderTotal = $cancelledOrReturned ? 0.00 : round((float) ($order->total ?? 0), 2);
+        $customerShippingCharge = $cancelledOrReturned ? 0.00 : round((float) ($order->shipping_fee ?? 0), 2);
+        $advanceAmount = $cancelledOrReturned ? 0.00 : round((float) ($order->advance_amount ?? 0), 2);
         $advanceStatus = $order->advance_status ?: 'none';
         $advanceRecipient = $order->advance_recipient ?: 'platform';
 
@@ -1189,6 +1191,9 @@ class OrderAccountingService
         } elseif ($orderTotal > 0) {
             $courierCollectable = $orderTotal;
         } else {
+            $courierCollectable = 0.00;
+        }
+        if ($cancelledOrReturned) {
             $courierCollectable = 0.00;
         }
 
@@ -1214,9 +1219,15 @@ class OrderAccountingService
             // Default 1% COD fee on collectable
             $courierCodFee = $courierCollectable > 0 ? round($courierCollectable * 0.01, 2) : 0.00;
         }
+        if ($cancelledOrReturned) {
+            $courierCodFee = 0.00;
+        }
 
         $totalCourierCost = round($courierDeliveryFee + $courierCodFee, 2);
         $courierNetToSupplier = round($courierCollectable - $totalCourierCost, 2);
+        if ($cancelledOrReturned) {
+            $courierNetToSupplier = 0.00;
+        }
 
         // Identify primary shop / vendor
         $primaryItem = $order->items->first();
@@ -1249,7 +1260,7 @@ class OrderAccountingService
                 'product_id' => $item->product_id,
                 'product_name' => $item->product_name ?: ($product?->name ?? ('Product #' . $item->product_id)),
                 'qty' => $qty,
-                'unit_price' => $vPrice,
+                'unit_price' => $cancelledOrReturned ? 0.00 : $vPrice,
                 'sku' => $item->sku ?: $product?->sku,
                 'product_thumbnail' => $thumbnail,
             ];
@@ -1258,6 +1269,12 @@ class OrderAccountingService
         $supplierVendorPrice = round($supplierVendorPrice, 2);
         $adminBasePrice = round($adminBasePrice, 2);
         $resellerSellingPrice = round($resellerSellingPrice, 2);
+
+        if ($cancelledOrReturned) {
+            $supplierVendorPrice = 0.00;
+            $adminBasePrice = 0.00;
+            $resellerSellingPrice = 0.00;
+        }
 
         // Platform settlement breakdown
         // When vendor has own delivery account: courier delivers all funds to vendor.
@@ -1288,6 +1305,14 @@ class OrderAccountingService
         $platformProductCommission = round($adminBasePrice - $supplierVendorPrice, 2);
         $platformDeliveryMargin = round($customerShippingCharge - $courierDeliveryFee, 2);
         $platformNetProfit = round($platformProductCommission + $platformDeliveryMargin, 2);
+        if ($cancelledOrReturned) {
+            $supplierOwesPlatform = 0.00;
+            $platformOwesSupplier = 0.00;
+            $dropshipperProfit = 0.00;
+            $platformProductCommission = 0.00;
+            $platformDeliveryMargin = 0.00;
+            $platformNetProfit = 0.00;
+        }
 
         // Balance check: Supplier Owes Platform == Dropshipper Profit + Platform Net Profit (for has_own_delivery_account)
         $isBalanced = ($courierCollectable <= 0)
@@ -1305,6 +1330,8 @@ class OrderAccountingService
             'order_id' => $order->id,
             'order_number' => $order->order_number,
             'status' => $order->status,
+            'admin_base_price' => round((float) $adminBasePrice, 2),
+            'customer_shipping_fee' => round((float) $customerShippingCharge, 2),
             'customer_name' => $order->customer_name,
             'customer_phone' => $order->customer_phone,
             'vendor_id' => $vendor?->id,
@@ -1337,6 +1364,7 @@ class OrderAccountingService
                 'user_phone' => $order->user?->phone,
                 'customer_collected' => round((float) $customerCollected, 2),
                 'admin_base_price' => round((float) $adminBasePrice, 2),
+                'customer_shipping_fee' => round((float) $customerShippingCharge, 2),
                 'customer_delivery_charge' => round((float) $customerShippingCharge, 2),
                 'cod_charge' => round((float) $courierCodFee, 2),
                 'profit' => round((float) $dropshipperProfit, 2),
@@ -1442,6 +1470,21 @@ class OrderAccountingService
     {
         return DB::transaction(function () use ($order, $adjusted, $adminUserId) {
             $lockedOrder = Order::lockForUpdate()->findOrFail($order->id);
+            if ($this->isCancelledOrReturned($lockedOrder)) {
+                // Cancelled orders have no transaction; returned orders only incur
+                // the courier delivery charge. Do not allow edits to recreate margin.
+                $adjusted = array_merge($adjusted, [
+                    'collectable_amount' => 0.00,
+                    'remaining_cod' => 0.00,
+                    'courier_cod_fee' => 0.00,
+                    'supplier_vendor_price' => 0.00,
+                    'admin_base_price' => 0.00,
+                    'customer_shipping_fee' => 0.00,
+                    'reseller_price' => 0.00,
+                    'dropshipper_profit' => 0.00,
+                ]);
+                $adjusted['items'] = [];
+            }
 
             // Update order courier fee attributes if provided
             $updates = [];
@@ -1450,6 +1493,9 @@ class OrderAccountingService
             }
             if (array_key_exists('courier_cod_fee', $adjusted)) {
                 $updates['actual_cod_fee'] = round((float) $adjusted['courier_cod_fee'], 2);
+            }
+            if (array_key_exists('customer_shipping_fee', $adjusted)) {
+                $updates['shipping_fee'] = round((float) $adjusted['customer_shipping_fee'], 2);
             }
             if (isset($updates['actual_courier_fee']) || isset($updates['actual_cod_fee'])) {
                 $delFee = $updates['actual_courier_fee'] ?? (float) ($lockedOrder->actual_courier_fee ?? 0);
@@ -1517,7 +1563,7 @@ class OrderAccountingService
                         }
                     }
                 }
-            } elseif (array_key_exists('supplier_vendor_price', $adjusted) || array_key_exists('admin_base_price', $adjusted) || array_key_exists('reseller_price', $adjusted)) {
+            } elseif (!$this->isCancelledOrReturned($lockedOrder) && (array_key_exists('supplier_vendor_price', $adjusted) || array_key_exists('admin_base_price', $adjusted) || array_key_exists('reseller_price', $adjusted))) {
                 // If top-level stake prices are sent directly from the breakdown modal
                 $firstItem = $lockedOrder->items()->first();
                 if ($firstItem) {
@@ -1544,7 +1590,9 @@ class OrderAccountingService
 
             // Authoritative re-sync: subtotal/reseller_price are derived from the current
             // item rows so they can never drift out of sync with the items.
-            $itemsSubtotal = round((float) $lockedOrder->items->sum('line_total'), 2);
+            $itemsSubtotal = $this->isCancelledOrReturned($lockedOrder)
+                ? 0.00
+                : round((float) $lockedOrder->items->sum('line_total'), 2);
             $lockedOrder->update([
                 'subtotal' => $itemsSubtotal,
                 'reseller_price' => $itemsSubtotal,
@@ -1610,6 +1658,20 @@ class OrderAccountingService
 
             return $breakdown;
         });
+    }
+
+    private function isCancelledOrReturned(Order $order): bool
+    {
+        $statusText = mb_strtolower(trim(
+            (string) $order->status . ' '
+            . (string) ($order->orderStatus?->type ?? '') . ' '
+            . (string) ($order->orderStatus?->name ?? '')
+        ));
+
+        return str_contains($statusText, 'cancel')
+            || str_contains($statusText, 'return')
+            || str_contains($statusText, 'বাতিল')
+            || str_contains($statusText, 'ফেরত');
     }
 
     /**

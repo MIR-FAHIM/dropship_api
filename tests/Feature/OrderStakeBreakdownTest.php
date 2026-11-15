@@ -418,7 +418,7 @@ class OrderStakeBreakdownTest extends TestCase
         $this->assertEquals(0.00, (float) $data['courier']['collectable_amount']);
         $this->assertEquals(105.00, (float) $data['courier']['delivery_fee']);
         $this->assertEquals(0.00, (float) $data['courier']['cod_fee']);
-        $this->assertEquals(-105.00, (float) $data['courier']['net_received_by_supplier']);
+        $this->assertEquals(0.00, (float) $data['courier']['net_received_by_supplier']);
         $this->assertEquals(0.00, (float) $data['supplier']['vendor_price']);
         $this->assertEquals(0.00, (float) $data['supplier']['supplier_owes_platform']);
         $this->assertEquals(0.00, (float) $data['dropshipper']['profit']);

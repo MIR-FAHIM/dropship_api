@@ -242,6 +242,81 @@ class OrderBreakdownProfitSyncTest extends TestCase
         $this->assertEquals(1676.00, (float) $item->line_total_reseller_profit);
     }
 
+    public function test_breakdown_update_persists_platform_margin_inputs_and_read_returns_saved_values(): void
+    {
+        $order = $this->createOrderWithItem();
+
+        $this->withHeader('Authorization', 'Bearer ' . $this->adminToken)
+            ->postJson("/api/order-settlements/orders/{$order->id}/update-breakdown", [
+                'admin_base_price' => 650.00,
+                'customer_shipping_fee' => 125.00,
+                'courier_delivery_fee' => 90.00,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.admin_base_price', 650)
+            ->assertJsonPath('data.customer_shipping_fee', 125)
+            ->assertJsonPath('data.platform.product_commission', 150)
+            ->assertJsonPath('data.platform.delivery_margin', 35)
+            ->assertJsonPath('data.platform.net_profit', 185);
+
+        $order->refresh();
+        $this->assertEquals(125.00, (float) $order->shipping_fee);
+        $this->assertEquals(650.00, (float) $order->items()->first()->admin_price);
+
+        $this->withHeader('Authorization', 'Bearer ' . $this->adminToken)
+            ->getJson("/api/order-settlements/orders/{$order->id}/breakdown")
+            ->assertOk()
+            ->assertJsonPath('data.admin_base_price', 650)
+            ->assertJsonPath('data.customer_shipping_fee', 125)
+            ->assertJsonPath('data.platform.product_commission', 150)
+            ->assertJsonPath('data.platform.delivery_margin', 35)
+            ->assertJsonPath('data.platform.net_profit', 185);
+    }
+
+    public function test_cancelled_and_returned_breakdowns_zero_everything_except_courier_delivery_fee(): void
+    {
+        $returned = OrderStatus::create([
+            'name' => 'Returned',
+            'type' => 'returned',
+            'is_active' => true,
+        ]);
+
+        foreach (['Cancelled', $returned->id] as $status) {
+            $order = $this->createOrderWithItem();
+            $order->update([
+                'status' => $status,
+                'actual_courier_fee' => 105,
+                'actual_cod_fee' => 12,
+            ]);
+
+            $this->withHeader('Authorization', 'Bearer ' . $this->adminToken)
+                ->postJson("/api/order-settlements/orders/{$order->id}/update-breakdown", [
+                    'admin_base_price' => 650,
+                    'customer_shipping_fee' => 125,
+                    'collectable_amount' => 900,
+                    'courier_delivery_fee' => 105,
+                    'courier_cod_fee' => 12,
+                ])
+                ->assertOk()
+                ->assertJsonPath('data.courier.collectable_amount', 0)
+                ->assertJsonPath('data.courier.delivery_fee', 105)
+                ->assertJsonPath('data.courier.cod_fee', 0)
+                ->assertJsonPath('data.courier.net_received_by_supplier', 0)
+                ->assertJsonPath('data.supplier.vendor_price', 0)
+                ->assertJsonPath('data.dropshipper.admin_base_price', 0)
+                ->assertJsonPath('data.dropshipper.customer_delivery_charge', 0)
+                ->assertJsonPath('data.dropshipper.profit', 0)
+                ->assertJsonPath('data.platform.product_commission', 0)
+                ->assertJsonPath('data.platform.delivery_margin', 0)
+                ->assertJsonPath('data.platform.net_profit', 0);
+
+            $order->refresh();
+            $this->assertEquals(0.00, (float) $order->remaining_cod);
+            $this->assertEquals(0.00, (float) $order->shipping_fee);
+            $this->assertEquals(0.00, (float) $order->reseller_profit);
+        }
+    }
+
     public function test_raising_total_via_plain_order_update_also_moves_reseller_profit(): void
     {
         $order = $this->createOrderWithItem();

@@ -563,6 +563,7 @@ class OrderSettlementController extends Controller
                 'remaining_cod' => 'nullable|numeric|min:0',
                 'supplier_vendor_price' => 'nullable|numeric|min:0',
                 'admin_base_price' => 'nullable|numeric|min:0',
+                'customer_shipping_fee' => 'nullable|numeric|min:0',
                 'reseller_price' => 'nullable|numeric|min:0',
                 'dropshipper_profit' => 'nullable|numeric|min:0',
                 'admin_note' => 'nullable|string',
