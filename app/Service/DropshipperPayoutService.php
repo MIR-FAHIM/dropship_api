@@ -114,8 +114,15 @@ class DropshipperPayoutService
                 $rows[] = $row;
             }
 
-            $total = round(array_sum(array_column($rows, 'profit')), 2);
+            // Admin may set the real payout; the calculated sum and the difference are kept.
+            $amount = SettlementInvoice::resolveFinalAmount(array_sum(array_column($rows, 'profit')), $data['final_amount'] ?? null, $data['adjustment_reason'] ?? null);
+            $total = $amount['final'];
             $invoice = SettlementInvoice::create([
+                'calculated_amount' => $amount['calculated'],
+                'adjustment_amount' => $amount['adjustment'],
+                'adjustment_reason' => $amount['reason'],
+                'adjusted_by' => $amount['adjustment'] != 0 ? $adminId : null,
+                'adjusted_at' => $amount['adjustment'] != 0 ? now() : null,
                 'invoice_number' => $this->newInvoiceNumber($dropshipperId),
                 'dropshipper_id' => $dropshipperId,
                 'user_id' => $adminId,
@@ -255,7 +262,39 @@ class DropshipperPayoutService
 
             $total += $amount;
         }
-        $total = round($total, 2);
+        $calculated = round($total, 2);
+
+        // Final amount: set when the invoice was issued, or changed now at payment time.
+        if (array_key_exists('final_amount', $data) && $data['final_amount'] !== null && $data['final_amount'] !== '') {
+            $resolved = SettlementInvoice::resolveFinalAmount($calculated, $data['final_amount'], $data['adjustment_reason'] ?? null);
+            $invoice->forceFill([
+                'adjustment_amount' => $resolved['adjustment'],
+                'adjustment_reason' => $resolved['reason'],
+                'adjusted_by' => $resolved['adjustment'] != 0 ? $adminId : null,
+                'adjusted_at' => $resolved['adjustment'] != 0 ? now() : null,
+            ]);
+        }
+        $adjustment = round((float) ($invoice->adjustment_amount ?? 0), 2);
+        $total = round($calculated + $adjustment, 2);
+        if ($total < 0) {
+            throw new InvalidArgumentException('The final amount cannot be negative.');
+        }
+
+        // The difference from the calculated profit is one separate ledger line with
+        // the reason, so the dropshipper's balance matches the final amount.
+        if ($adjustment != 0) {
+            ResellerTransaction::create([
+                'reseller_id' => $dropshipperId,
+                'amount' => abs($adjustment),
+                'trx_id' => 'ADJ-' . $invoice->invoice_number,
+                'trx_type' => $adjustment > 0 ? 'credit' : 'debit',
+                'type' => 'payout_adjustment',
+                'source' => 'adjustment',
+                'ref_id' => $invoice->id,
+                'status' => 'completed',
+                'note' => "Payout invoice {$invoice->invoice_number} adjustment: " . ($invoice->adjustment_reason ?: 'admin adjustment'),
+            ]);
+        }
 
         // Sent outside the wallet: one transfer record for the whole invoice.
         if (!$isWallet && $total > 0) {
@@ -301,6 +340,7 @@ class DropshipperPayoutService
             'trx_id' => $trxId,
             'receiver_account' => $data['receiver_account'] ?? $invoice->receiver_account,
             'note' => $data['note'] ?? $invoice->note,
+            'calculated_amount' => $calculated,
             'total_dropshipper_payout' => $total,
             'paid_amount' => $total,
             'paid_by' => $adminId,

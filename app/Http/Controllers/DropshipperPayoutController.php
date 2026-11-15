@@ -193,6 +193,9 @@ class DropshipperPayoutController extends Controller
             'trx_id' => ['nullable', 'string', 'max:100'],
             'receiver_account' => ['nullable', 'string', 'max:100'],
             'note' => ['nullable', 'string', 'max:1000'],
+            // Admin's real payout when the calculated profit sum is wrong (reason required if it differs).
+            'final_amount' => ['nullable', 'numeric', 'min:0'],
+            'adjustment_reason' => ['nullable', 'string', 'max:1000'],
         ];
     }
 

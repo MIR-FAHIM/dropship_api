@@ -51,6 +51,11 @@ class SettlementInvoice extends Model
         'rejected_by',
         'rejected_at',
         'rejection_reason',
+        'calculated_amount',
+        'adjustment_amount',
+        'adjustment_reason',
+        'adjusted_by',
+        'adjusted_at',
     ];
 
     protected $casts = [
@@ -64,6 +69,9 @@ class SettlementInvoice extends Model
         'total_dropshipper_payout' => 'float',
         'total_platform_net_profit' => 'float',
         'paid_amount' => 'float',
+        'calculated_amount' => 'float',
+        'adjustment_amount' => 'float',
+        'adjusted_at' => 'datetime',
         'order_ids' => 'array',
         'orders_breakdown' => 'array',
         'admin_payment_details' => 'array',
@@ -96,6 +104,38 @@ class SettlementInvoice extends Model
     public function approver()
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    /**
+     * Final amount for an invoice: the calculated sum, or the admin's figure when
+     * given. A different final amount needs a reason.
+     *
+     * @return array{final: float, calculated: float, adjustment: float, reason: ?string}
+     */
+    public static function resolveFinalAmount(float $calculated, $finalAmount, ?string $reason): array
+    {
+        $calculated = round($calculated, 2);
+        $reason = trim((string) $reason) ?: null;
+
+        if ($finalAmount === null || $finalAmount === '') {
+            return ['final' => $calculated, 'calculated' => $calculated, 'adjustment' => 0.0, 'reason' => null];
+        }
+
+        $final = round((float) $finalAmount, 2);
+        if ($final < 0) {
+            throw new \InvalidArgumentException('The final amount cannot be negative.');
+        }
+        $adjustment = round($final - $calculated, 2);
+        if (abs($adjustment) >= 0.01 && $reason === null) {
+            throw new \InvalidArgumentException('Give a reason for changing the amount from the calculated ৳' . number_format($calculated, 2) . '.');
+        }
+
+        return ['final' => $final, 'calculated' => $calculated, 'adjustment' => abs($adjustment) >= 0.01 ? $adjustment : 0.0, 'reason' => abs($adjustment) >= 0.01 ? $reason : null];
+    }
+
+    public function adjuster()
+    {
+        return $this->belongsTo(User::class, 'adjusted_by');
     }
 
     public function rejecter()

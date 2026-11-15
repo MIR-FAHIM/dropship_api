@@ -600,6 +600,9 @@ class OrderSettlementController extends Controller
                 'status' => 'nullable|string|in:pending,paid,approved,rejected',
                 'admin_payment_details' => 'nullable|array',
                 'note' => 'nullable|string',
+                // Admin's real final amount when the calculated sum is wrong (reason required if it differs).
+                'final_amount' => 'nullable|numeric|min:0',
+                'adjustment_reason' => 'nullable|string|max:1000',
             ]);
 
             $adminUserId = $request->user()?->id ?: (int) $request->input('created_by');
@@ -608,6 +611,8 @@ class OrderSettlementController extends Controller
             return $this->success('Vendor settlement invoice created successfully', $invoice, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\InvalidArgumentException $e) {
+            return $this->failed($e->getMessage(), null, 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
@@ -702,6 +707,30 @@ class OrderSettlementController extends Controller
             return $this->success('Settlement invoice details fetched successfully', $invoice);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * POST /order-settlements/vendor-invoices/{id}/adjust  {final_amount, adjustment_reason}
+     * Admin sets the real final amount of an unpaid vendor invoice.
+     */
+    public function adjustVendorInvoice(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate([
+                'final_amount' => 'required|numeric|min:0',
+                'adjustment_reason' => 'nullable|string|max:1000',
+            ]);
+            $adminUserId = ($request->attributes->get('api_user') ?? $request->user())?->id;
+            $invoice = $this->accountingService->adjustVendorInvoiceAmount((int) $id, $validated['final_amount'], $validated['adjustment_reason'] ?? null, $adminUserId);
+
+            return $this->success('Invoice amount updated', $invoice);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\InvalidArgumentException $e) {
+            return $this->failed($e->getMessage(), null, 422);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return $this->failed('Invoice not found', null, 404);
         }
     }
 

@@ -699,6 +699,100 @@ class OrderStakeBreakdownTest extends TestCase
         ]);
     }
 
+    private function makeVendorInvoiceOrder(string $number): Order
+    {
+        $order = Order::create([
+            'order_number' => $number,
+            'user_id' => $this->dropshipper->id,
+            'vendor_id' => $this->vendor->id,
+            'total' => 2630.00,
+            'shipping_fee' => 130.00,
+            'remaining_cod' => 2630.00,
+            'courier_account_owner' => 'vendor',
+            'status' => 'Delivered',
+            'actual_courier_fee' => 105.00,
+            'actual_cod_fee' => 26.30,
+        ]);
+        OrderItem::create([
+            'order_id' => $order->id, 'product_id' => $this->product->id, 'shop_id' => $this->vendor->id,
+            'unit_price' => 1750.00, 'admin_price' => 1838.00, 'reseller_price' => 2500.00, 'qty' => 1,
+        ]);
+
+        return $order;
+    }
+
+    public function test_multi_order_vendor_invoice_pays_and_approves_with_one_trx_id()
+    {
+        // Several orders share one payment trx id; settlements must each keep a unique settled_trx_id.
+        $a = $this->makeVendorInvoiceOrder('ORD-MULTI-A');
+        $b = $this->makeVendorInvoiceOrder('ORD-MULTI-B');
+
+        $invoice = $this->withHeaders($this->adminHeaders)->postJson('/api/order-settlements/vendor-invoice', [
+            'vendor_id' => $this->vendor->id, 'order_ids' => [$a->id, $b->id], 'status' => 'paid',
+            'payment_method' => 'bkash', 'trx_id' => 'BK-SHARED-1',
+        ])->assertStatus(201)->json('data');
+
+        $this->assertSame(2, OrderSettlement::whereIn('order_id', [$a->id, $b->id])
+            ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)
+            ->where('status', OrderSettlement::STATUS_SETTLED)->count());
+
+        // Pending two-order invoice through the vendor pay + admin approve path.
+        $c = $this->makeVendorInvoiceOrder('ORD-MULTI-C');
+        $d = $this->makeVendorInvoiceOrder('ORD-MULTI-D');
+        $pending = $this->withHeaders($this->adminHeaders)->postJson('/api/order-settlements/vendor-invoice', [
+            'vendor_id' => $this->vendor->id, 'order_ids' => [$c->id, $d->id], 'status' => 'pending',
+        ])->assertStatus(201)->json('data');
+        $this->withHeaders($this->vendorHeaders)->postJson("/api/order-settlements/vendor-invoices/{$pending['id']}/pay", [
+            'payment_method' => 'bkash', 'trx_id' => 'BK-SHARED-2',
+        ])->assertStatus(200);
+        $this->withHeaders($this->adminHeaders)->postJson("/api/order-settlements/vendor-invoices/{$pending['id']}/approve", [
+            'trx_id' => 'BK-SHARED-2',
+        ])->assertStatus(200)->assertJsonPath('data.status', 'approved');
+        $this->assertNotNull($invoice['id']);
+    }
+
+    public function test_vendor_invoice_final_amount_adjustment()
+    {
+        $a = $this->makeVendorInvoiceOrder('ORD-ADJ-A');
+        $b = $this->makeVendorInvoiceOrder('ORD-ADJ-B');
+        $base = ['vendor_id' => $this->vendor->id, 'order_ids' => [$a->id, $b->id], 'status' => 'pending'];
+
+        // Different amount without a reason is refused.
+        $this->withHeaders($this->adminHeaders)->postJson('/api/order-settlements/vendor-invoice', $base + ['final_amount' => 1400])
+            ->assertStatus(422);
+
+        $invoice = $this->withHeaders($this->adminHeaders)->postJson('/api/order-settlements/vendor-invoice', $base + [
+            'final_amount' => 1400, 'adjustment_reason' => 'CarryBee charged extra return fee',
+        ])->assertStatus(201)->json('data');
+
+        $calculated = (float) $invoice['calculated_amount'];
+        $this->assertEquals(1497.40, $calculated); // 2 x 748.70
+        $this->assertEquals(1400, (float) $invoice['total_amount_owed']);
+        $this->assertEquals(-97.40, (float) $invoice['adjustment_amount']);
+        $this->assertSame('CarryBee charged extra return fee', $invoice['adjustment_reason']);
+
+        // Per-order settlements keep the calculated amounts.
+        $this->assertEquals(1497.40, (float) OrderSettlement::whereIn('order_id', [$a->id, $b->id])
+            ->where('settlement_type', OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE)->sum('settleable_amount'));
+
+        // Admin changes it again while unpaid; vendors can't.
+        $this->withHeaders($this->vendorHeaders)->postJson("/api/order-settlements/vendor-invoices/{$invoice['id']}/adjust", ['final_amount' => 1, 'adjustment_reason' => 'x'])
+            ->assertForbidden();
+        $this->withHeaders($this->adminHeaders)->postJson("/api/order-settlements/vendor-invoices/{$invoice['id']}/adjust", ['final_amount' => 1450, 'adjustment_reason' => 'Fee partly refunded'])
+            ->assertStatus(200)->assertJsonPath('data.adjustment_amount', -47.4);
+        // Back to the calculated amount clears the adjustment.
+        $this->withHeaders($this->adminHeaders)->postJson("/api/order-settlements/vendor-invoices/{$invoice['id']}/adjust", ['final_amount' => 1497.40])
+            ->assertStatus(200)->assertJsonPath('data.adjustment_amount', 0)->assertJsonPath('data.adjustment_reason', null);
+
+        // The vendor's payment defaults to the final amount; once paid it can't be adjusted.
+        $this->withHeaders($this->adminHeaders)->postJson("/api/order-settlements/vendor-invoices/{$invoice['id']}/adjust", ['final_amount' => 1400, 'adjustment_reason' => 'Final agreed'])->assertStatus(200);
+        $paid = $this->withHeaders($this->vendorHeaders)->postJson("/api/order-settlements/vendor-invoices/{$invoice['id']}/pay", ['payment_method' => 'bkash', 'trx_id' => 'BK-ADJ'])
+            ->assertStatus(200)->json('data');
+        $this->assertEquals(1400, (float) $paid['paid_amount']);
+        $this->withHeaders($this->adminHeaders)->postJson("/api/order-settlements/vendor-invoices/{$invoice['id']}/adjust", ['final_amount' => 1300, 'adjustment_reason' => 'late'])
+            ->assertStatus(422);
+    }
+
     public function test_legacy_invoice_orders_breakdown_hydrates_items_automatically()
     {
         $order = Order::create([

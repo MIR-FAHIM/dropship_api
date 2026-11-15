@@ -217,6 +217,52 @@ class DropshipperPayoutInvoiceTest extends TestCase
         $this->assertSame(2, OrderSettlement::whereIn('order_id', [$a->id, $b->id])->where('status', OrderSettlement::STATUS_SETTLED)->count());
     }
 
+    public function test_admin_can_set_a_different_final_payout_with_a_reason(): void
+    {
+        $a = $this->order($this->rahim);
+        $b = $this->order($this->rahim);
+        $calculated = $this->payable($this->rahim)['payable_total'];
+        $final = round($calculated - 50, 2);
+        $body = ['dropshipper_id' => $this->rahim->id, 'order_ids' => [$a->id, $b->id], 'payment_method' => 'bkash',
+            'trx_id' => 'BKADJ', 'payout_review_confirmed' => true, 'final_amount' => $final];
+
+        // A different amount needs a reason.
+        $this->postJson('/api/dropshipper-payouts', $body, $this->headers($this->admin))->assertStatus(422);
+        $this->assertSame(0, SettlementInvoice::count());
+
+        $invoice = $this->postJson('/api/dropshipper-payouts', $body + ['adjustment_reason' => 'Penalty for 1 fake order'], $this->headers($this->admin))
+            ->assertCreated()->json('data');
+
+        $this->assertEquals($final, $invoice['total_dropshipper_payout']);
+        $this->assertEquals($calculated, $invoice['calculated_amount']);
+        $this->assertEquals(-50, $invoice['adjustment_amount']);
+        $this->assertSame('Penalty for 1 fake order', $invoice['adjustment_reason']);
+
+        // Orders keep their calculated profit; one adjustment line; one transfer of the final amount; wallet nets to zero.
+        $this->assertEquals($calculated, (float) ResellerTransaction::where('reseller_id', $this->rahim->id)->where('type', 'order_settlement')->sum('amount'));
+        $adj = ResellerTransaction::where('reseller_id', $this->rahim->id)->where('type', 'payout_adjustment')->firstOrFail();
+        $this->assertSame('debit', $adj->trx_type);
+        $this->assertEquals(50, (float) $adj->amount);
+        $this->assertEquals($final, (float) WithdrawRequest::where('user_id', $this->rahim->id)->value('amount'));
+        $this->assertEquals(0.0, $this->balance($this->rahim));
+    }
+
+    public function test_final_amount_can_be_set_when_paying_an_issued_invoice(): void
+    {
+        $a = $this->order($this->rahim);
+        $admin = $this->headers($this->admin);
+        $issued = $this->postJson('/api/dropshipper-payouts', ['dropshipper_id' => $this->rahim->id, 'order_ids' => [$a->id], 'status' => 'pending'], $admin)->json('data');
+        $calculated = $issued['total_dropshipper_payout'];
+
+        $this->postJson("/api/dropshipper-payouts/{$issued['id']}/pay", [
+            'payment_method' => 'wallet', 'payout_review_confirmed' => true,
+            'final_amount' => $calculated + 20, 'adjustment_reason' => 'Bonus for fast sale',
+        ], $admin)->assertOk()->assertJsonPath('data.adjustment_amount', 20);
+
+        // Wallet gets calculated profit + 20 bonus.
+        $this->assertEquals($calculated + 20, $this->balance($this->rahim));
+    }
+
     public function test_dropshipper_sees_only_their_own_invoices(): void
     {
         $mine = $this->order($this->rahim);

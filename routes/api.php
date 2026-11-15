@@ -312,6 +312,7 @@ Route::prefix('order-settlements')->group(function () {
     Route::get('/vendor-invoices/{id}', [OrderSettlementController::class, 'vendorInvoiceDetails']);
     Route::post('/vendor-invoices/{id}/pay', [OrderSettlementController::class, 'payVendorInvoice']);
     Route::post('/vendor-invoices/{id}/approve', [OrderSettlementController::class, 'approveVendorInvoice']);
+    Route::post('/vendor-invoices/{id}/adjust', [OrderSettlementController::class, 'adjustVendorInvoice'])->middleware('admin:orders');
     Route::post('/vendor-invoices/{id}/reject', [OrderSettlementController::class, 'rejectVendorInvoice']);
     Route::get('/admin-payment-accounts', [OrderSettlementController::class, 'getAdminPaymentAccounts']);
 });

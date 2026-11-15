@@ -1671,7 +1671,8 @@ class OrderAccountingService
                         'settleable_amount' => $b['supplier']['supplier_owes_platform'],
                         'gross_entitlement' => $b['supplier']['vendor_price'],
                         'deducted_by_courier' => $b['courier']['net_received_by_supplier'],
-                        'settled_trx_id' => $isDirectlyPaid ? ($trxId ?: $invoiceNumber) : null,
+                        // settled_trx_id is unique per settlement: one per order, the real trx is on the invoice.
+                        'settled_trx_id' => $isDirectlyPaid ? $invoiceNumber . '-' . $order->id : null,
                         'settled_at' => $isDirectlyPaid ? now() : null,
                         'admin_note' => $isDirectlyPaid
                             ? "Settled via Vendor Invoice {$invoiceNumber}. Trx ID: {$trxId}"
@@ -1688,6 +1689,10 @@ class OrderAccountingService
             $settlementAuditNote = "CarryBee delivery fee (৳{$totalDeliveryFee}) & COD fee (৳{$totalCodFee}) totaling ৳{$courierSettledTotal} were automatically deducted and settled at source by the delivery company. Net disbursed: ৳{$totalCourierNet}.";
             $finalNote = $note ? ($note . " | " . $settlementAuditNote) : $settlementAuditNote;
 
+            // Admin may set the real final amount; the calculated sum and the difference are kept.
+            $amount = SettlementInvoice::resolveFinalAmount($totalAmountOwed, $data['final_amount'] ?? null, $data['adjustment_reason'] ?? null);
+            $totalAmountOwed = $amount['final'];
+
             // Create SettlementInvoice record
             $invoice = SettlementInvoice::create([
                 'invoice_number' => $invoiceNumber,
@@ -1701,6 +1706,11 @@ class OrderAccountingService
                 'total_courier_net' => round($totalCourierNet, 2),
                 'total_supplier_price' => round($totalSupplierPrice, 2),
                 'total_amount_owed' => round($totalAmountOwed, 2),
+                'calculated_amount' => $amount['calculated'],
+                'adjustment_amount' => $amount['adjustment'],
+                'adjustment_reason' => $amount['reason'],
+                'adjusted_by' => $amount['adjustment'] != 0 ? $adminUserId : null,
+                'adjusted_at' => $amount['adjustment'] != 0 ? now() : null,
                 'total_dropshipper_payout' => round($totalDropshipperPayout, 2),
                 'total_platform_net_profit' => round($totalPlatformNetProfit, 2),
                 'payment_method' => $paymentMethod,
@@ -1784,7 +1794,7 @@ class OrderAccountingService
                             'vendor_id' => $invoice->vendor_id,
                             'user_type' => 'vendor',
                             'status' => OrderSettlement::STATUS_SETTLED,
-                            'settled_trx_id' => $trxId,
+                            'settled_trx_id' => $invoice->invoice_number . '-' . $orderId,
                             'settled_at' => now(),
                             'admin_note' => "Settled via Vendor Invoice {$invoice->invoice_number}. Trx: {$trxId}",
                         ]
@@ -1839,7 +1849,7 @@ class OrderAccountingService
                             'vendor_id' => $invoice->vendor_id,
                             'user_type' => 'vendor',
                             'status' => OrderSettlement::STATUS_SETTLED,
-                            'settled_trx_id' => $trxId,
+                            'settled_trx_id' => $invoice->invoice_number . '-' . $orderId,
                             'settled_at' => now(),
                             'admin_note' => "Approved via Vendor Invoice {$invoice->invoice_number}. Trx: {$trxId}",
                         ]
@@ -1853,6 +1863,35 @@ class OrderAccountingService
             }
 
             return $invoice;
+        });
+    }
+
+    /**
+     * Admin changes the final amount of an unpaid vendor invoice (reason required
+     * when it differs from the calculated sum). Per-order settlements are untouched.
+     */
+    public function adjustVendorInvoiceAmount(int $invoiceId, $finalAmount, ?string $reason, ?int $adminUserId = null): SettlementInvoice
+    {
+        return DB::transaction(function () use ($invoiceId, $finalAmount, $reason, $adminUserId) {
+            $invoice = SettlementInvoice::where('type', '!=', SettlementInvoice::TYPE_DROPSHIPPER_PAYOUT)->lockForUpdate()->findOrFail($invoiceId);
+            if (!in_array($invoice->status, [SettlementInvoice::STATUS_PENDING, SettlementInvoice::STATUS_REJECTED], true)) {
+                throw new \InvalidArgumentException("Invoice {$invoice->invoice_number} is {$invoice->status}; only an unpaid invoice can be adjusted.");
+            }
+
+            // Older invoices have no calculated_amount: their current total was the calculation.
+            $calculated = $invoice->calculated_amount ?? (float) $invoice->total_amount_owed;
+            $amount = SettlementInvoice::resolveFinalAmount((float) $calculated, $finalAmount, $reason);
+
+            $invoice->update([
+                'total_amount_owed' => $amount['final'],
+                'calculated_amount' => $amount['calculated'],
+                'adjustment_amount' => $amount['adjustment'],
+                'adjustment_reason' => $amount['reason'],
+                'adjusted_by' => $amount['adjustment'] != 0 ? $adminUserId : null,
+                'adjusted_at' => $amount['adjustment'] != 0 ? now() : null,
+            ]);
+
+            return $invoice->fresh();
         });
     }
 
