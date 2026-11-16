@@ -34,4 +34,9 @@ class SupportTicket extends Model
     {
         return $this->belongsTo(Upload::class, 'image_id');
     }
+
+    public function order()
+    {
+        return $this->belongsTo(Order::class, 'order_id');
+    }
 }

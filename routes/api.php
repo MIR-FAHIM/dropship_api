@@ -111,6 +111,7 @@ Route::prefix('support-tickets')->group(function () {
     Route::post('/add', [SupportTicketController::class, 'addSupportTicket']);
     Route::get('/all', [SupportTicketController::class, 'getAllSupportTicket']);
     Route::get('/user/{userId}', [SupportTicketController::class, 'getUserSupportTicket']);
+    Route::get('/admin/user/{userId}', [SupportTicketController::class, 'adminUserTickets'])->whereNumber('userId')->middleware('admin');
     Route::put('/edit/{id}', [SupportTicketController::class, 'editTicket']);
     Route::post('/status-change/{id}', [SupportTicketController::class, 'changeTicketStatus']);
 });
