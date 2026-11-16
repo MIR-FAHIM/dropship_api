@@ -383,4 +383,22 @@ class TransactionController extends Controller
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
     }
+
+    /** Admin: fetch all wallet transaction types for one dropshipper. */
+    public function dropshipperTransactions(Request $request, $dropshipperId)
+    {
+        $request->merge(['dropshipper_id' => $dropshipperId]);
+        $validated = $request->validate([
+            'dropshipper_id' => ['required', 'integer', 'exists:users,id'],
+        ]);
+
+        $dropshipper = \App\Models\User::where('user_type', 'dropshipper')->find($validated['dropshipper_id']);
+        if (!$dropshipper) {
+            return $this->failed('Dropshipper not found', null, 404);
+        }
+
+        $request->merge(['reseller_id' => $dropshipper->id]);
+
+        return $this->resellerTransactions($request);
+    }
 }

@@ -450,6 +450,7 @@ Route::prefix('transactions')->group(function () {
     Route::get('/debit', [TransactionController::class, 'debitTransaction']);
     Route::get('/report', [TransactionController::class, 'transactionReport']);
     Route::get('/reseller', [TransactionController::class, 'resellerTransactions']);
+    Route::get('/dropshipper/{dropshipperId}', [TransactionController::class, 'dropshipperTransactions'])->middleware('admin:accounts');
     Route::get('/reseller/advance-refunds', [TransactionController::class, 'resellerAdvanceRefunds'])
         ->middleware('admin:accounts');
     Route::get('/reseller/advance-history', [TransactionController::class, 'resellerAdvanceHistory'])
