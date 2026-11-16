@@ -30,6 +30,18 @@ class SupportTicketController extends Controller
                 'is_active'    => true,
             ]);
 
+            $ticket->loadMissing('user:id,name,phone,user_type');
+            if (strtolower((string) $ticket->user?->user_type) === 'dropshipper') {
+                app(\App\Service\AdminAlertService::class)->send(
+                    'New support ticket',
+                    "{$ticket->user->name}: " . \Illuminate\Support\Str::limit($ticket->title, 80),
+                    ['type' => 'support_ticket', 'ticket_id' => (string) $ticket->id, 'user_id' => (string) $ticket->user_id],
+                    $ticket->user_id,
+                    'support',
+                    'support_ticket'
+                );
+            }
+
             return response()->json(['success' => true, 'data' => $ticket], 201);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);

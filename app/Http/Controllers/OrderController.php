@@ -707,10 +707,17 @@ class OrderController extends Controller
                 $advanceAmount = $advanceAmountInput > 0 ? $advanceAmountInput : 0.00;
             }
 
+            $paidAdvance = null; // alerted to admins after commit
             if ($eligibility['requires_advance'] || $advanceAmountInput > 0) {
                 if ($payFromWallet) {
                     $this->orderAccountingService->payAdvanceFromWallet($order, $advanceAmount);
+                    $paidAdvance = ['amount' => $advanceAmount, 'method' => 'wallet', 'trx_id' => null];
                 } elseif ($request->filled('advance_trx_id')) {
+                    $paidAdvance = [
+                        'amount' => $advanceAmount,
+                        'method' => $request->input('advance_payment_method', 'bkash'),
+                        'trx_id' => $request->input('advance_trx_id'),
+                    ];
                     $this->orderAccountingService->submitMfsAdvance(
                         $order,
                         $advanceAmount,
@@ -840,6 +847,10 @@ class OrderController extends Controller
                     'order_id' => $order->id,
                     'exception' => $pushException->getMessage(),
                 ]);
+            }
+
+            if ($paidAdvance && $paidAdvance['amount'] > 0) {
+                $this->alertAdminsAdvancePaid($order, (float) $paidAdvance['amount'], $paidAdvance['method'], $paidAdvance['trx_id']);
             }
 
             $adminNumber = config('services.muthobarta.admin_number', '01941606310');
@@ -1803,6 +1814,36 @@ class OrderController extends Controller
      * POST /orders/{id}/pay-advance
      * Pay or submit advance payment for an existing pending order.
      */
+    /**
+     * In-app + push alert to admins when a dropshipper pays an order advance.
+     * Wallet payments are approved at once; bKash/Nagad ones wait for admin verification.
+     */
+    private function alertAdminsAdvancePaid(Order $order, float $amount, ?string $method, ?string $trxId = null): void
+    {
+        $order->loadMissing('user:id,name');
+        $isWallet = strtolower((string) $method) === 'wallet';
+        $amountText = number_format($amount, 0, '.', ',');
+        $via = $isWallet ? 'wallet' : strtoupper((string) ($method ?: 'MFS'));
+        $who = $order->user?->name ?: 'Dropshipper';
+
+        $subtitle = "{$who} paid ৳{$amountText} via {$via} for {$order->order_number}."
+            . ($isWallet ? '' : ($trxId ? " Trx {$trxId}. Verify it." : ' Verify it.'));
+
+        app(\App\Service\AdminAlertService::class)->send(
+            $isWallet ? 'Advance paid' : 'Advance to verify',
+            $subtitle,
+            [
+                'type' => 'advance_paid',
+                'order_id' => (string) $order->id,
+                'order_number' => (string) $order->order_number,
+                'method' => $isWallet ? 'wallet' : (string) $method,
+            ],
+            $order->user_id,
+            'payment',
+            'order'
+        );
+    }
+
     public function payAdvance(Request $request, $id)
     {
         try {
@@ -1825,6 +1866,7 @@ class OrderController extends Controller
             if ($payFromWallet) {
                 $this->orderAccountingService->payAdvanceFromWallet($order, $amount);
                 $order->refresh();
+                $this->alertAdminsAdvancePaid($order, $amount, 'wallet');
 
                 return $this->success('Advance payment deducted from wallet successfully.', [
                     'order' => $order,
@@ -1851,17 +1893,8 @@ class OrderController extends Controller
                 $validated['sender_phone'] ?? null
             );
 
-            // Notify Admin of new advance payment submitted
-            $this->notificationService->createAdminNotifications([
-                'title'      => 'Order Advance Payment Submitted',
-                'subtitle'   => "Order {$order->order_number} advance of {$amount} BDT submitted via {$validated['payment_method']} (Trx: {$validated['trx_id']}).",
-                'created_by' => $order->user_id,
-                'is_seen'    => false,
-                'type'       => 'payment',
-                'is_active'  => true,
-                'image'      => null,
-                'module'     => 'order',
-            ]);
+            // Notify admins (in-app + push): bKash/Nagad advance needs verification.
+            $this->alertAdminsAdvancePaid($order, $amount, $validated['payment_method'], $validated['trx_id']);
 
             return $this->success('Advance payment submitted successfully. Awaiting admin verification.', [
                 'order' => $order,

@@ -161,6 +161,16 @@ class UserController extends Controller
 
             $created = ApiTokenService::create($user, ['basic'], 30, 'dropshipper-register-token');
 
+            // New accounts start inactive (banned = 1), so admins need to know to review them.
+            app(\App\Service\AdminAlertService::class)->send(
+                'New dropshipper',
+                trim("{$user->name}" . ($user->phone ? " ({$user->phone})" : '')) . ' registered. Waiting for activation.',
+                ['type' => 'dropshipper_registered', 'user_id' => (string) $user->id],
+                $user->id,
+                'user',
+                'dropshipper'
+            );
+
             return $this->success('Dropshipper registered successfully', [
                 'token' => $created['plain'],
                 'token_type' => 'Bearer',
