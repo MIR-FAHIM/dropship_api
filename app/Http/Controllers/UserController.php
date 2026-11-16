@@ -354,9 +354,17 @@ class UserController extends Controller
     {
         try {
             $perPage = (int) ($request->get('per_page', 20));
+            // wallet_balance: completed credits minus completed debits from the
+            // reseller_transactions ledger (same rule as calculateUserBalances).
+            $walletBalance = ResellerTransaction::query()
+                ->selectRaw("COALESCE(SUM(CASE WHEN trx_type = 'credit' THEN amount WHEN trx_type = 'debit' THEN -amount ELSE 0 END), 0)")
+                ->whereColumn('reseller_transactions.reseller_id', 'users.id')
+                ->where('status', 'completed');
+
             $query = User::where('user_type', 'dropshipper')
                 ->withCount('orders as total_order_count')
-                ->withCasts(['total_order_count' => 'integer']);
+                ->addSelect(['wallet_balance' => $walletBalance])
+                ->withCasts(['total_order_count' => 'integer', 'wallet_balance' => 'float']);
 
             if ($request->filled('id')) {
                 $query->where('id', $request->id);
@@ -576,7 +584,7 @@ class UserController extends Controller
             $previous = [];
             $updated = [];
 
-            DB::transaction(function () use ($user, $validated, $actor, &$previous, &$updated) {
+            DB::transaction(function () use ($user, $validated, $actor, $request, &$previous, &$updated) {
                 foreach (['name', 'email', 'phone', 'address'] as $field) {
                     if (array_key_exists($field, $validated) && $user->{$field} !== $validated[$field]) {
                         $previous[$field] = $user->{$field};
@@ -601,6 +609,10 @@ class UserController extends Controller
                         'new_values' => $updated,
                         'created_at' => now(),
                     ]);
+                }
+
+                if (array_key_exists('password', $validated)) {
+                    \App\Models\PasswordChangeLog::record($user, $actor, \App\Models\PasswordChangeLog::TYPE_ADMIN_RESET, $request, 'Set from Edit profile');
                 }
             });
 

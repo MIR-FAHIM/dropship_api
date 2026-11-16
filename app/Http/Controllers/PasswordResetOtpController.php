@@ -154,7 +154,7 @@ class PasswordResetOtpController extends Controller
             }
             RateLimiter::hit($verifyRateKey, 300);
 
-            return DB::transaction(function () use ($validated, $email) {
+            return DB::transaction(function () use ($validated, $email, $request) {
                 $user = User::where('email', $email)->lockForUpdate()->first();
 
                 if (!$user) {
@@ -207,6 +207,8 @@ class PasswordResetOtpController extends Controller
 
                 // Revoke active API tokens / sessions
                 ApiToken::where('user_id', $user->id)->update(['is_revoked' => true]);
+
+                \App\Models\PasswordChangeLog::record($user, null, \App\Models\PasswordChangeLog::TYPE_OTP_RESET, $request, 'Email OTP');
 
                 // Asynchronously/safely dispatch confirmation email
                 try {

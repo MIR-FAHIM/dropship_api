@@ -158,6 +158,8 @@ class PartnerApiController extends Controller
         $store = $request->get('partner_store');
         /** @var User $user */
         $user = $request->get('partner_user');
+        // Wallet balance comes from the reseller_transactions ledger.
+        $balances = app(\App\Service\OrderAccountingService::class)->calculateUserBalances((int) $user->id);
 
         return $this->success('Partner authenticated successfully', [
             'store' => [
@@ -174,7 +176,8 @@ class PartnerApiController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'phone' => $user->phone,
-                'balance' => (float) ($user->balance ?? 0),
+                'balance' => (float) $balances['net_balance'],
+                'available_balance' => (float) $balances['available_balance'],
                 'banned' => (bool) ($user->banned ?? false),
             ],
         ]);

@@ -47,7 +47,6 @@ class User extends Model
         'city',
         'postal_code',
         'phone',
-        'balance',
         'banned',
         'role',
         'referral_code',
@@ -76,7 +75,6 @@ class User extends Model
      */
     protected $casts = [
         'email_verified_at' => 'datetime',
-        'balance' => 'float',
         'banned' => 'integer',
         'remaining_uploads' => 'integer',
         'customer_package_id' => 'integer',

@@ -369,6 +369,8 @@ class AuthController extends Controller
 
             ApiToken::where('user_id', $user->id)->update(['is_revoked' => true]);
 
+            \App\Models\PasswordChangeLog::record($user, null, \App\Models\PasswordChangeLog::TYPE_OTP_RESET, $request, 'SMS OTP');
+
             return $this->success('Password reset successfully');
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);

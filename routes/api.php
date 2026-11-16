@@ -54,6 +54,7 @@ use App\Http\Controllers\SocialMediaTextContentController;
 use App\Http\Controllers\ProductAssistantQaController;
 use App\Http\Controllers\FeedPostController;
 use App\Http\Controllers\PasswordResetOtpController;
+use App\Http\Controllers\PasswordManagementController;
 use App\Http\Controllers\WhatsAppWebhookController;
 use App\Http\Controllers\PartnerApiController;
 use App\Http\Controllers\MarketerController;
@@ -169,6 +170,9 @@ Route::prefix('users')->group(function () {
     Route::get('/getBalance/{id}', [UserController::class, 'getUserBalance']);
     Route::get('/{id}/payout-review', [UserController::class, 'payoutReview'])->middleware('admin:orders');
     Route::patch('/edituserprofile/{id}', [UserController::class, 'editUserProfile'])->middleware('admin:accounts');
+    Route::post('/change-password', [PasswordManagementController::class, 'changeOwnPassword']);
+    Route::post('/{id}/reset-password', [PasswordManagementController::class, 'adminResetPassword'])->whereNumber('id')->middleware('admin:accounts');
+    Route::get('/password-logs', [PasswordManagementController::class, 'logs'])->middleware('admin:accounts');
     Route::put('/update/{id}', [UserController::class, 'updateUser']);
     Route::patch('/ban/{id}', [UserController::class, 'banToggle'])->middleware('admin:accounts');
     Route::patch('/unban/{id}', [UserController::class, 'unbanUser'])->middleware('admin:accounts');
