@@ -16,6 +16,7 @@ use App\Models\SettlementInvoice;
 use App\Models\OrderStatusHistory;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -1015,6 +1016,34 @@ class OrderAccountingService
             if ($reason = $this->advanceDecisionBlockReason($order)) {
                 throw ValidationException::withMessages(['advance_status' => $reason]);
             }
+
+            // An admin approval must point to a verifiable payment. A sender phone
+            // alone is not enough to establish that the reliability advance was paid.
+            $submittedTrxId = trim((string) ($paymentDetails['advance_trx_id'] ?? ''));
+            $existingTrxId = trim((string) ($order->advance_trx_id ?? ''));
+            $verifiedTrxId = $submittedTrxId !== '' ? $submittedTrxId : $existingTrxId;
+            if ($verifiedTrxId === '') {
+                throw ValidationException::withMessages([
+                    'advance_trx_id' => 'A transaction ID is required to approve this advance.',
+                ]);
+            }
+
+            if ($usedBy = $this->paymentTrxAlreadyUsed($verifiedTrxId, (int) $order->id)) {
+                throw ValidationException::withMessages([
+                    'advance_trx_id' => "This transaction ID was already used for {$usedBy}.",
+                ]);
+            }
+
+            // Blank optional form fields must not erase a transaction reference
+            // that was already submitted with the advance.
+            $paymentDetails['advance_trx_id'] = $verifiedTrxId;
+            $senderPhone = trim((string) ($paymentDetails['advance_sender_phone'] ?? ''));
+            if ($senderPhone !== '') {
+                $paymentDetails['advance_sender_phone'] = $senderPhone;
+            } else {
+                unset($paymentDetails['advance_sender_phone']);
+            }
+
             $advanceTransactions = ResellerTransaction::where('order_id', $order->id)->where('type', 'order_advance');
             $transactionStatus = $order->advance_status === 'rejected' ? 'rejected' : 'pending';
             $transaction = (clone $advanceTransactions)
@@ -1216,6 +1245,30 @@ class OrderAccountingService
                 return;
             }
 
+            $isWalletPayment = $order->advance_payment_method === 'wallet';
+            $advanceTrxId = trim((string) $order->advance_trx_id);
+            $hasRecordedWalletDebit = $isWalletPayment && ResellerTransaction::where('order_id', $order->id)
+                ->where('reseller_id', $order->user_id)
+                ->where('type', 'order_advance')
+                ->where('trx_type', 'debit')
+                ->where('status', 'completed')
+                ->where('amount', round((float) $order->advance_amount, 2))
+                ->exists();
+
+            $adminApprovedWithoutTrxId = !$isWalletPayment
+                && $advanceTrxId === ''
+                && $order->advance_verified_by !== null;
+
+            if ($adminApprovedWithoutTrxId || ($isWalletPayment && !$hasRecordedWalletDebit)) {
+                Log::warning('Skipping advance refund because no verified advance payment record exists.', [
+                    'order_id' => $order->id,
+                    'reseller_id' => $order->user_id,
+                    'payment_method' => $order->advance_payment_method,
+                ]);
+
+                return;
+            }
+
             $note = $reason === 'delivered'
                 ? "Release of reliability balance for completed order #{$order->order_number}"
                 : "Refund of advance payment for cancelled order #{$order->order_number}";
@@ -1225,11 +1278,13 @@ class OrderAccountingService
             // same deposit twice, so it is only marked as released (status "released"
             // is not counted in the balance). Wallet-paid advances were debited, so
             // those are credited back as before.
-            $alreadyInWallet = $order->advance_payment_method !== 'wallet'
+            $alreadyInWallet = !$isWalletPayment
                 && ResellerTransaction::where('order_id', $order->id)
+                    ->where('reseller_id', $order->user_id)
                     ->where('type', 'order_advance')
                     ->where('trx_type', 'credit')
                     ->where('status', 'completed')
+                    ->where('amount', round((float) $order->advance_amount, 2))
                     ->exists();
             if ($alreadyInWallet) {
                 $note .= ' (already in wallet since the advance was approved; no second credit)';
