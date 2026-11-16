@@ -50,12 +50,36 @@ class UserLedgerBalanceTest extends TestCase
         $headers = ['Authorization' => 'Bearer ' . ApiTokenService::create($admin, ['basic', 'admin'])['plain']];
         $empty = User::factory()->create(['user_type' => 'dropshipper', 'banned' => 0]);
 
-        $rows = collect($this->getJson('/api/users/dropshippers', $headers)->assertOk()->json('data.data'))->keyBy('id');
+        WithdrawRequest::create(['user_id' => $this->rahim->id, 'amount' => 200, 'status' => 'pending', 'payment_method' => 'bkash']);
+        WithdrawRequest::create(['user_id' => $this->rahim->id, 'amount' => 999, 'status' => 'rejected', 'payment_method' => 'bkash']);
 
-        $this->assertEquals(700.0, $rows[$this->rahim->id]['wallet_balance']);
-        $this->assertEquals(-50.0, $rows[$this->karim->id]['wallet_balance']);
-        $this->assertEquals(0.0, $rows[$empty->id]['wallet_balance']);
-        $this->assertArrayNotHasKey('balance', $rows[$this->rahim->id]);
+        $rows = collect($this->getJson('/api/users/dropshippers?page=1&per_page=20', $headers)->assertOk()->json('data.data'))->keyBy('id');
+
+        $this->assertEquals([
+            'total_credit' => 1000, 'total_debit' => 300, 'net_balance' => 700,
+            'pending_reserved' => 200, 'available_balance' => 500,
+        ], $rows[$this->rahim->id]['balance']);
+        $this->assertEquals(700, $rows[$this->rahim->id]['wallet_balance']);
+
+        $this->assertEquals(-50, $rows[$this->karim->id]['balance']['net_balance']);
+        $this->assertEquals(0, $rows[$this->karim->id]['balance']['available_balance']);
+        $this->assertEquals(0, $rows[$empty->id]['balance']['net_balance']);
+        $this->assertArrayNotHasKey('ledger_total_credit', $rows[$this->rahim->id]);
+
+        // all=1 (used by pickers) carries the same object.
+        $all = collect($this->getJson('/api/users/dropshippers?all=1', $headers)->assertOk()->json('data'))->keyBy('id');
+        $this->assertEquals(500, $all[$this->rahim->id]['balance']['available_balance']);
+    }
+
+    public function test_dropshipper_list_balance_matches_wallet_balance_endpoint(): void
+    {
+        $admin = User::factory()->create(['user_type' => 'admin', 'role' => 'admin', 'banned' => 0]);
+        $headers = ['Authorization' => 'Bearer ' . ApiTokenService::create($admin, ['basic', 'admin'])['plain']];
+
+        $row = collect($this->getJson('/api/users/dropshippers', $headers)->json('data.data'))->firstWhere('id', $this->rahim->id);
+        $wallet = app(\App\Service\OrderAccountingService::class)->calculateUserBalances($this->rahim->id);
+
+        $this->assertEquals($wallet, $row['balance']);
     }
 
     public function test_partner_auth_verify_returns_ledger_balance(): void

@@ -354,17 +354,48 @@ class UserController extends Controller
     {
         try {
             $perPage = (int) ($request->get('per_page', 20));
-            // wallet_balance: completed credits minus completed debits from the
-            // reseller_transactions ledger (same rule as calculateUserBalances).
-            $walletBalance = ResellerTransaction::query()
-                ->selectRaw("COALESCE(SUM(CASE WHEN trx_type = 'credit' THEN amount WHEN trx_type = 'debit' THEN -amount ELSE 0 END), 0)")
+            // Wallet balance from the reseller_transactions ledger, same rules as
+            // OrderAccountingService::calculateUserBalances, done as subqueries so the
+            // list stays one query: completed credits/debits, and money held by
+            // pending/approved withdraw requests.
+            $ledgerSum = fn (string $trxType) => ResellerTransaction::query()
+                ->selectRaw('COALESCE(SUM(amount), 0)')
                 ->whereColumn('reseller_transactions.reseller_id', 'users.id')
-                ->where('status', 'completed');
+                ->where('status', 'completed')
+                ->where('trx_type', $trxType);
+            $pendingReserved = \App\Models\WithdrawRequest::query()
+                ->selectRaw('COALESCE(SUM(amount), 0)')
+                ->whereColumn('withdraw_requests.user_id', 'users.id')
+                ->whereIn('status', ['pending', 'approved']);
 
             $query = User::where('user_type', 'dropshipper')
                 ->withCount('orders as total_order_count')
-                ->addSelect(['wallet_balance' => $walletBalance])
-                ->withCasts(['total_order_count' => 'integer', 'wallet_balance' => 'float']);
+                ->addSelect([
+                    'ledger_total_credit' => $ledgerSum('credit'),
+                    'ledger_total_debit' => $ledgerSum('debit'),
+                    'ledger_pending_reserved' => $pendingReserved,
+                ])
+                ->withCasts(['total_order_count' => 'integer']);
+
+            // Response: balance = { total_credit, total_debit, net_balance, pending_reserved,
+            // available_balance }, plus wallet_balance (= net_balance) for older clients.
+            $withBalance = function (User $user) {
+                $credit = round((float) $user->ledger_total_credit, 2);
+                $debit = round((float) $user->ledger_total_debit, 2);
+                $reserved = round((float) $user->ledger_pending_reserved, 2);
+                $net = round($credit - $debit, 2);
+
+                $user->setAttribute('balance', [
+                    'total_credit' => $credit,
+                    'total_debit' => $debit,
+                    'net_balance' => $net,
+                    'pending_reserved' => $reserved,
+                    'available_balance' => max(0.00, round($net - $reserved, 2)),
+                ]);
+                $user->setAttribute('wallet_balance', $net);
+
+                return $user->makeHidden(['ledger_total_credit', 'ledger_total_debit', 'ledger_pending_reserved']);
+            };
 
             if ($request->filled('id')) {
                 $query->where('id', $request->id);
@@ -399,10 +430,10 @@ class UserController extends Controller
             }
 
             if ($request->filled('all') && (int) $request->get('all') === 1) {
-                return $this->success('Dropshippers fetched successfully', $query->latest()->get());
+                return $this->success('Dropshippers fetched successfully', $query->latest()->get()->map($withBalance));
             }
 
-            $dropshippers = $query->latest()->paginate($perPage);
+            $dropshippers = $query->latest()->paginate($perPage)->through($withBalance);
 
             return $this->success('Dropshippers fetched successfully', $dropshippers);
         } catch (\Throwable $e) {
