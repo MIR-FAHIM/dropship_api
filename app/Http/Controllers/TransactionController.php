@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Transaction;
 use App\Models\ResellerTransaction;
+use App\Models\User;
+use App\Models\WithdrawRequest;
+use App\Models\WalletTopup;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -390,15 +393,145 @@ class TransactionController extends Controller
         $request->merge(['dropshipper_id' => $dropshipperId]);
         $validated = $request->validate([
             'dropshipper_id' => ['required', 'integer', 'exists:users,id'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'status' => ['sometimes', 'string', 'max:30'],
+            'trx_type' => ['sometimes', 'string', 'max:30'],
+            'type' => ['sometimes', 'string', 'max:60'],
+            'start_date' => ['sometimes', 'date'],
+            'end_date' => ['sometimes', 'date'],
+            'search' => ['sometimes', 'string', 'max:100'],
         ]);
 
-        $dropshipper = \App\Models\User::where('user_type', 'dropshipper')->find($validated['dropshipper_id']);
+        if (!empty($validated['start_date']) && !empty($validated['end_date'])
+            && Carbon::parse($validated['end_date'])->lt(Carbon::parse($validated['start_date']))) {
+            return $this->failed('Validation failed', ['end_date' => ['The end date must be on or after the start date.']], 422);
+        }
+
+        $dropshipper = User::where('user_type', 'dropshipper')->find($validated['dropshipper_id']);
         if (!$dropshipper) {
             return $this->failed('Dropshipper not found', null, 404);
         }
 
-        $request->merge(['reseller_id' => $dropshipper->id]);
+        $userId = (int) $dropshipper->id;
+        $perPage = (int) ($validated['per_page'] ?? 20);
+        $accounting = app(\App\Service\OrderAccountingService::class);
+        $balance = $accounting->calculateUserBalances($userId);
+        $labels = [
+            'wallet_topup' => 'Wallet top-up',
+            'order_settlement' => 'Order profit',
+            'withdraw' => 'Withdrawal or payout',
+            'order_advance' => 'Reliability advance',
+            'advance_refund' => 'Advance refund',
+            'profit_clawback' => 'Order profit reversal',
+        ];
 
-        return $this->resellerTransactions($request);
+        $ledgerQuery = ResellerTransaction::with(['order:id,order_number,customer_name'])
+            ->where('reseller_id', $userId);
+        if (!empty($validated['status']) && $validated['status'] !== 'all') {
+            $ledgerQuery->where('status', $validated['status']);
+        }
+        if (!empty($validated['trx_type']) && $validated['trx_type'] !== 'all') {
+            $ledgerQuery->where('trx_type', $validated['trx_type']);
+        }
+        if (!empty($validated['type']) && $validated['type'] !== 'all') {
+            $ledgerQuery->where('type', $validated['type']);
+        }
+        if (!empty($validated['search'])) {
+            $term = trim($validated['search']);
+            $ledgerQuery->where(function ($query) use ($term) {
+                $query->where('trx_id', 'like', "%{$term}%")
+                    ->orWhere('ref_id', 'like', "%{$term}%")
+                    ->orWhere('note', 'like', "%{$term}%")
+                    ->orWhereHas('order', fn ($order) => $order
+                        ->where('order_number', 'like', "%{$term}%")
+                        ->orWhere('customer_name', 'like', "%{$term}%"));
+            });
+        }
+        $this->applyDateFilters($ledgerQuery, $request);
+
+        $transactions = $ledgerQuery->orderByDesc('created_at')->orderByDesc('id')
+            ->paginate($perPage)->withQueryString();
+        $transactions->getCollection()->transform(function (ResellerTransaction $transaction) use ($labels) {
+            $status = strtolower((string) $transaction->status);
+            $direction = strtolower((string) $transaction->trx_type);
+            $amount = round((float) $transaction->amount, 2);
+            $balanceEffect = $status === 'completed'
+                ? ($direction === 'credit' ? $amount : ($direction === 'debit' ? -$amount : 0.00))
+                : 0.00;
+
+            return [
+                'id' => $transaction->id,
+                'category' => $transaction->type,
+                'category_label' => $labels[$transaction->type] ?? str($transaction->type)->replace('_', ' ')->title()->toString(),
+                'direction' => $transaction->trx_type,
+                'amount' => $amount,
+                'balance_effect' => $balanceEffect,
+                'status' => $transaction->status,
+                'status_affects_balance' => $status === 'completed',
+                'transaction_id' => $transaction->trx_id,
+                'reference_id' => $transaction->ref_id,
+                'source' => $transaction->source,
+                'note' => $transaction->note,
+                'order' => $transaction->order ? [
+                    'id' => $transaction->order->id,
+                    'order_number' => $transaction->order->order_number,
+                    'customer_name' => $transaction->order->customer_name,
+                ] : null,
+                'created_at' => $transaction->created_at?->toIso8601String(),
+            ];
+        });
+
+        $totalsByCategory = ResellerTransaction::where('reseller_id', $userId)
+            ->select('type', 'trx_type', 'status')
+            ->selectRaw('COUNT(*) as transaction_count, SUM(amount) as amount_total')
+            ->groupBy('type', 'trx_type', 'status')
+            ->orderBy('type')->get()
+            ->map(fn ($row) => [
+                'category' => $row->type,
+                'category_label' => $labels[$row->type] ?? str($row->type)->replace('_', ' ')->title()->toString(),
+                'direction' => $row->trx_type,
+                'status' => $row->status,
+                'count' => (int) $row->transaction_count,
+                'amount_total' => round((float) $row->amount_total, 2),
+            ]);
+
+        $withdrawals = WithdrawRequest::where('user_id', $userId)
+            ->orderByDesc('created_at')->orderByDesc('id')
+            ->paginate($perPage, ['id', 'user_id', 'amount', 'reserved_amount', 'status', 'payment_method', 'bank_reference', 'note', 'type', 'transferred_at', 'created_at'], 'withdrawals_page')
+            ->withQueryString();
+
+        $topups = WalletTopup::where('user_id', $userId)
+            ->orderByDesc('created_at')->orderByDesc('id')
+            ->paginate($perPage, ['id', 'user_id', 'amount', 'payment_method', 'sender_phone', 'trx_id', 'status', 'approved_by', 'approved_at', 'admin_note', 'created_at'], 'topups_page')
+            ->withQueryString();
+
+        $pendingCredits = ResellerTransaction::where('reseller_id', $userId)
+            ->where('status', 'pending')->where('trx_type', 'credit')->sum('amount');
+
+        return $this->success('Dropshipper account history fetched', [
+            'dropshipper' => [
+                'id' => $dropshipper->id,
+                'name' => $dropshipper->name,
+                'email' => $dropshipper->email,
+                'phone' => $dropshipper->phone,
+            ],
+            'summary' => [
+                'currency' => 'BDT',
+                'completed_credits' => $balance['total_credit'],
+                'completed_debits' => $balance['total_debit'],
+                'net_wallet_balance' => $balance['net_balance'],
+                'pending_withdrawal_reserved' => $balance['pending_reserved'],
+                'available_balance' => $balance['available_balance'],
+                'pending_credits_not_yet_in_balance' => round((float) $pendingCredits, 2),
+                'transaction_count' => ResellerTransaction::where('reseller_id', $userId)->count(),
+                'withdrawal_request_count' => WithdrawRequest::where('user_id', $userId)->count(),
+                'topup_request_count' => WalletTopup::where('user_id', $userId)->count(),
+            ],
+            'totals_by_category' => $totalsByCategory,
+            'transactions' => $transactions,
+            'withdrawal_requests' => $withdrawals,
+            'wallet_topup_requests' => $topups,
+        ]);
     }
 }
