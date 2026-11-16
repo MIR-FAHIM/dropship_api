@@ -27,6 +27,7 @@ use App\Service\OrderAccountingService;
 use App\Service\OrderStatusTransitionService;
 use App\Service\CarrybeeService;
 use App\Service\CompanyTransactionService;
+use App\Service\FirebasePushNotificationService;
 use App\Service\MuthobartaSmsService;
 
 class OrderController extends Controller
@@ -35,17 +36,20 @@ class OrderController extends Controller
     protected OrderAccountingService $orderAccountingService;
     protected MuthobartaSmsService $smsService;
     protected CompanyTransactionService $companyTransactions;
+    protected FirebasePushNotificationService $firebasePushNotificationService;
 
     public function __construct(
         NotificationService $notificationService,
         OrderAccountingService $orderAccountingService,
         MuthobartaSmsService $smsService,
-        CompanyTransactionService $companyTransactions
+        CompanyTransactionService $companyTransactions,
+        FirebasePushNotificationService $firebasePushNotificationService
     ) {
         $this->notificationService = $notificationService;
         $this->orderAccountingService = $orderAccountingService;
         $this->smsService = $smsService;
         $this->companyTransactions = $companyTransactions;
+        $this->firebasePushNotificationService = $firebasePushNotificationService;
     }
     private function maskSensitive(array $payload): array
     {
@@ -737,7 +741,7 @@ class OrderController extends Controller
             DB::commit();
             $transactionStarted = false;
 
-            $order->load(['items', 'vendor.user']);
+            $order->load(['items', 'user', 'vendor.user']);
             $formattedTotal = number_format((float) $order->total, 2, '.', '');
 
             $this->notificationService->createNotificationSafely([
@@ -776,6 +780,67 @@ class OrderController extends Controller
                 'image'      => null,
                 'module'     => 'order',
             ]);
+
+            // Push delivery happens after commit; an FCM outage must not undo checkout.
+            try {
+                $pushData = [
+                    'type' => 'order_created',
+                    'order_id' => (string) $order->id,
+                    'order_number' => (string) $order->order_number,
+                ];
+                $pushTargets = [];
+
+                if ($order->user) {
+                    $pushTargets[] = [
+                        'user' => $order->user,
+                        'title' => 'Order placed',
+                        'body' => "Your order {$order->order_number} was placed successfully.",
+                    ];
+                }
+
+                if ($order->vendor?->user) {
+                    $pushTargets[] = [
+                        'user' => $order->vendor->user,
+                        'title' => 'New vendor order',
+                        'body' => "Order {$order->order_number} includes product(s) from your shop.",
+                    ];
+                }
+
+                User::query()
+                    ->where(function ($query) {
+                        $query->where('role', 'admin')->orWhere('user_type', 'admin');
+                    })
+                    ->get()
+                    ->each(function (User $admin) use (&$pushTargets, $formattedTotal, $order) {
+                        $pushTargets[] = [
+                            'user' => $admin,
+                            'title' => 'New checkout order',
+                            'body' => "Order {$order->order_number} placed. Total {$formattedTotal} BDT.",
+                        ];
+                    });
+
+                $sentToUserIds = [];
+                foreach ($pushTargets as $pushTarget) {
+                    /** @var User $recipient */
+                    $recipient = $pushTarget['user'];
+                    if (isset($sentToUserIds[$recipient->id])) {
+                        continue;
+                    }
+
+                    $sentToUserIds[$recipient->id] = true;
+                    $this->firebasePushNotificationService->sendToUser(
+                        $recipient,
+                        $pushTarget['title'],
+                        $pushTarget['body'],
+                        $pushData
+                    );
+                }
+            } catch (\Throwable $pushException) {
+                Log::warning('Order checkout push notification processing failed.', [
+                    'order_id' => $order->id,
+                    'exception' => $pushException->getMessage(),
+                ]);
+            }
 
             $adminNumber = config('services.muthobarta.admin_number', '01941606310');
             if ($adminNumber) {

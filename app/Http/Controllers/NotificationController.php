@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Notification;
+use App\Models\User;
+use App\Service\FirebasePushNotificationService;
 
 class NotificationController extends Controller
 {
@@ -139,6 +141,51 @@ class NotificationController extends Controller
 			]);
 		} catch (\Throwable $e) {
 			return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+		}
+	}
+
+	/**
+	 * POST /notifications/test-push
+	 * Sends a test push notification to a user's registered device token.
+	 */
+	public function testPushNotification(Request $request, FirebasePushNotificationService $firebasePushNotificationService)
+	{
+		try {
+			$validated = $request->validate([
+				'user_id' => ['required', 'integer', 'exists:users,id'],
+				'title' => ['required', 'string', 'max:150'],
+				'body' => ['required', 'string', 'max:1000'],
+				'data' => ['sometimes', 'array'],
+			]);
+
+			$user = User::findOrFail($validated['user_id']);
+			$result = $firebasePushNotificationService->sendToUser(
+				$user,
+				$validated['title'],
+				$validated['body'],
+				$validated['data'] ?? []
+			);
+
+			if ($result['success'] ?? false) {
+				return $this->success('Push notification sent successfully', [
+					'user_id' => $user->id,
+					'fcm' => $result,
+				]);
+			}
+
+			$status = ($result['skipped'] ?? false) ? 422 : 502;
+			$message = ($result['reason'] ?? null) === 'missing_device_token'
+				? 'This user has no registered device token'
+				: 'Push notification could not be sent';
+
+			return $this->failed($message, [
+				'user_id' => $user->id,
+				'fcm' => $result,
+			], $status);
+		} catch (\Illuminate\Validation\ValidationException $e) {
+			return $this->failed('Validation failed', $e->errors(), 422);
+		} catch (\Throwable $e) {
+			return $this->failed('Push notification test failed', ['error' => $e->getMessage()], 500);
 		}
 	}
 }

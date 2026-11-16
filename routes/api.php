@@ -522,6 +522,7 @@ Route::prefix('notifications')->group(function () {
     Route::get('/user/{userId}', [NotificationController::class, 'getNotificationByUser']);
     Route::patch('/read-unread/{id}', [NotificationController::class, 'readUnread']);
     Route::patch('/mark-all-read/{userId}', [NotificationController::class, 'markAllAsReadByUser']);
+    Route::post('/test-push', [NotificationController::class, 'testPushNotification'])->middleware('admin:accounts');
 });
 
 Route::prefix('notices')->group(function () {
