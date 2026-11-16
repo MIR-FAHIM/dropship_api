@@ -1394,8 +1394,20 @@ class OrderController extends Controller
             }
 
             // Status filter
-            if ($request->filled('status') && $request->get('status') !== 'all') {
+            $hasStatusFilter = $request->filled('status') && $request->get('status') !== 'all';
+            if ($hasStatusFilter) {
                 $query->where('status', $request->get('status'));
+            }
+
+            // Cancelled orders live on their own admin page:
+            //   cancelled=only    -> only cancelled orders
+            //   cancelled=include -> no cancelled filter
+            //   (default)         -> exclude cancelled, unless an explicit status was asked for
+            $cancelled = strtolower((string) $request->get('cancelled', ''));
+            if ($cancelled === 'only') {
+                $query->where('status', Order::STATUS_CANCELLED);
+            } elseif ($cancelled !== 'include' && !$hasStatusFilter) {
+                $query->where('status', '!=', Order::STATUS_CANCELLED);
             }
 
             // Dropshipper filter (the reseller who placed the order)
