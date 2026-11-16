@@ -42,7 +42,7 @@ class PasswordManagementController extends Controller
         try {
             $validated = $request->validate([
                 'current_password' => ['required', 'string'],
-                'password' => ['required', 'string', 'min:8', 'max:191', 'confirmed', 'different:current_password'],
+                'password' => ['required', 'string', 'min:5', 'max:191', 'confirmed', 'different:current_password'],
                 'password_confirmation' => ['required', 'string'],
             ]);
 
@@ -94,7 +94,7 @@ class PasswordManagementController extends Controller
     {
         try {
             $validated = $request->validate([
-                'password' => ['required', 'string', 'min:8', 'max:191', 'confirmed'],
+                'password' => ['required', 'string', 'min:5', 'max:191', 'confirmed'],
                 'password_confirmation' => ['required', 'string'],
                 'note' => ['nullable', 'string', 'max:250'],
             ]);

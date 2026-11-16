@@ -137,7 +137,7 @@ class PasswordResetOtpController extends Controller
             $validated = $request->validate([
                 'email'                 => ['required', 'string', 'email', 'max:191'],
                 'otp'                   => ['required', 'string', 'regex:/^[0-9]{6}$/'],
-                'password'              => ['required', 'string', 'min:8', 'confirmed'],
+                'password'              => ['required', 'string', 'min:5', 'confirmed'],
                 'password_confirmation' => ['required', 'string'],
             ]);
 

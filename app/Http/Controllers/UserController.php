@@ -603,7 +603,7 @@ class UserController extends Controller
                 'email' => ['sometimes', 'required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($id)],
                 'phone' => ['sometimes', 'nullable', 'string', 'max:20'],
                 'address' => ['sometimes', 'nullable', 'string', 'max:300'],
-                'password' => ['sometimes', 'required', 'string', 'min:8'],
+                'password' => ['sometimes', 'required', 'string', 'min:5'],
             ]);
 
             $user = User::where('user_type', 'dropshipper')->find($id);

@@ -91,8 +91,8 @@ class PasswordManagementTest extends TestCase
 
         $this->postJson('/api/users/change-password', [
             'current_password' => 'old-password-1',
-            'password' => 'short',
-            'password_confirmation' => 'short',
+            'password' => 'abcd', // 4 characters: below the 5 minimum
+            'password_confirmation' => 'abcd',
         ], $headers)->assertStatus(422)->assertJsonStructure(['errors' => ['password']]);
 
         $this->postJson('/api/users/change-password', [
@@ -102,6 +102,27 @@ class PasswordManagementTest extends TestCase
         ], $headers)->assertStatus(422)->assertJsonStructure(['errors' => ['password']]);
 
         $this->assertSame(0, PasswordChangeLog::count());
+    }
+
+    public function test_five_character_password_is_accepted(): void
+    {
+        $this->postJson('/api/users/change-password', [
+            'current_password' => 'old-password-1',
+            'password' => 'abcde',
+            'password_confirmation' => 'abcde',
+        ], $this->headersFor($this->dropshipper))->assertOk();
+        $this->assertTrue(Hash::check('abcde', $this->dropshipper->fresh()->password));
+
+        $this->postJson("/api/users/{$this->dropshipper->id}/reset-password", [
+            'password' => '12345',
+            'password_confirmation' => '12345',
+        ], $this->adminHeaders)->assertOk();
+        $this->assertTrue(Hash::check('12345', $this->dropshipper->fresh()->password));
+
+        $this->postJson("/api/users/{$this->dropshipper->id}/reset-password", [
+            'password' => '1234',
+            'password_confirmation' => '1234',
+        ], $this->adminHeaders)->assertStatus(422);
     }
 
     public function test_change_password_requires_login(): void
