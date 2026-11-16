@@ -58,6 +58,7 @@ class OrderAdvanceAndTopupTest extends TestCase
         $this->admin = User::factory()->create([
             'email' => 'admin_adv@test.com',
             'user_type' => 'admin',
+            'banned' => 0,
         ]);
 
         $this->reseller = User::factory()->create([

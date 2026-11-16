@@ -117,9 +117,11 @@ Route::prefix('support-tickets')->group(function () {
 // Withdraw Requests
 Route::prefix('withdraws')->group(function () {
     Route::post('/add', [WithdrawController::class, 'addWithdrawRequest']);
-    Route::get('/all', [WithdrawController::class, 'getAllWithdrawRequest']);
+    Route::get('/all', [WithdrawController::class, 'getAllWithdrawRequest'])->middleware('admin:accounts');
     Route::get('/user/{id}', [WithdrawController::class, 'getUserWithdrawRequest']);
-    Route::post('/status-change/{id}', [WithdrawController::class, 'withdrawStatusChange']);
+    Route::post('/status-change/{id}', [WithdrawController::class, 'withdrawStatusChange'])->middleware('admin:accounts');
+    // Admin records a wallet payout made by hand (bKash, bank, cash) so the balance drops.
+    Route::post('/admin-payout', [WithdrawController::class, 'adminWalletPayout'])->middleware('admin:accounts');
 });
 
 Route::prefix('reseller-store-profiles')->group(function () {
@@ -288,9 +290,9 @@ Route::prefix('dropshipper-payouts')->group(function () {
 Route::prefix('wallet')->group(function () {
     Route::post('/topup', [WalletTopupController::class, 'requestTopup']);
     Route::get('/topup/my-history', [WalletTopupController::class, 'myTopups']);
-    Route::get('/topup/all', [WalletTopupController::class, 'allTopups']);
-    Route::post('/topup/{id}/approve', [WalletTopupController::class, 'approveTopup']);
-    Route::post('/topup/{id}/reject', [WalletTopupController::class, 'rejectTopup']);
+    Route::get('/topup/all', [WalletTopupController::class, 'allTopups'])->middleware('admin:accounts');
+    Route::post('/topup/{id}/approve', [WalletTopupController::class, 'approveTopup'])->middleware('admin:accounts');
+    Route::post('/topup/{id}/reject', [WalletTopupController::class, 'rejectTopup'])->middleware('admin:accounts');
 });
 
 Route::prefix('order-settlements')->group(function () {
@@ -298,22 +300,22 @@ Route::prefix('order-settlements')->group(function () {
     Route::get('/order/{orderId}', [OrderSettlementController::class, 'getSettlementRequestByOrder']);
     Route::get('/get-settlement-request-by-order/{orderId}', [OrderSettlementController::class, 'getSettlementRequestByOrder']);
     Route::get('/get-settlment-request-by-order/{orderId}', [OrderSettlementController::class, 'getSettlementRequestByOrder']);
-    Route::post('/add-settled-trx-id/{id}', [OrderSettlementController::class, 'addSettledTrxId']);
-    Route::post('/settled-trx-id/{id}', [OrderSettlementController::class, 'addSettledTrxId']);
-    Route::post('/settle-nowe/{id}', [OrderSettlementController::class, 'settleNowe']);
-    Route::post('/settle-now/{id}', [OrderSettlementController::class, 'settleNowe']);
+    Route::post('/add-settled-trx-id/{id}', [OrderSettlementController::class, 'addSettledTrxId'])->middleware('admin:accounts');
+    Route::post('/settled-trx-id/{id}', [OrderSettlementController::class, 'addSettledTrxId'])->middleware('admin:accounts');
+    Route::post('/settle-nowe/{id}', [OrderSettlementController::class, 'settleNowe'])->middleware('admin:accounts');
+    Route::post('/settle-now/{id}', [OrderSettlementController::class, 'settleNowe'])->middleware('admin:accounts');
 
     // Financial stake breakdown, editable adjustments, multi-order vendor invoice, and direct dropshipper disbursement
     Route::get('/orders/{orderId}/breakdown', [OrderSettlementController::class, 'getOrderBreakdown']);
-    Route::post('/orders/{orderId}/update-breakdown', [OrderSettlementController::class, 'updateOrderBreakdown']);
+    Route::post('/orders/{orderId}/update-breakdown', [OrderSettlementController::class, 'updateOrderBreakdown'])->middleware('admin:accounts');
     Route::post('/orders/{orderId}/disburse-reseller-profit', [OrderSettlementController::class, 'disburseDropshipperProfit'])->middleware('admin:orders');
-    Route::post('/vendor-invoice', [OrderSettlementController::class, 'createVendorInvoice']);
+    Route::post('/vendor-invoice', [OrderSettlementController::class, 'createVendorInvoice'])->middleware('admin:accounts');
     Route::get('/vendor-invoices', [OrderSettlementController::class, 'listVendorInvoices']);
     Route::get('/vendor-invoices/{id}', [OrderSettlementController::class, 'vendorInvoiceDetails']);
     Route::post('/vendor-invoices/{id}/pay', [OrderSettlementController::class, 'payVendorInvoice']);
-    Route::post('/vendor-invoices/{id}/approve', [OrderSettlementController::class, 'approveVendorInvoice']);
+    Route::post('/vendor-invoices/{id}/approve', [OrderSettlementController::class, 'approveVendorInvoice'])->middleware('admin:accounts');
     Route::post('/vendor-invoices/{id}/adjust', [OrderSettlementController::class, 'adjustVendorInvoice'])->middleware('admin:orders');
-    Route::post('/vendor-invoices/{id}/reject', [OrderSettlementController::class, 'rejectVendorInvoice']);
+    Route::post('/vendor-invoices/{id}/reject', [OrderSettlementController::class, 'rejectVendorInvoice'])->middleware('admin:accounts');
     Route::get('/admin-payment-accounts', [OrderSettlementController::class, 'getAdminPaymentAccounts']);
 });
 

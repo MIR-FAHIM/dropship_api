@@ -63,6 +63,10 @@ class WalletTopupController extends Controller
             if ($existing) {
                 return $this->failed('This transaction ID has already been submitted.', null, 422);
             }
+            // The same payment can't also be an order advance.
+            if ($usedBy = $this->orderAccountingService->paymentTrxAlreadyUsed($validated['trx_id'])) {
+                return $this->failed("This transaction ID was already used for {$usedBy}.", null, 422);
+            }
 
             $topup = WalletTopup::create([
                 'user_id' => $userId,
@@ -257,7 +261,7 @@ class WalletTopupController extends Controller
 
             return $this->success('Wallet recharge rejected successfully.', $topup);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            return $this->failed('Validation failed', $e->errors(), 422);
+            return $this->failed($e->validator->errors()->first() ?: 'Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }

@@ -52,6 +52,16 @@ class DropshipperPayoutService
             ->pluck('order_id')
             ->all();
 
+        // Orders whose profit was already credited are paid, even if their settlement
+        // row was later reset to pending/cancelled (e.g. a CarryBee "paid" reset).
+        $creditedOrderIds = ResellerTransaction::where('reseller_id', $dropshipperId)
+            ->where('type', 'order_settlement')
+            ->where('trx_type', 'credit')
+            ->whereNotNull('order_id')
+            ->pluck('order_id')
+            ->all();
+        $settledOrderIds = array_values(array_unique(array_merge($settledOrderIds, $creditedOrderIds)));
+
         $orders = Order::with(['deliveryInformation'])
             ->where('user_id', $dropshipperId)
             ->whereIn('status', ['6', '9', '10', '13'])

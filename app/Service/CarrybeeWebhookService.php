@@ -450,6 +450,14 @@ class CarrybeeWebhookService
             // Money is reversed only on cancel or when the parcel is back with the vendor
             // (order.returned-to-merchant), never on the first "returning" event (12).
             $this->orderAccountingService->processOrderReversal($order, 'CarryBee delivery returned/cancelled');
+
+            // Profit already paid for this order comes back out of the dropshipper's wallet.
+            $clawedBack = $this->orderAccountingService->clawbackResellerProfit($order, 'CarryBee returned/cancelled the order');
+            if ($clawedBack > 0) {
+                $amountText = number_format($clawedBack, 2);
+                $this->notifyUser($order->user_id, 'Profit taken back', "Order {$order->order_number} was returned/cancelled. ৳{$amountText} profit already paid was deducted from your balance.");
+                $this->notifyAdmins('Paid profit taken back', "Order {$order->order_number}: ৳{$amountText} already-paid profit was deducted from the dropshipper's balance after return/cancel.");
+            }
         }
 
         if ($targetStatusId === $currentStatusId) {

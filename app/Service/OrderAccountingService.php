@@ -588,6 +588,44 @@ class OrderAccountingService
     }
 
     /**
+     * When an order is cancelled or returned after its profit was already paid to
+     * the dropshipper, take that profit back out of their wallet (once). The balance
+     * may go negative; it is recovered from later payouts and blocks withdrawals.
+     * Returns the amount taken back (0 when nothing had been paid).
+     */
+    public function clawbackResellerProfit(Order $order, string $reason): float
+    {
+        return DB::transaction(function () use ($order, $reason) {
+            $paid = ResellerTransaction::where('order_id', $order->id)
+                ->where('type', 'order_settlement')
+                ->where('trx_type', 'credit')
+                ->where('status', 'completed')
+                ->first();
+            if (!$paid || (float) $paid->amount <= 0) {
+                return 0.0;
+            }
+            if (ResellerTransaction::where('order_id', $order->id)->where('type', 'profit_clawback')->exists()) {
+                return 0.0;
+            }
+
+            ResellerTransaction::create([
+                'reseller_id' => $paid->reseller_id,
+                'order_id' => $order->id,
+                'amount' => $paid->amount,
+                'trx_id' => 'CLAWBACK-' . $order->id . '-' . time(),
+                'trx_type' => 'debit',
+                'type' => 'profit_clawback',
+                'source' => 'wallet',
+                'ref_id' => $paid->id,
+                'status' => 'completed',
+                'note' => "Profit of order #{$order->order_number} taken back: {$reason}",
+            ]);
+
+            return round((float) $paid->amount, 2);
+        });
+    }
+
+    /**
      * Calculate comprehensive, real-time balances for a reseller.
      */
     public function calculateUserBalances(int $userId): array
@@ -602,9 +640,10 @@ class OrderAccountingService
             ->where('trx_type', 'debit')
             ->sum('amount');
 
-        // Pending reservations in withdraw requests
+        // Money held by withdraw requests that are not paid out yet. "approved" counts
+        // too: it is promised but not transferred, so it must not be requested again.
         $pendingReserved = (float) WithdrawRequest::where('user_id', $userId)
-            ->where('status', 'pending')
+            ->whereIn('status', ['pending', 'approved'])
             ->sum('amount');
 
         $netBalance = $credit - $debit;
@@ -665,6 +704,21 @@ class OrderAccountingService
             if ($withdraw->status === 'transferred') {
                 return $withdraw;
             }
+            if (!in_array($withdraw->status, ['pending', 'approved'], true)) {
+                throw ValidationException::withMessages([
+                    'status' => ["This withdraw request is {$withdraw->status} and cannot be transferred. Ask the dropshipper to submit a new request."],
+                ]);
+            }
+
+            // The balance may have dropped since the request was made (advance paid
+            // from wallet, clawback, another payout). Never send more than is there.
+            User::lockForUpdate()->findOrFail($withdraw->user_id);
+            $balances = $this->calculateUserBalances((int) $withdraw->user_id);
+            if ((float) $withdraw->amount > round($balances['net_balance'], 2) + 0.001) {
+                throw ValidationException::withMessages([
+                    'amount' => ["The dropshipper's balance is now ৳{$balances['net_balance']}, less than this ৳{$withdraw->amount} request. Reject it and ask for a new request."],
+                ]);
+            }
 
             $withdraw->update([
                 'status' => 'transferred',
@@ -712,12 +766,73 @@ class OrderAccountingService
     }
 
     /**
+     * Admin records a payout of wallet balance made by hand (bKash, bank, cash),
+     * so the balance drops and the same money can't be withdrawn again.
+     */
+    public function adminWalletPayout(int $userId, float $amount, string $method, ?string $reference, ?string $note, ?int $adminId): WithdrawRequest
+    {
+        return DB::transaction(function () use ($userId, $amount, $method, $reference, $note, $adminId) {
+            User::lockForUpdate()->findOrFail($userId);
+            $amount = round($amount, 2);
+            $balances = $this->calculateUserBalances($userId);
+            if ($amount > $balances['available_balance'] + 0.001) {
+                throw ValidationException::withMessages([
+                    'amount' => ["Only ৳{$balances['available_balance']} is available in this wallet (৳{$balances['pending_reserved']} is held by open withdraw requests)."],
+                ]);
+            }
+
+            $reference = trim((string) $reference) ?: ('ADMIN-PAYOUT-' . $userId . '-' . time());
+            $withdraw = WithdrawRequest::create([
+                'user_id' => $userId,
+                'amount' => $amount,
+                'reserved_amount' => 0.00,
+                'status' => 'transferred',
+                'payment_method' => $method,
+                'bank_reference' => $reference,
+                'transferred_at' => now(),
+                'note' => trim("Wallet payout recorded by admin #{$adminId}. " . ($note ?? '')),
+                'type' => 'admin_wallet_payout',
+            ]);
+
+            ResellerTransaction::create([
+                'reseller_id' => $userId,
+                'amount' => $amount,
+                'trx_id' => 'WD-' . $withdraw->id . '-' . time(),
+                'trx_type' => 'debit',
+                'type' => 'withdraw',
+                'source' => $method,
+                'ref_id' => $withdraw->id,
+                'status' => 'completed',
+                'note' => "Wallet payout by admin via {$method} (Ref: {$reference})",
+            ]);
+
+            Transaction::create([
+                'ref_id' => $withdraw->id,
+                'type' => 'reseller_withdraw',
+                'amount' => $amount,
+                'trx_id' => $reference,
+                'trx_type' => 'debit',
+                'source' => $method,
+                'status' => 'completed',
+                'note' => "Wallet payout to dropshipper #{$userId} via {$method} (Ref: {$reference})",
+            ]);
+
+            return $withdraw;
+        });
+    }
+
+    /**
      * Reject a withdrawal request, releasing reserved funds.
      */
     public function rejectWithdrawal(WithdrawRequest $withdraw, ?string $reason = null): WithdrawRequest
     {
         return DB::transaction(function () use ($withdraw, $reason) {
             $withdraw = WithdrawRequest::lockForUpdate()->findOrFail($withdraw->id);
+            if ($withdraw->status === 'transferred') {
+                throw ValidationException::withMessages([
+                    'status' => ['This withdraw was already transferred and cannot be rejected.'],
+                ]);
+            }
 
             $withdraw->update([
                 'status' => 'rejected',
@@ -1051,6 +1166,38 @@ class OrderAccountingService
     }
 
     /**
+     * One bKash/Nagad/bank transaction can back only one deposit. Returns where a
+     * transaction id is already used (another order's advance or a wallet top-up),
+     * or null when it is free.
+     */
+    public function paymentTrxAlreadyUsed(?string $trxId, ?int $exceptOrderId = null, ?int $exceptTopupId = null): ?string
+    {
+        $trxId = trim((string) $trxId);
+        if ($trxId === '') {
+            return null;
+        }
+
+        $order = Order::where('advance_trx_id', $trxId)
+            ->when($exceptOrderId, fn ($q) => $q->where('id', '!=', $exceptOrderId))
+            ->where('advance_payment_method', '!=', 'wallet')
+            ->whereNotIn('advance_status', ['rejected', 'none'])
+            ->first(['id', 'order_number']);
+        if ($order) {
+            return "the advance of order {$order->order_number}";
+        }
+
+        $topup = WalletTopup::where('trx_id', $trxId)
+            ->when($exceptTopupId, fn ($q) => $q->where('id', '!=', $exceptTopupId))
+            ->where('status', '!=', 'rejected')
+            ->first(['id']);
+        if ($topup) {
+            return "wallet top-up #{$topup->id}";
+        }
+
+        return null;
+    }
+
+    /**
      * Refund/Release order advance to dropshipper wallet if cancelled or delivered.
      */
     public function refundOrderAdvance(Order $order, string $reason = 'cancelled'): void
@@ -1073,6 +1220,21 @@ class OrderAccountingService
                 ? "Release of reliability balance for completed order #{$order->order_number}"
                 : "Refund of advance payment for cancelled order #{$order->order_number}";
 
+            // A bKash/Nagad advance was already added to the wallet when the admin
+            // approved it (order_advance credit). Crediting it again here paid the
+            // same deposit twice, so it is only marked as released (status "released"
+            // is not counted in the balance). Wallet-paid advances were debited, so
+            // those are credited back as before.
+            $alreadyInWallet = $order->advance_payment_method !== 'wallet'
+                && ResellerTransaction::where('order_id', $order->id)
+                    ->where('type', 'order_advance')
+                    ->where('trx_type', 'credit')
+                    ->where('status', 'completed')
+                    ->exists();
+            if ($alreadyInWallet) {
+                $note .= ' (already in wallet since the advance was approved; no second credit)';
+            }
+
             ResellerTransaction::create([
                 'reseller_id' => $order->user_id,
                 'order_id' => $order->id,
@@ -1080,7 +1242,7 @@ class OrderAccountingService
                 'trx_type' => 'credit',
                 'type' => 'advance_refund',
                 'source' => 'wallet',
-                'status' => 'completed',
+                'status' => $alreadyInWallet ? 'released' : 'completed',
                 'trx_id' => 'REF-ADV-' . $order->id . '-' . time(),
                 'note' => $note,
             ]);
@@ -1105,18 +1267,24 @@ class OrderAccountingService
                 'admin_note' => $note,
             ]);
 
-            // Credit reseller wallet balance!
-            ResellerTransaction::create([
-                'reseller_id' => $topup->user_id,
-                'amount' => $topup->amount,
-                'trx_type' => 'credit',
-                'type' => 'wallet_topup',
-                'source' => $topup->payment_method,
-                'trx_id' => $topup->trx_id,
-                'ref_id' => $topup->id,
-                'status' => 'completed',
-                'note' => "Wallet balance recharge approved via {$topup->payment_method} (Trx: {$topup->trx_id})",
-            ]);
+            // Credit reseller wallet balance. One credit row per top-up: approving a
+            // top-up that was approved, rejected and approved again reuses its row
+            // instead of adding a second credit.
+            ResellerTransaction::updateOrCreate(
+                [
+                    'type' => 'wallet_topup',
+                    'ref_id' => $topup->id,
+                    'reseller_id' => $topup->user_id,
+                ],
+                [
+                    'amount' => $topup->amount,
+                    'trx_type' => 'credit',
+                    'source' => $topup->payment_method,
+                    'trx_id' => $topup->trx_id,
+                    'status' => 'completed',
+                    'note' => "Wallet balance recharge approved via {$topup->payment_method} (Trx: {$topup->trx_id})",
+                ]
+            );
 
             // Record company cashbook credit (inflow)
             Transaction::updateOrCreate(
@@ -1145,6 +1313,21 @@ class OrderAccountingService
     {
         return DB::transaction(function () use ($topup, $adminId, $reason) {
             $topup = WalletTopup::lockForUpdate()->findOrFail($topup->id);
+
+            // Rejecting an approved top-up takes its credit back out of the wallet.
+            if ($topup->status === 'approved') {
+                User::lockForUpdate()->findOrFail($topup->user_id);
+                $available = $this->calculateUserBalances((int) $topup->user_id)['available_balance'];
+                if ((float) $topup->amount > $available + 0.001) {
+                    throw ValidationException::withMessages([
+                        'status' => ["This top-up was approved and ৳{$topup->amount} can't be taken back: the wallet has only ৳{$available} available."],
+                    ]);
+                }
+                ResellerTransaction::where('type', 'wallet_topup')->where('ref_id', $topup->id)->where('reseller_id', $topup->user_id)
+                    ->update(['status' => 'rejected', 'note' => "Wallet recharge approval reversed: {$reason}"]);
+                Transaction::where('type', 'wallet_topup')->where('ref_id', $topup->id)->update(['status' => 'reversed']);
+            }
+
             $topup->update([
                 'status' => 'rejected',
                 'approved_by' => $adminId,
@@ -2044,9 +2227,35 @@ class OrderAccountingService
             $breakdown = $this->calculateOrderStakeBreakdown($lockedOrder);
 
             $payoutAmount = isset($data['amount']) ? round((float) $data['amount'], 2) : $breakdown['dropshipper']['profit'];
+
+            // Same rules as a payout invoice: only pay profit that is really earned.
+            $statusId = (int) $lockedOrder->status;
+            if (in_array($statusId, [7, 8, 11, 12], true)) {
+                throw new \InvalidArgumentException("Order #{$lockedOrder->order_number} is cancelled or returned; its profit can't be paid.");
+            }
+            if ($lockedOrder->hasConsignment() && !$lockedOrder->is_carrybee_paid) {
+                throw new \InvalidArgumentException("CarryBee has not paid order #{$lockedOrder->order_number} yet; pay the profit after CarryBee's payment arrives.");
+            }
+            if (\App\Models\DeliveryAssignedInfo::where('order_id', $lockedOrder->id)->where('needs_review', true)->exists()) {
+                throw new \InvalidArgumentException("Order #{$lockedOrder->order_number} is on hold for courier review; approve the review first.");
+            }
+            // One profit credit per order: a second payout would pay the same profit twice.
+            if (ResellerTransaction::where('order_id', $lockedOrder->id)->where('type', 'order_settlement')->where('trx_type', 'credit')->exists()) {
+                throw new \InvalidArgumentException("Profit for order #{$lockedOrder->order_number} was already paid to the dropshipper.");
+            }
+            // More than the calculated profit needs a written reason.
+            $calculatedProfit = round((float) ($breakdown['dropshipper']['profit'] ?? 0), 2);
+            $amountReason = trim((string) ($data['amount_reason'] ?? ''));
+            if ($payoutAmount > $calculatedProfit + 0.01 && $amountReason === '') {
+                throw new \InvalidArgumentException("৳{$payoutAmount} is more than the calculated profit of ৳{$calculatedProfit}. Give a reason to pay a higher amount.");
+            }
+
             $paymentMethod = $data['payment_method'] ?? 'wallet'; // 'wallet', 'bank', 'bkash', 'nagad', 'cash'
             $trxId = $data['trx_id'] ?? ('DIR-DISB-' . $lockedOrder->id . '-' . time());
             $note = $data['note'] ?? "Direct disbursement by Admin #{$adminUserId} for order #{$lockedOrder->order_number}";
+            if ($amountReason !== '' && $payoutAmount > $calculatedProfit + 0.01) {
+                $note .= " | Paid above calculated profit ৳{$calculatedProfit}: {$amountReason}";
+            }
 
             // Find or create reseller settlement
             $resellerSettlement = OrderSettlement::firstOrCreate(

@@ -1626,6 +1626,20 @@ class OrderController extends Controller
                 $order->save();
 
                 $this->orderAccountingService->processOrderReversal($order, "Order status changed to {$statusName}");
+
+                // Profit already paid for this order comes back out of the dropshipper's wallet.
+                $clawedBack = $this->orderAccountingService->clawbackResellerProfit($order, "order {$statusName}");
+                if ($clawedBack > 0) {
+                    $amountText = number_format($clawedBack, 2);
+                    $this->notificationService->createNotificationSafely([
+                        'title' => 'Profit taken back', 'subtitle' => "Order {$order->order_number} was {$statusName}. ৳{$amountText} profit already paid was deducted from your balance.",
+                        'created_by' => $requester?->id, 'send_to' => $order->user_id, 'is_seen' => false, 'type' => 'payment', 'is_active' => true, 'image' => null, 'module' => 'order',
+                    ]);
+                    $this->notificationService->createAdminNotifications([
+                        'title' => 'Paid profit taken back', 'subtitle' => "Order {$order->order_number} ({$statusName}): ৳{$amountText} already-paid profit was deducted from the dropshipper's balance.",
+                        'created_by' => $requester?->id, 'is_seen' => false, 'type' => 'payment', 'is_active' => true, 'image' => null, 'module' => 'order',
+                    ]);
+                }
             }
 
             return $this->success('Order status updated successfully', $order);
@@ -1747,6 +1761,11 @@ class OrderController extends Controller
                 'sender_phone' => ['nullable', 'string', 'max:30'],
             ]);
 
+            // One real payment can't back several deposits.
+            if ($usedBy = $this->orderAccountingService->paymentTrxAlreadyUsed($validated['trx_id'], (int) $order->id)) {
+                return $this->failed("This transaction ID was already used for {$usedBy}.", ['trx_id' => ['Transaction ID already used.']], 422);
+            }
+
             $order = $this->orderAccountingService->submitMfsAdvance(
                 $order,
                 $amount,
@@ -1801,6 +1820,13 @@ class OrderController extends Controller
                 'advance_sender_phone' => ['sometimes', 'nullable', 'string', 'max:30'],
             ]);
             $note = $request->input('admin_note', 'Approved by Admin');
+
+            // Approving on a transaction id another deposit already uses would count one payment twice.
+            $approvingTrx = $validated['advance_trx_id'] ?? $order->advance_trx_id;
+            if ($order->advance_payment_method !== 'wallet'
+                && ($usedBy = $this->orderAccountingService->paymentTrxAlreadyUsed($approvingTrx, (int) $order->id))) {
+                return $this->failed("This transaction ID was already used for {$usedBy}.", ['advance_trx_id' => ['Transaction ID already used.']], 422);
+            }
 
             $order = $this->orderAccountingService->approveOrderAdvance(
                 $order,

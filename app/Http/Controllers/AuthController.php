@@ -144,6 +144,7 @@ class AuthController extends Controller
                 'password' => ['required', 'string', 'min:4'],
                 'expires_in_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
                 'name' => ['nullable', 'string', 'max:255'],
+                'device_token' => ['nullable', 'string', 'max:255'],
             ]);
 
             if (!empty($validated['email'])) {
@@ -186,6 +187,11 @@ class AuthController extends Controller
             if (isset($user->banned) && $user->banned == 1) {
                 $this->storeLoginError($request, 'Account inactive or banned', $user);
                 return $this->failed('You need to activate your account', null, 403);
+            }
+
+            if (!empty($validated['device_token'])) {
+                $user->device_token = $validated['device_token'];
+                $user->save();
             }
 
             $scopes = ['basic'];

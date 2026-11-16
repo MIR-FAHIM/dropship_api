@@ -833,6 +833,8 @@ class OrderSettlementController extends Controller
                 'payment_method' => 'nullable|string|in:wallet,bank,bank_transfer,bkash,nagad,rocket,cash',
                 'trx_id' => 'nullable|string|max:100',
                 'note' => 'nullable|string',
+                // Required when paying more than the calculated profit.
+                'amount_reason' => 'nullable|string|max:500',
                 // Admin must confirm they reviewed balance, withdraws and advances.
                 'payout_review_confirmed' => 'accepted',
             ], [

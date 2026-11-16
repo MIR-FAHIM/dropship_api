@@ -59,6 +59,7 @@ class DisburseDropshipperProfitGuardTest extends TestCase
         $this->postJson($this->url($order->id), [
             'amount' => 100,
             'payment_method' => 'rocket',
+            'amount_reason' => 'Test order has no item rows',
             'trx_id' => 'RKT123',
             'payout_review_confirmed' => true,
         ], $this->headersFor($admin))->assertOk();

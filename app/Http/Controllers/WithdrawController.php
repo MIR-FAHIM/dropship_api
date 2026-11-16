@@ -155,9 +155,18 @@ class WithdrawController extends Controller
 	/**
 	 * Get withdraw requests for the authenticated user.
 	 */
-	public function getUserWithdrawRequest($id)
+	public function getUserWithdrawRequest(Request $request, $id)
 	{
 		try {
+			// A user sees only their own requests; admins can see anyone's.
+			$viewer = $request->attributes->get('api_user') ?? $request->user();
+			$isAdmin = $viewer && (bool) array_intersect(
+				[strtolower((string) $viewer->user_type), strtolower((string) $viewer->role)],
+				['admin', 'superadmin']
+			);
+			if (!$isAdmin && (int) ($viewer?->id ?? 0) !== (int) $id) {
+				return response()->json(['success' => false, 'message' => 'You can only view your own withdraw requests.'], 403);
+			}
 			$userId = $id;
 			$withdraws = WithdrawRequest::with(['bank'])->where('user_id', $userId)->orderByDesc('id')->get();
 			return response()->json(['success' => true, 'data' => $withdraws]);
@@ -184,15 +193,20 @@ class WithdrawController extends Controller
 			$withdraw = WithdrawRequest::findOrFail($id);
 			$previousStatus = $withdraw->status;
 
+			// Allowed moves: pending <-> approved, pending/approved -> transferred or rejected.
+			// A transferred request is final; a rejected one can't be revived.
 			if ($validated['status'] === 'transferred') {
 				$bankRef = $validated['bank_reference'] ?? ('BNK-' . time());
 				$withdraw = $this->orderAccountingService->transferWithdrawal($withdraw, $bankRef);
 			} elseif ($validated['status'] === 'rejected') {
 				$withdraw = $this->orderAccountingService->rejectWithdrawal($withdraw, $validated['note'] ?? null);
-			} elseif ($validated['status'] === 'approved') {
-				$withdraw->status = 'approved';
-				$withdraw->save();
 			} else {
+				if (!in_array($previousStatus, ['pending', 'approved'], true)) {
+					return response()->json([
+						'success' => false,
+						'message' => "This withdraw request is {$previousStatus} and can't be changed to {$validated['status']}.",
+					], 422);
+				}
 				$withdraw->status = $validated['status'];
 				$withdraw->save();
 			}
@@ -203,11 +217,63 @@ class WithdrawController extends Controller
 			}
 
 			return response()->json(['success' => true, 'data' => $withdraw]);
+		} catch (\Illuminate\Validation\ValidationException $e) {
+			return response()->json([
+				'success' => false,
+				'message' => $e->validator->errors()->first() ?: 'Validation failed',
+				'errors' => $e->errors(),
+			], 422);
 		} catch (\Exception $e) {
 			return response()->json([
 				'success' => false,
 				'message' => $e->getMessage(),
 			], 500);
+		}
+	}
+
+	/**
+	 * POST /withdraws/admin-payout  {user_id, amount, payment_method, bank_reference?, note?}
+	 * Admin records a wallet payout made by hand, so the balance drops and the same
+	 * money can't be withdrawn again.
+	 */
+	public function adminWalletPayout(Request $request)
+	{
+		try {
+			$validated = $request->validate([
+				'user_id' => 'required|integer|exists:users,id',
+				'amount' => 'required|numeric|min:1',
+				'payment_method' => 'required|string|in:bkash,nagad,rocket,bank_transfer,cash',
+				'bank_reference' => 'nullable|string|max:100',
+				'note' => 'nullable|string|max:500',
+			]);
+			if ($validated['payment_method'] !== 'cash' && empty($validated['bank_reference'])) {
+				return response()->json(['success' => false, 'message' => 'Enter the transaction ID of the payment.'], 422);
+			}
+
+			$admin = $request->attributes->get('api_user') ?? $request->user();
+			$withdraw = $this->orderAccountingService->adminWalletPayout(
+				(int) $validated['user_id'],
+				(float) $validated['amount'],
+				$validated['payment_method'],
+				$validated['bank_reference'] ?? null,
+				$validated['note'] ?? null,
+				$admin?->id
+			);
+
+			return response()->json([
+				'success' => true,
+				'message' => 'Wallet payout recorded.',
+				'data' => $withdraw,
+				'balance' => $this->orderAccountingService->calculateUserBalances((int) $validated['user_id']),
+			], 201);
+		} catch (\Illuminate\Validation\ValidationException $e) {
+			return response()->json([
+				'success' => false,
+				'message' => $e->validator->errors()->first() ?: 'Validation failed',
+				'errors' => $e->errors(),
+			], 422);
+		} catch (\Exception $e) {
+			return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
 		}
 	}
 }
