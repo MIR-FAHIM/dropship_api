@@ -419,7 +419,8 @@ Route::prefix('product-discounts')->group(function () {
 });
 
 Route::prefix('price-update-logs')->group(function () {
-    Route::get('/list', [PriceUpdateLogController::class, 'list']);
+    // Admin / product manager only: price history is internal.
+    Route::get('/list', [PriceUpdateLogController::class, 'list'])->middleware('admin');
 });
 
 Route::prefix('error-logs')->group(function () {
