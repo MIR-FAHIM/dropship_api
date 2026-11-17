@@ -1374,7 +1374,8 @@ class OrderController extends Controller
     public function allOrders(Request $request)
     {
         try {
-            $perPage = (int) $request->get('per_page', 20);
+            // Admin list page offers 20 / 50 / 100 per page.
+            $perPage = max(1, min(100, (int) $request->get('per_page', 20)));
 
             $query = Order::with([
                 'status',
@@ -1453,7 +1454,8 @@ class OrderController extends Controller
                               $uq->where('name', 'like', "%{$search}%")
                                  ->orWhere('phone', 'like', "%{$search}%")
                                  ->orWhere('email', 'like', "%{$search}%");
-                          });
+                          })
+                          ->orWhereHas('vendor', fn ($vq) => $vq->where('shop_name', 'like', "%{$search}%"));
                     });
                 }
             }

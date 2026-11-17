@@ -132,6 +132,30 @@ class AdminOrderPaymentProgressTest extends TestCase
         $this->assertCount(5, $this->progress(['payment_stage' => 'all']));
     }
 
+    public function test_list_paginates_on_server_with_per_page_status_and_vendor_search(): void
+    {
+        for ($i = 0; $i < 3; $i++) {
+            $this->order(4);
+        }
+        $this->order(6);
+
+        $page = $this->getJson('/api/orders/all/orders?per_page=2&page=2', $this->headers)->assertOk()->json('data');
+        $this->assertSame(2, $page['per_page']);
+        $this->assertSame(4, $page['total']);
+        $this->assertSame(2, $page['last_page']);
+        $this->assertSame(2, $page['current_page']);
+
+        // Page size is capped at 100.
+        $this->assertSame(100, $this->getJson('/api/orders/all/orders?per_page=5000', $this->headers)->json('data.per_page'));
+
+        // Status tab is a server filter, so totals match the tab.
+        $this->assertSame(3, $this->getJson('/api/orders/all/orders?status=4', $this->headers)->json('data.total'));
+
+        // Search also matches the vendor's shop name.
+        $this->assertSame(4, $this->getJson('/api/orders/all/orders?search=Shop', $this->headers)->json('data.total'));
+        $this->assertSame(0, $this->getJson('/api/orders/all/orders?search=NoSuchShop', $this->headers)->json('data.total'));
+    }
+
     public function test_settlements_are_not_sent_in_the_list(): void
     {
         $this->order(10, ['carrybee_paid' => true, 'dropshipper' => OrderSettlement::STATUS_PENDING]);

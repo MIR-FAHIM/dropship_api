@@ -177,6 +177,7 @@ Route::prefix('users')->group(function () {
     Route::put('/update/{id}', [UserController::class, 'updateUser']);
     Route::patch('/ban/{id}', [UserController::class, 'banToggle'])->middleware('admin:accounts');
     Route::patch('/unban/{id}', [UserController::class, 'unbanUser'])->middleware('admin:accounts');
+    Route::patch('/{id}/employee-status', [UserController::class, 'setEmployeeStatus'])->whereNumber('id')->middleware('admin:accounts');
     Route::delete('/delete/{id}', [UserController::class, 'deleteUser'])->middleware('admin:accounts');
 });
 

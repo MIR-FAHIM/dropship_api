@@ -858,6 +858,57 @@ class UserController extends Controller
     }
 
     /**
+     * PATCH /users/{id}/employee-status  {banned: bool}  (admin:accounts)
+     * Ban or reactivate an admin employee. Explicit value, not a toggle, so a
+     * double click can't flip it back. Banning signs them out everywhere.
+     */
+    public function setEmployeeStatus(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate(['banned' => ['required', 'boolean']]);
+            $banned = (bool) $validated['banned'];
+
+            $actor = $request->attributes->get('api_user') ?? $request->user();
+            $employee = User::where('user_type', 'admin')->find($id);
+            if (!$employee) {
+                return $this->failed('Employee not found', null, 404);
+            }
+            if ($actor && (int) $actor->id === (int) $employee->id) {
+                return $this->failed('You cannot change your own status.', null, 422);
+            }
+
+            return DB::transaction(function () use ($employee, $banned) {
+                if ($banned && (int) $employee->banned === 0) {
+                    $otherActiveAdmins = User::where('user_type', 'admin')
+                        ->where('banned', 0)
+                        ->where('id', '!=', $employee->id)
+                        ->lockForUpdate()
+                        ->count();
+                    if ($otherActiveAdmins === 0) {
+                        return $this->failed('At least one admin must stay active.', null, 422);
+                    }
+                }
+
+                $employee->banned = $banned ? 1 : 0;
+                $employee->save();
+
+                if ($banned) {
+                    \App\Models\ApiToken::where('user_id', $employee->id)->update(['is_revoked' => true]);
+                }
+
+                return $this->success(
+                    $banned ? 'Employee banned and signed out of all devices.' : 'Employee reactivated.',
+                    $employee->only(['id', 'name', 'email', 'phone', 'user_type', 'role', 'banned'])
+                );
+            });
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * PATCH /users/unban/{id}
      */
     public function unbanUser($id)
