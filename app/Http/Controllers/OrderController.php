@@ -1433,6 +1433,8 @@ class OrderController extends Controller
                 },
                 'statusHistory.status',
                 'deliveryInformation',
+                // Saved CarryBee draft: the list shows "Ready Product For CarryBee" when present.
+                'carryBeeDraft',
             ])
                 ->whereIn('id', $orderIds)
                 ->where('status', '!=', 1)

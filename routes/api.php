@@ -59,6 +59,7 @@ use App\Http\Controllers\LeadController;
 use App\Http\Controllers\WhatsAppWebhookController;
 use App\Http\Controllers\PartnerApiController;
 use App\Http\Controllers\MarketerController;
+use App\Http\Controllers\MobileAppVersionController;
 use App\Models\TaskType;
 
 // Authentication endpoints
@@ -106,6 +107,16 @@ Route::prefix('marketer-client')->group(function () {
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
 Route::get('/auth/check-admin', [AuthController::class, 'checkAdmin'])->middleware('admin');
+
+// Mobile app update system. `check` is public so it works before login or
+// with an expired token; managing releases is admin-only.
+Route::get('/app-version/check', [MobileAppVersionController::class, 'check'])->withoutMiddleware('token');
+Route::prefix('app-version')->middleware('admin')->group(function () {
+    Route::get('/list', [MobileAppVersionController::class, 'index']);
+    Route::post('/store', [MobileAppVersionController::class, 'store']);
+    Route::post('/update/{id}', [MobileAppVersionController::class, 'update'])->whereNumber('id');
+    Route::post('/toggle/{id}', [MobileAppVersionController::class, 'toggle'])->whereNumber('id');
+});
 
 // Lead management (admin CRM): every admin sees every lead.
 Route::prefix('leads')->middleware('admin')->group(function () {
