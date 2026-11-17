@@ -13,6 +13,12 @@ return [
     'webhook' => [
         'signature_header' => env('CARRYBEE_WEBHOOK_SIGNATURE_HEADER', 'X-Carrybee-Webhook-Signature'),
         'secret' => env('CARRYBEE_WEBHOOK_SECRET', ''),
+        // The panel shows the secret going in this header on the integration check;
+        // the API docs show the signature header above. Both are accepted.
+        'integration_header' => 'X-CB-Webhook-Integration-Header',
+        // Value CarryBee's panel asks us to send back on the "Add Webhook" check.
+        // A business can override it per URL: .../carrybee/webhook?cb=<value>
+        'integration_value' => env('CARRYBEE_WEBHOOK_INTEGRATION_VALUE', ''),
     ],
 
     // CarryBee event -> internal order_statuses.id. Null = no status change; the

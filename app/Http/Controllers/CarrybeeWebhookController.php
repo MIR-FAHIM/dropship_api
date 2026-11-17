@@ -33,7 +33,29 @@ class CarrybeeWebhookController extends Controller
 
         $rawBody = $request->getContent();
         $signatureHeader = (string) config('carrybee.webhook.signature_header', 'X-Carrybee-Webhook-Signature');
-        $signature = (string) $request->header($signatureHeader, '');
+        $integrationHeader = (string) config('carrybee.webhook.integration_header', 'X-CB-Webhook-Integration-Header');
+        // The secret can arrive in either header (docs vs merchant panel).
+        $signature = (string) ($request->header($signatureHeader) ?: $request->header($integrationHeader, ''));
+
+        // CarryBee's "Add Webhook" check: 202 + echo header, or registration fails.
+        if ((string) ($payload['event'] ?? '') === 'webhook.integration') {
+            $check = $this->webhookService->handleIntegrationCheck(
+                payload: $payload,
+                rawBody: $rawBody,
+                secret: $signature,
+                headers: $request->headers->all(),
+                urlValue: $request->query('cb'),
+            );
+            $response = response()->json([
+                'status' => $check['ok'] ? 'success' : 'failed',
+                'message' => $check['message'],
+            ], $check['http_code']);
+            if ($check['integration_value'] !== null) {
+                $response->headers->set($integrationHeader, $check['integration_value']);
+            }
+
+            return $response;
+        }
 
         $result = $this->webhookService->process(
             payload: $payload,

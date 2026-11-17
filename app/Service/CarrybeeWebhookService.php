@@ -11,6 +11,7 @@ use App\Models\OrderStatusHistory;
 use Carbon\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -653,6 +654,48 @@ class CarrybeeWebhookService
         ]);
 
         return hash('sha256', $key);
+    }
+
+    /**
+     * CarryBee's "Add Webhook" check (merchant panel > API integration > Webhook integration).
+     * CarryBee POSTs {"event":"webhook.integration"} with our secret in
+     * X-CB-Webhook-Integration-Header and expects:
+     *   - status 202
+     *   - response header X-CB-Webhook-Integration-Header = the value shown in that
+     *     business's panel.
+     * Webhooks are registered per business, and each may show its own value, so the
+     * value can come from the registered URL (?cb=<value>); otherwise the .env default.
+     *
+     * @return array{ok: bool, http_code: int, message: string, integration_value: ?string}
+     */
+    public function handleIntegrationCheck(array $payload, string $rawBody, string $secret, array $headers, ?string $urlValue): array
+    {
+        $value = trim((string) ($urlValue ?: config('carrybee.webhook.integration_value', '')));
+        $valid = $this->isValidSignature($rawBody, $secret);
+
+        $result = match (true) {
+            !$valid => ['ok' => false, 'http_code' => 401, 'message' => 'Invalid webhook secret', 'integration_value' => null],
+            $value === '' => ['ok' => false, 'http_code' => 500, 'message' => 'CARRYBEE_WEBHOOK_INTEGRATION_VALUE is not set and the URL has no ?cb= value', 'integration_value' => null],
+            default => ['ok' => true, 'http_code' => 202, 'message' => 'Webhook integration accepted', 'integration_value' => $value],
+        };
+
+        // Shown on the webhook log / health board, so you can see when a business registered.
+        try {
+            CarrybeeWebhookEvent::create([
+                'fingerprint' => substr('integration-' . now()->format('YmdHisv') . '-' . bin2hex(random_bytes(6)), 0, 64),
+                'event' => 'webhook.integration',
+                'payload' => $payload,
+                'request_headers' => $headers,
+                'signature_valid' => $valid,
+                'processing_status' => $result['ok'] ? 'processed' : 'rejected',
+                'message' => $result['message'],
+                'processed_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Could not log CarryBee webhook integration check.', ['exception' => $e->getMessage()]);
+        }
+
+        return $result;
     }
 
     private function isValidSignature(string $rawBody, string $received): bool
