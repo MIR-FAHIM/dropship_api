@@ -1394,7 +1394,18 @@ class OrderController extends Controller
     public function vendorOrderList($vendorId, Request $request)
     {
         try {
-            $perPage = (int) $request->get('per_page', 20);
+            $perPage = max(1, min(100, (int) $request->get('per_page', 20)));
+            $dateFilters = $request->validate([
+                'period' => ['sometimes', 'nullable', 'in:all,today,yesterday,custom'],
+                'date_from' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+                'date_to' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            ]);
+            if (!empty($dateFilters['date_from']) && !empty($dateFilters['date_to'])
+                && $dateFilters['date_to'] < $dateFilters['date_from']) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'date_to' => 'The end date must be on or after the start date.',
+                ]);
+            }
 
             // Get all order_ids that have items belonging to this vendor's shop
             $orderIds = OrderItem::where('shop_id', $vendorId)
@@ -1405,7 +1416,7 @@ class OrderController extends Controller
                 return $this->failed('No orders found for this vendor', null, 404);
             }
 
-            $orders = Order::with([
+            $ordersQuery = Order::with([
                 'items' => function ($query) use ($vendorId) {
                     // Only return items that belong to this vendor's shop
                     // Product is limited to the columns the list needs: vendor_id (to decide
@@ -1433,9 +1444,31 @@ class OrderController extends Controller
                             ->from('carrybee_webhook_events')
                             ->whereColumn('carrybee_webhook_events.order_id', 'orders.id')
                             ->whereRaw("TRIM(carrybee_webhook_events.consignment_id) <> ''"));
-                })
-                ->latest()
-                ->paginate($perPage);
+                });
+
+            $dateTimezone = 'Asia/Dhaka';
+            $period = $dateFilters['period'] ?? 'all';
+            if ($period === 'today' || $period === 'yesterday') {
+                $date = \Carbon\Carbon::now($dateTimezone);
+                if ($period === 'yesterday') {
+                    $date->subDay();
+                }
+                $ordersQuery->whereBetween('created_at', [
+                    $date->copy()->startOfDay()->utc(),
+                    $date->copy()->endOfDay()->utc(),
+                ]);
+            } elseif ($period === 'custom' || !empty($dateFilters['date_from']) || !empty($dateFilters['date_to'])) {
+                if (!empty($dateFilters['date_from'])) {
+                    $dateFrom = \Carbon\Carbon::createFromFormat('!Y-m-d', $dateFilters['date_from'], $dateTimezone)->utc();
+                    $ordersQuery->where('created_at', '>=', $dateFrom);
+                }
+                if (!empty($dateFilters['date_to'])) {
+                    $dateTo = \Carbon\Carbon::createFromFormat('!Y-m-d', $dateFilters['date_to'], $dateTimezone)->endOfDay()->utc();
+                    $ordersQuery->where('created_at', '<=', $dateTo);
+                }
+            }
+
+            $orders = $ordersQuery->latest()->paginate($perPage);
 
             // Admin note only for admins or the vendor this list belongs to; this
             // route takes any vendorId, so other users must not get it.
@@ -1444,6 +1477,8 @@ class OrderController extends Controller
             }
 
             return $this->success('Vendor orders fetched successfully', $orders);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
