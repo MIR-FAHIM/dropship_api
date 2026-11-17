@@ -13,6 +13,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // A first run failed after the table was created (FK type mismatch) and
+        // left an empty, unrecorded table behind; clear it so this can re-run.
+        Schema::dropIfExists('mobile_app_version_updates');
+
         Schema::create('mobile_app_version_updates', function (Blueprint $table) {
             $table->id();
             $table->string('platform', 10);                    // android | ios
@@ -25,7 +29,9 @@ return new class extends Migration
             $table->string('store_url', 500);
             $table->boolean('is_active')->default(true);
             $table->timestamp('released_at')->nullable();
-            $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
+            // users.id is an UNSIGNED INT (increments), so match it, not foreignId's BIGINT.
+            $table->unsignedInteger('created_by')->nullable();
+            $table->foreign('created_by')->references('id')->on('users')->nullOnDelete();
             $table->timestamps();
 
             $table->unique(['platform', 'build_number']);
