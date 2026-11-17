@@ -215,48 +215,143 @@ class CarrybeeWebhookController extends Controller
     {
         $days = max(1, min(90, (int) $request->get('days', 7)));
         $since = now()->subDays($days);
+        $real = CarrybeeWebhookEvent::SOURCE_CARRYBEE;
 
-        $rows = CarrybeeWebhookEvent::query()
-            ->where('created_at', '>=', $since)
-            ->selectRaw("COALESCE(store_id, '') as store_id, processing_status, COUNT(*) as total, MAX(created_at) as last_seen")
-            ->groupBy('store_id', 'processing_status')
-            ->get();
+        // Only events CarryBee itself POSTed prove the webhook works. Sync, simulator,
+        // reprocess and manual rows are counted apart (see CarrybeeWebhookEvent::source()).
+        $emptyStats = fn ($storeId) => [
+            'store_id' => $storeId,
+            'total' => 0,               // every logged event in the window
+            'by_status' => [],          // real CarryBee events in the window, by processing status
+            'by_source' => [],          // every event in the window, by source
+            'real_events' => 0,
+            'last_seen' => null,        // last real CarryBee event in the window
+            'last_real_event_at' => null, // last real CarryBee event ever
+            'last_other_event_at' => null,
+        ];
 
         $byStore = [];
-        foreach ($rows as $row) {
-            $key = (string) $row->store_id;
-            $byStore[$key] ??= ['store_id' => $key ?: null, 'total' => 0, 'by_status' => [], 'last_seen' => null];
-            $byStore[$key]['total'] += (int) $row->total;
-            $byStore[$key]['by_status'][$row->processing_status] = (int) $row->total;
-            if ($byStore[$key]['last_seen'] === null || $row->last_seen > $byStore[$key]['last_seen']) {
-                $byStore[$key]['last_seen'] = $row->last_seen;
-            }
-        }
+        $byVendor = [];          // keyed by orders.vendor_id
+        $storesSeenByVendor = []; // store ids CarryBee/sync reported for a vendor's orders
+        $lastRealOverall = null;
+        $realInWindow = 0;
+
+        CarrybeeWebhookEvent::query()
+            ->with('order:id,vendor_id')
+            ->select(['id', 'store_id', 'order_id', 'processing_status', 'signature_valid', 'request_headers', 'payload', 'created_at'])
+            ->orderBy('id')
+            ->lazyById(500)
+            ->each(function (CarrybeeWebhookEvent $event) use (
+                &$byStore, &$byVendor, &$storesSeenByVendor, &$lastRealOverall, &$realInWindow, $emptyStats, $since, $real
+            ) {
+                $source = $event->source();
+                $at = $event->created_at?->toDateTimeString();
+                $inWindow = $event->created_at && $event->created_at->gte($since);
+                $storeKey = (string) ($event->store_id ?? '');
+                $vendorId = $event->order?->vendor_id;
+
+                $buckets = [];
+                $byStore[$storeKey] ??= $emptyStats($storeKey !== '' ? $storeKey : null);
+                $buckets[] = &$byStore[$storeKey];
+                if ($vendorId) {
+                    $byVendor[$vendorId] ??= $emptyStats(null);
+                    $buckets[] = &$byVendor[$vendorId];
+                    // CarryBee's API (sync) and real webhooks both report the true store id.
+                    if ($event->store_id !== null && in_array($source, [$real, CarrybeeWebhookEvent::SOURCE_SYNC], true)) {
+                        $storesSeenByVendor[$vendorId][(string) $event->store_id] = true;
+                    }
+                }
+
+                foreach ($buckets as &$stats) {
+                    if ($source === $real) {
+                        $stats['last_real_event_at'] = max($stats['last_real_event_at'] ?? '', $at) ?: null;
+                    } else {
+                        $stats['last_other_event_at'] = max($stats['last_other_event_at'] ?? '', $at) ?: null;
+                    }
+                    if (!$inWindow) {
+                        continue;
+                    }
+                    $stats['total']++;
+                    $stats['by_source'][$source] = ($stats['by_source'][$source] ?? 0) + 1;
+                    if ($source === $real) {
+                        $stats['real_events']++;
+                        $stats['by_status'][$event->processing_status] = ($stats['by_status'][$event->processing_status] ?? 0) + 1;
+                        $stats['last_seen'] = max($stats['last_seen'] ?? '', $at) ?: null;
+                    }
+                }
+                unset($stats);
+
+                if ($source === $real) {
+                    $lastRealOverall = max($lastRealOverall ?? '', $at) ?: null;
+                    if ($inWindow) {
+                        $realInWindow++;
+                    }
+                }
+            });
 
         // Vendors that should be sending events from their own CarryBee account.
         $vendors = \App\Models\Vendor::where('has_own_delivery_account', true)
             ->get(['id', 'shop_name', 'carryb_store_id']);
-        $vendorHealth = $vendors->map(function ($vendor) use ($byStore) {
-            $stats = $vendor->carryb_store_id !== null ? ($byStore[(string) $vendor->carryb_store_id] ?? null) : null;
+        $vendorHealth = $vendors->map(function ($vendor) use ($byStore, $byVendor, $storesSeenByVendor, $emptyStats) {
+            $configured = $vendor->carryb_store_id !== null ? (string) $vendor->carryb_store_id : null;
+            // Events for this vendor: those on its orders, plus any on its store id
+            // that aren't linked to an order (e.g. unmatched consignments).
+            $stats = $byVendor[$vendor->id] ?? $emptyStats(null);
+            $storeStats = $configured !== null ? ($byStore[$configured] ?? null) : null;
+            if ($storeStats && $stats['real_events'] === 0 && $storeStats['real_events'] > 0) {
+                $stats = $storeStats;
+            }
+
+            // array keys like "31651" come back as ints: compare as strings.
+            $seenStores = array_map('strval', array_keys($storesSeenByVendor[$vendor->id] ?? []));
+            $mismatch = $seenStores !== [] && ($configured === null || !in_array($configured, $seenStores, true));
+            $rejected = (int) ($stats['by_status']['rejected'] ?? 0);
+            $accepted = $stats['real_events'] - $rejected;
+
+            // receiving: real events accepted in the window
+            // secret_wrong: CarryBee is calling us but every recent call failed the signature
+            // quiet: real events before, none in the window
+            // never: CarryBee has never sent this account's events to us
+            $state = match (true) {
+                $accepted > 0 => 'receiving',
+                $rejected > 0 => 'secret_wrong',
+                $stats['last_real_event_at'] !== null => 'quiet',
+                default => 'never',
+            };
 
             return [
                 'vendor_id' => $vendor->id,
                 'shop_name' => $vendor->shop_name,
-                'carryb_store_id' => $vendor->carryb_store_id,
-                'events' => $stats['total'] ?? 0,
-                'last_seen' => $stats['last_seen'] ?? null,
-                'by_status' => $stats['by_status'] ?? [],
-                'healthy' => ($stats['total'] ?? 0) > 0 && (($stats['by_status']['rejected'] ?? 0) === 0),
+                'carryb_store_id' => $configured,
+                'state' => $state,
+                'healthy' => $state === 'receiving',
+                // Real CarryBee webhooks only (older clients read these keys).
+                'events' => $stats['real_events'],
+                'by_status' => $stats['by_status'],
+                'last_seen' => $stats['last_seen'],
+                'last_real_event_at' => $stats['last_real_event_at'],
+                // Everything else logged for this vendor (sync / manual / simulator).
+                'other_events' => array_diff_key($stats['by_source'], [CarrybeeWebhookEvent::SOURCE_CARRYBEE => true]),
+                'last_other_event_at' => $stats['last_other_event_at'],
+                'seen_store_ids' => $seenStores,
+                'store_mismatch' => $mismatch,
             ];
         })->values();
+
+        $stores = collect($byStore)
+            ->filter(fn ($s) => $s['total'] > 0)
+            ->sortByDesc('real_events')
+            ->values();
 
         return response()->json([
             'status' => 'success',
             'data' => [
                 'days' => $days,
-                'stores' => array_values($byStore),
+                'stores' => $stores,
                 'own_account_vendors' => $vendorHealth,
                 'secret_configured' => (string) config('carrybee.webhook.secret', '') !== '',
+                'real_events' => $realInWindow,
+                'last_real_event_at' => $lastRealOverall,
             ],
         ]);
     }
