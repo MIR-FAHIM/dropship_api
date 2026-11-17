@@ -392,8 +392,22 @@ class UserController extends Controller
                     'ledger_pending_reserved' => $pendingReserved,
                     'product_clicks_count' => $clicks('COUNT(*)'),
                     'last_product_click_at' => $clicks('MAX(created_at)'),
+                    // Lead management: is this dropshipper already a lead?
+                    'lead_id' => \App\Models\Lead::query()->select('id')
+                        ->whereColumn('leads.user_id', 'users.id')->whereNull('leads.deleted_at')->limit(1),
+                    'lead_status' => \App\Models\Lead::query()->select('status')
+                        ->whereColumn('leads.user_id', 'users.id')->whereNull('leads.deleted_at')->limit(1),
                 ])
-                ->withCasts(['total_order_count' => 'integer', 'product_clicks_count' => 'integer']);
+                ->withCasts(['total_order_count' => 'integer', 'product_clicks_count' => 'integer', 'lead_id' => 'integer']);
+
+            // Inactive: no order and no product click in the last 30 days.
+            if ($request->boolean('inactive')) {
+                $since = now()->subDays(30);
+                $query->whereDoesntHave('orders', fn ($o) => $o->where('created_at', '>=', $since))
+                    ->whereNotExists(fn ($c) => $c->selectRaw('1')->from('product_clicks')
+                        ->whereColumn('product_clicks.clicked_by', 'users.id')
+                        ->where('product_clicks.created_at', '>=', $since));
+            }
 
             // Response: balance = { total_credit, total_debit, net_balance, pending_reserved,
             // available_balance }, plus wallet_balance (= net_balance) for older clients.
@@ -519,6 +533,9 @@ class UserController extends Controller
                 $clicks = \App\Models\ProductClicks::where('clicked_by', $user->id);
                 $user->setAttribute('product_clicks_count', (clone $clicks)->count());
                 $user->setAttribute('last_product_click_at', (clone $clicks)->max('created_at'));
+                $lead = \App\Models\Lead::where('user_id', $user->id)->first(['id', 'status']);
+                $user->setAttribute('lead_id', $lead?->id);
+                $user->setAttribute('lead_status', $lead?->status);
             }
 
             return $this->success('User fetched successfully', $user);

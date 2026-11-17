@@ -55,6 +55,7 @@ use App\Http\Controllers\ProductAssistantQaController;
 use App\Http\Controllers\FeedPostController;
 use App\Http\Controllers\PasswordResetOtpController;
 use App\Http\Controllers\PasswordManagementController;
+use App\Http\Controllers\LeadController;
 use App\Http\Controllers\WhatsAppWebhookController;
 use App\Http\Controllers\PartnerApiController;
 use App\Http\Controllers\MarketerController;
@@ -105,6 +106,20 @@ Route::prefix('marketer-client')->group(function () {
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);
 Route::delete('/auth/tokens/{id}', [AuthController::class, 'revokeToken']);
 Route::get('/auth/check-admin', [AuthController::class, 'checkAdmin'])->middleware('admin');
+
+// Lead management (admin CRM): every admin sees every lead.
+Route::prefix('leads')->middleware('admin')->group(function () {
+    Route::get('/', [LeadController::class, 'index']);
+    Route::post('/', [LeadController::class, 'store']);
+    Route::get('/stats', [LeadController::class, 'stats']);
+    Route::get('/tags', [LeadController::class, 'tags']);
+    Route::post('/tags', [LeadController::class, 'storeTag']);
+    Route::post('/from-dropshipper/{userId}', [LeadController::class, 'fromDropshipper'])->whereNumber('userId');
+    Route::get('/{id}', [LeadController::class, 'show'])->whereNumber('id');
+    Route::put('/{id}', [LeadController::class, 'update'])->whereNumber('id');
+    Route::delete('/{id}', [LeadController::class, 'destroy'])->whereNumber('id');
+    Route::post('/{id}/contact', [LeadController::class, 'contact'])->whereNumber('id');
+});
 
 // Support Tickets
 Route::prefix('support-tickets')->group(function () {
