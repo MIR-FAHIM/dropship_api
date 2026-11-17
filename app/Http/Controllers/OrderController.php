@@ -879,19 +879,96 @@ class OrderController extends Controller
     }
 
     /**
-     * GET /orders/list/{userId}?per_page=20
-     * List orders for a customer
+     * GET /orders/list/{userId}?per_page=20&search=...
+     * List or search orders belonging to a dropshipper/customer.
      */
     public function listOrdersByUser($userId, Request $request)
     {
         try {
-            $perPage = (int) $request->get('per_page', 20);
+            $perPage = max(1, min(100, (int) $request->get('per_page', 20)));
+            $dateFilters = $request->validate([
+                'period' => ['sometimes', 'nullable', 'in:all,today,yesterday,custom'],
+                'date_from' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+                'date_to' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            ]);
+            if (!empty($dateFilters['date_from']) && !empty($dateFilters['date_to'])
+                && $dateFilters['date_to'] < $dateFilters['date_from']) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'date_to' => 'The end date must be on or after the start date.',
+                ]);
+            }
+            $search = trim((string) $request->get('search', ''));
+            $query = Order::where('user_id', $userId)->with(['status']);
 
-            $orders = Order::where('user_id', $userId)->with([ 'status'])
+            $dateTimezone = 'Asia/Dhaka';
+            $period = $dateFilters['period'] ?? 'all';
+            if ($period === 'today' || $period === 'yesterday') {
+                $date = \Carbon\Carbon::now($dateTimezone);
+                if ($period === 'yesterday') {
+                    $date->subDay();
+                }
+                $dateFrom = $date->copy()->startOfDay()->utc();
+                $dateTo = $date->copy()->endOfDay()->utc();
+                $query->whereBetween('created_at', [$dateFrom, $dateTo]);
+            } elseif ($period === 'custom' || !empty($dateFilters['date_from']) || !empty($dateFilters['date_to'])) {
+                if (!empty($dateFilters['date_from'])) {
+                    $dateFrom = \Carbon\Carbon::createFromFormat('!Y-m-d', $dateFilters['date_from'], $dateTimezone)->utc();
+                    $query->where('created_at', '>=', $dateFrom);
+                }
+                if (!empty($dateFilters['date_to'])) {
+                    $dateTo = \Carbon\Carbon::createFromFormat('!Y-m-d', $dateFilters['date_to'], $dateTimezone)->endOfDay()->utc();
+                    $query->where('created_at', '<=', $dateTo);
+                }
+            }
+
+            if ($search !== '') {
+                $latinSearch = strtr($search, [
+                    '০' => '0', '১' => '1', '২' => '2', '৩' => '3', '৪' => '4',
+                    '৫' => '5', '৬' => '6', '৭' => '7', '৮' => '8', '৯' => '9',
+                ]);
+                $phoneDigits = preg_replace('/\D+/', '', $latinSearch) ?? '';
+                $phoneSearches = [];
+
+                if (strlen($phoneDigits) >= 7) {
+                    $phoneSearches[] = $phoneDigits;
+                    if (str_starts_with($phoneDigits, '880')) {
+                        $phoneSearches[] = '0' . substr($phoneDigits, 3);
+                    } elseif (str_starts_with($phoneDigits, '0')) {
+                        $phoneSearches[] = '880' . substr($phoneDigits, 1);
+                    } elseif (strlen($phoneDigits) === 10 && str_starts_with($phoneDigits, '1')) {
+                        $phoneSearches[] = '0' . $phoneDigits;
+                        $phoneSearches[] = '880' . $phoneDigits;
+                    }
+                    $phoneSearches = array_values(array_unique(array_filter($phoneSearches)));
+                }
+
+                $query->where(function ($q) use ($search, $latinSearch, $phoneSearches) {
+                    $like = "%{$search}%";
+                    $q->where('order_number', 'like', $like)
+                        ->orWhere('customer_name', 'like', $like)
+                        ->orWhere('customer_phone', 'like', $like)
+                        ->orWhere('shipping_address', 'like', $like)
+                        ->orWhereHas('deliveryInformation', fn ($delivery) => $delivery->where('consignment_id', 'like', $like))
+                        ->orWhereHas('items', function ($items) use ($like) {
+                            $items->where('product_name', 'like', $like)
+                                ->orWhereHas('product', fn ($product) => $product->where('name', 'like', $like));
+                        });
+
+                    if (ctype_digit($latinSearch)) {
+                        $q->orWhere('orders.id', (int) $latinSearch);
+                    }
+
+                    $this->applyNormalizedPhoneSearch($q, 'customer_phone', $phoneSearches);
+                });
+            }
+
+            $orders = $query
                 ->latest()
                 ->paginate($perPage);
 
             return $this->success('Orders fetched successfully', $orders);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
