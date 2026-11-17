@@ -1390,6 +1390,8 @@ class OrderController extends Controller
                 'deliveryInformation',
                 'advanceTransaction',
                 'advanceRefundTransaction',
+                // For payment_progress (Payment column): one query for the whole page.
+                'settlements:id,order_id,settlement_type,status,direction,net_payable_amount,settled_at',
             ]);
 
             // Vendor filter: support vendor_id or vendor
@@ -1456,7 +1458,21 @@ class OrderController extends Controller
                 }
             }
 
-            $orders = $query->latest()->paginate($perPage);
+            // Payment stage filter (Payment column): cancelled, returning, not_delivered,
+            // carrybee_pending, dropshipper_pending, supplier_pending, completed.
+            $progress = app(\App\Service\OrderPaymentProgressService::class);
+            $paymentStage = (string) $request->get('payment_stage', '');
+            if ($paymentStage !== '' && $paymentStage !== 'all') {
+                $progress->applyStageFilter($query, $paymentStage);
+            }
+
+            $orders = $query->latest()->paginate($perPage)->through(function (Order $order) use ($progress) {
+                $order->setAttribute('payment_progress', $progress->build($order));
+                // Only needed to build payment_progress; keep the list payload small.
+                $order->unsetRelation('settlements');
+
+                return $order;
+            });
 
             return $this->success('Orders fetched successfully', $orders);
         } catch (\Throwable $e) {
