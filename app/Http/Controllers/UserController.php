@@ -378,14 +378,22 @@ class UserController extends Controller
                 ->whereColumn('withdraw_requests.user_id', 'users.id')
                 ->whereIn('status', ['pending', 'approved']);
 
+            // Activity: how many product pages the dropshipper opened (same source as
+            // the Product Click Leaderboard) and when they last did.
+            $clicks = fn (string $aggregate) => \App\Models\ProductClicks::query()
+                ->selectRaw($aggregate)
+                ->whereColumn('product_clicks.clicked_by', 'users.id');
+
             $query = User::where('user_type', 'dropshipper')
                 ->withCount('orders as total_order_count')
                 ->addSelect([
                     'ledger_total_credit' => $ledgerSum('credit'),
                     'ledger_total_debit' => $ledgerSum('debit'),
                     'ledger_pending_reserved' => $pendingReserved,
+                    'product_clicks_count' => $clicks('COUNT(*)'),
+                    'last_product_click_at' => $clicks('MAX(created_at)'),
                 ])
-                ->withCasts(['total_order_count' => 'integer']);
+                ->withCasts(['total_order_count' => 'integer', 'product_clicks_count' => 'integer']);
 
             // Response: balance = { total_credit, total_debit, net_balance, pending_reserved,
             // available_balance }, plus wallet_balance (= net_balance) for older clients.
@@ -504,6 +512,13 @@ class UserController extends Controller
 
             if (!$user) {
                 return $this->failed('User not found', null, 404);
+            }
+
+            // Dropshipper activity for the admin details header.
+            if ($user->user_type === 'dropshipper') {
+                $clicks = \App\Models\ProductClicks::where('clicked_by', $user->id);
+                $user->setAttribute('product_clicks_count', (clone $clicks)->count());
+                $user->setAttribute('last_product_click_at', (clone $clicks)->max('created_at'));
             }
 
             return $this->success('User fetched successfully', $user);
