@@ -1442,20 +1442,72 @@ class OrderController extends Controller
                 $query->where('created_at', $param === 'date_from' ? '>=' : '<=', $boundary);
             }
 
-            // Search filter across order_number, customer, and dropshipper
+            // One search box supports order/customer/dropshipper/vendor details.
+            // Normalize phone input so spaces, punctuation and the Bangladesh
+            // +880 prefix do not prevent a match against the stored phone.
             if ($request->filled('search')) {
                 $search = trim($request->get('search'));
                 if ($search !== '') {
-                    $query->where(function ($q) use ($search) {
-                        $q->where('order_number', 'like', "%{$search}%")
-                          ->orWhere('customer_name', 'like', "%{$search}%")
-                          ->orWhere('customer_phone', 'like', "%{$search}%")
-                          ->orWhereHas('user', function ($uq) use ($search) {
-                              $uq->where('name', 'like', "%{$search}%")
-                                 ->orWhere('phone', 'like', "%{$search}%")
-                                 ->orWhere('email', 'like', "%{$search}%");
+                    $latinSearch = strtr($search, [
+                        '০' => '0', '১' => '1', '২' => '2', '৩' => '3', '৪' => '4',
+                        '৫' => '5', '৬' => '6', '৭' => '7', '৮' => '8', '৯' => '9',
+                    ]);
+                    $phoneDigits = preg_replace('/\D+/', '', $latinSearch) ?? '';
+                    $phoneSearches = [];
+
+                    if (strlen($phoneDigits) >= 7) {
+                        $phoneSearches[] = $phoneDigits;
+
+                        // Match local and international forms of a Bangladesh number.
+                        if (str_starts_with($phoneDigits, '880')) {
+                            $phoneSearches[] = '0' . substr($phoneDigits, 3);
+                        } elseif (str_starts_with($phoneDigits, '0')) {
+                            $phoneSearches[] = '880' . substr($phoneDigits, 1);
+                        } elseif (strlen($phoneDigits) === 10 && str_starts_with($phoneDigits, '1')) {
+                            $phoneSearches[] = '0' . $phoneDigits;
+                            $phoneSearches[] = '880' . $phoneDigits;
+                        }
+
+                        $phoneSearches = array_values(array_unique(array_filter($phoneSearches)));
+                    }
+
+                    $query->where(function ($q) use ($search, $latinSearch, $phoneSearches) {
+                        $like = "%{$search}%";
+                        $q->where('order_number', 'like', $like)
+                          ->orWhere('customer_name', 'like', $like)
+                          ->orWhere('customer_phone', 'like', $like)
+                          ->orWhere('shipping_address', 'like', $like)
+                          ->orWhereHas('deliveryInformation', fn ($dq) => $dq->where('consignment_id', 'like', $like))
+                          ->orWhereHas('items', function ($iq) use ($like) {
+                              $iq->where('product_name', 'like', $like)
+                                  ->orWhereHas('product', fn ($pq) => $pq->where('name', 'like', $like));
                           })
-                          ->orWhereHas('vendor', fn ($vq) => $vq->where('shop_name', 'like', "%{$search}%"));
+                          ->orWhereHas('user', function ($uq) use ($like, $phoneSearches) {
+                              $uq->where('name', 'like', $like)
+                                 ->orWhere('phone', 'like', $like)
+                                 ->orWhere('email', 'like', $like);
+                              $this->applyNormalizedPhoneSearch($uq, 'phone', $phoneSearches);
+                          })
+                          ->orWhereHas('vendor', function ($vq) use ($like, $phoneSearches) {
+                              $vq->where('shop_name', 'like', $like)
+                                  ->orWhere('owner_name', 'like', $like)
+                                  ->orWhere('emergency_contact', 'like', $like)
+                                  ->orWhere('whatsapp', 'like', $like);
+                              $this->applyNormalizedPhoneSearch($vq, 'emergency_contact', $phoneSearches);
+                              $this->applyNormalizedPhoneSearch($vq, 'whatsapp', $phoneSearches);
+                              $vq->orWhereHas('user', function ($vuq) use ($like, $phoneSearches) {
+                                  $vuq->where('name', 'like', $like)
+                                      ->orWhere('phone', 'like', $like)
+                                      ->orWhere('email', 'like', $like);
+                                  $this->applyNormalizedPhoneSearch($vuq, 'phone', $phoneSearches);
+                              });
+                          });
+
+                        if (ctype_digit($latinSearch)) {
+                            $q->orWhere('orders.id', (int) $latinSearch);
+                        }
+
+                        $this->applyNormalizedPhoneSearch($q, 'customer_phone', $phoneSearches);
                     });
                 }
             }
@@ -1480,6 +1532,21 @@ class OrderController extends Controller
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    /** Add phone comparisons after removing common separators from stored numbers. */
+    private function applyNormalizedPhoneSearch($query, string $column, array $phoneSearches): void
+    {
+        if ($phoneSearches === []) {
+            return;
+        }
+
+        $normalizedColumn = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE({$column}, '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', '')";
+        $query->orWhere(function ($phoneQuery) use ($normalizedColumn, $phoneSearches) {
+            foreach ($phoneSearches as $digits) {
+                $phoneQuery->orWhereRaw("{$normalizedColumn} LIKE ?", ["%{$digits}%"]);
+            }
+        });
     }
 
     /**
