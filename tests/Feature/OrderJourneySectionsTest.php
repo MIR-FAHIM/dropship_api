@@ -200,6 +200,14 @@ class OrderJourneySectionsTest extends TestCase
         $this->assertSame(['J-7'], $numbers(['order_number' => 'J-7']));
         $this->assertSame(['J-9'], $numbers(['customer_name' => 'Customer 9']));
         $this->assertSame(['J-4'], $numbers(['customer_phone' => '+8801700000004']), 'country code is ignored');
+
+        // Phones saved with spaces / dashes / +880 still match, full or partial, Bangla digits too.
+        $formatted = $this->order(4, null);
+        $formatted->update(['customer_phone' => '+880 1917-892100']);
+        $this->assertSame([$formatted->order_number], $numbers(['customer_phone' => '01917892100']));
+        $this->assertSame([$formatted->order_number], $numbers(['customer_phone' => '0191789210']), 'partial number');
+        $this->assertSame([$formatted->order_number], $numbers(['customer_phone' => '০১৯১৭৮৯২১০০']), 'Bangla digits');
+        $this->assertSame([], $numbers(['customer_phone' => '01800000000']));
         $this->assertSame(['J-12', 'J-13', 'J-14', 'J-15'], $numbers(['status' => 5]));
         $this->assertSame([], $numbers(['status' => 5, 'customer_name' => 'Customer 9']), 'fields combine with AND');
     }

@@ -993,8 +993,12 @@ class OrderController extends Controller
                 if ($digits === '') {
                     $query->whereRaw('1 = 0');
                 } else {
-                    // Last 10 digits so 017…, 88017… and +88017… all match.
-                    $query->where('customer_phone', 'like', '%' . substr($digits, -10) . '%');
+                    // Drop the country code / leading 0 so 017…, 88017… and +88017… all match,
+                    // and compare against the stored phone with spaces, dashes, + etc. removed
+                    // (customers' phones are saved as typed, e.g. "01917-892100", "+880 1917…").
+                    $core = preg_replace('/^(?:880|0)/', '', $digits) ?: $digits;
+                    $normalized = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(customer_phone, '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', '')";
+                    $query->whereRaw("{$normalized} LIKE ?", ['%' . $core . '%']);
                 }
             }
             if ($request->filled('status') && ctype_digit((string) $request->get('status'))) {
