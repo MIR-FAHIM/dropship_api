@@ -901,7 +901,9 @@ class OrderController extends Controller
             // collectable_amount feeds the COD/profit breakdown columns on My Orders.
             $query = Order::where('user_id', $userId)->with([
                 'status',
-                'deliveryInformation:id,order_id,collectable_amount',
+                // collectable_amount: money columns; consignment_id: Live Track column
+                // (also saves the per-order lookup in Order::getConsignmentId()).
+                'deliveryInformation:id,order_id,collectable_amount,consignment_id',
                 // Item thumbnails for the list (only the columns the image needs).
                 'items:id,order_id,product_id,product_name,qty',
                 'items.product:id,thumbnail_img',

@@ -759,11 +759,24 @@ class ProductController extends Controller
                 }
             }
 
+            // Moving a product to another vendor (admin product page): admins / product
+            // managers only — this route is also used by vendors for their own products.
+            $changesVendor = $request->filled('vendor_id') && (int) $request->input('vendor_id') !== (int) $product->vendor_id;
+            if ($changesVendor) {
+                $user = $request->user();
+                $roles = [strtolower((string) $user?->user_type), strtolower((string) $user?->role)];
+                if (!$user || (int) $user->banned === 1 || !array_intersect($roles, ['admin', 'superadmin', 'product manager'])) {
+                    return $this->failed('Only an admin can change the vendor of a product', null, 403);
+                }
+            }
+
             // Normalize photos input: accept comma string or single id and convert to array
 
             $validated = $request->validate([
                 'name' => ['sometimes', 'nullable', 'string', 'max:255'],
                 'added_by' => ['sometimes', 'nullable', 'string', 'max:255'],
+                // Was missing, so a vendor change from the admin product page was silently dropped.
+                'vendor_id' => ['sometimes', 'required', 'integer', 'exists:vendors,id'],
                 'user_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
                 'category_id' => ['sometimes', 'nullable', 'integer', 'exists:categories,id'],
                 'brand_id' => ['sometimes', 'nullable', 'integer', 'exists:brands,id'],
@@ -835,6 +848,10 @@ class ProductController extends Controller
                 'wholesale_product' => ['sometimes', 'nullable', 'boolean'],
                 'frequently_brought_selection_type' => ['sometimes', 'nullable', 'string', 'max:50'],
             ]);
+
+            if (array_key_exists('vendor_id', $validated)) {
+                $validated['vendor_id'] = (int) $validated['vendor_id']; // the page sends "9"
+            }
 
             if (array_key_exists('photos', $validated) && is_array($validated['photos'])) {
                 $validated['photos'] = implode(',', $validated['photos']);
