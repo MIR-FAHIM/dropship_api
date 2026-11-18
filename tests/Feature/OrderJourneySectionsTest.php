@@ -160,6 +160,35 @@ class OrderJourneySectionsTest extends TestCase
         $this->assertSame('P', $all['data'][0]['items'][0]['product_name'], 'items are listed for the thumbnails');
     }
 
+    public function test_order_lists_flag_supplier_and_dropshipper_invoices(): void
+    {
+        $paidOut = $this->order(10, 'order.paid');
+        $supplierOnly = $this->order(9, 'order.paid');
+        $cancelledInvoice = $this->order(6, 'order.delivered');
+        $plain = $this->order(6, 'order.delivered');
+
+        \App\Models\SettlementInvoice::create(['invoice_number' => 'PAY-1', 'type' => 'dropshipper_payout', 'dropshipper_id' => $this->dropshipper->id,
+            'status' => 'paid', 'order_ids' => [$paidOut->id], 'paid_at' => now()]);
+        \App\Models\SettlementInvoice::create(['invoice_number' => 'PAY-X', 'type' => 'dropshipper_payout', 'dropshipper_id' => $this->dropshipper->id,
+            'status' => 'cancelled', 'order_ids' => [$cancelledInvoice->id]]);
+        \App\Models\SettlementInvoice::create(['invoice_number' => 'INV-S1', 'type' => 'vendor_settlement', 'vendor_id' => $this->vendor->id,
+            'status' => 'pending', 'order_ids' => [(string) $paidOut->id, $supplierOnly->id]]);
+
+        $admin = collect($this->getJson('/api/orders/all/orders?per_page=100', $this->adminHeaders)->assertOk()->json('data.data'))->keyBy('order_number');
+        $this->assertSame('PAY-1', $admin[$paidOut->order_number]['invoices']['dropshipper']['invoice_number']);
+        $this->assertSame('paid', $admin[$paidOut->order_number]['invoices']['dropshipper']['status']);
+        $this->assertSame('INV-S1', $admin[$paidOut->order_number]['invoices']['supplier']['invoice_number']);
+        $this->assertSame('INV-S1', $admin[$supplierOnly->order_number]['invoices']['supplier']['invoice_number']);
+        $this->assertNull($admin[$supplierOnly->order_number]['invoices']['dropshipper']);
+        $this->assertNull($admin[$cancelledInvoice->order_number]['invoices']['dropshipper'], 'cancelled invoices are ignored');
+        $this->assertSame(['supplier' => null, 'dropshipper' => null], $admin[$plain->order_number]['invoices']);
+
+        $mine = collect($this->getJson("/api/orders/list/{$this->dropshipper->id}?per_page=100", $this->headersFor($this->dropshipper))
+            ->assertOk()->json('data.data'))->keyBy('order_number');
+        $this->assertSame('PAY-1', $mine[$paidOut->order_number]['invoices']['dropshipper']['invoice_number']);
+        $this->assertArrayNotHasKey('supplier', $mine[$paidOut->order_number]['invoices'], 'dropshippers do not see supplier invoices');
+    }
+
     public function test_dropshipper_list_has_separate_field_filters(): void
     {
         $this->seedAll();

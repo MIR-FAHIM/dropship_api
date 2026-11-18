@@ -1008,6 +1008,9 @@ class OrderController extends Controller
                 ->latest()
                 ->paginate($perPage);
 
+            // invoices.dropshipper: this dropshipper's profit payout invoice (supplier invoices are admin-only).
+            app(\App\Service\OrderInvoiceFlags::class)->attach($orders->getCollection(), [\App\Service\OrderInvoiceFlags::DROPSHIPPER]);
+
             return $this->success('Orders fetched successfully', $orders->toArray() + ['journey_counts' => $journeyCounts]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
@@ -1700,6 +1703,9 @@ class OrderController extends Controller
 
                 return $order;
             });
+
+            // invoices.supplier + invoices.dropshipper: flags for invoiced orders.
+            app(\App\Service\OrderInvoiceFlags::class)->attach($orders->getCollection());
 
             return $this->success('Orders fetched successfully', $orders->toArray() + ['journey_counts' => $journeyCounts]);
         } catch (\Throwable $e) {
