@@ -72,11 +72,17 @@ class OrderJourneyService
     {
         $case = self::caseExpression();
 
-        $rows = (clone $query)
+        // Work out the journey in a subquery and group the outer query by its alias.
+        // MySQL's only_full_group_by rejects GROUP BY on a CASE with a correlated subquery.
+        $journeys = (clone $query)
             ->reorder()
-            ->select(DB::raw("{$case} as journey"), DB::raw('COUNT(*) as total'))
-            ->groupBy(DB::raw($case))
-            ->toBase()
+            ->select(DB::raw("{$case} as journey"))
+            ->toBase();
+
+        $rows = DB::query()
+            ->fromSub($journeys, 'oj')
+            ->select('oj.journey', DB::raw('COUNT(*) as total'))
+            ->groupBy('oj.journey')
             ->get();
 
         $stages = [];
