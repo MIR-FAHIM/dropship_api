@@ -157,5 +157,21 @@ class OrderJourneySectionsTest extends TestCase
         $this->assertSame(27, $all['journey_counts']['sections']['all']);
         $this->assertSame(3, $get(['section' => 'returning'])['total']);
         $this->assertSame('delivered.partial', collect($get(['section' => 'delivered', 'stage' => 'partial'])['data'])->first()['journey']);
+        $this->assertSame('P', $all['data'][0]['items'][0]['product_name'], 'items are listed for the thumbnails');
+    }
+
+    public function test_dropshipper_list_has_separate_field_filters(): void
+    {
+        $this->seedAll();
+        $headers = $this->headersFor($this->dropshipper);
+        $numbers = fn (array $q) => collect($this->getJson("/api/orders/list/{$this->dropshipper->id}?" . http_build_query($q + ['per_page' => 100]), $headers)
+            ->assertOk()->json('data.data'))->pluck('order_number')->sort()->values()->all();
+
+        $this->assertSame(['J-12'], $numbers(['consignment_id' => 'FJ12']));
+        $this->assertSame(['J-7'], $numbers(['order_number' => 'J-7']));
+        $this->assertSame(['J-9'], $numbers(['customer_name' => 'Customer 9']));
+        $this->assertSame(['J-4'], $numbers(['customer_phone' => '+8801700000004']), 'country code is ignored');
+        $this->assertSame(['J-12', 'J-13', 'J-14', 'J-15'], $numbers(['status' => 5]));
+        $this->assertSame([], $numbers(['status' => 5, 'customer_name' => 'Customer 9']), 'fields combine with AND');
     }
 }

@@ -898,7 +898,15 @@ class OrderController extends Controller
                 ]);
             }
             $search = trim((string) $request->get('search', ''));
-            $query = Order::where('user_id', $userId)->with(['status']);
+            // collectable_amount feeds the COD/profit breakdown columns on My Orders.
+            $query = Order::where('user_id', $userId)->with([
+                'status',
+                'deliveryInformation:id,order_id,collectable_amount',
+                // Item thumbnails for the list (only the columns the image needs).
+                'items:id,order_id,product_id,product_name,qty',
+                'items.product:id,thumbnail_img',
+                'items.product.primaryImage:id,file_name,external_link',
+            ]);
 
             $dateTimezone = 'Asia/Dhaka';
             $period = $dateFilters['period'] ?? 'all';
@@ -960,6 +968,37 @@ class OrderController extends Controller
 
                     $this->applyNormalizedPhoneSearch($q, 'customer_phone', $phoneSearches);
                 });
+            }
+
+            // Separate field filters (Consignment ID / Order ID / Name / Phone / Status), combined with AND.
+            $toLatin = fn (string $v) => strtr($v, ['০' => '0', '১' => '1', '২' => '2', '৩' => '3', '৪' => '4',
+                '৫' => '5', '৬' => '6', '৭' => '7', '৮' => '8', '৯' => '9']);
+            if (($consignment = trim((string) $request->get('consignment_id', ''))) !== '') {
+                $query->whereHas('deliveryInformation', fn ($d) => $d->where('consignment_id', 'like', '%' . $toLatin($consignment) . '%'));
+            }
+            if (($orderNo = trim((string) $request->get('order_number', ''))) !== '') {
+                $orderNo = $toLatin($orderNo);
+                $query->where(function ($q) use ($orderNo) {
+                    $q->where('order_number', 'like', "%{$orderNo}%");
+                    if (ctype_digit($orderNo)) {
+                        $q->orWhere('orders.id', (int) $orderNo);
+                    }
+                });
+            }
+            if (($name = trim((string) $request->get('customer_name', ''))) !== '') {
+                $query->where('customer_name', 'like', "%{$name}%");
+            }
+            if (($phone = trim((string) $request->get('customer_phone', ''))) !== '') {
+                $digits = preg_replace('/\D+/', '', $toLatin($phone)) ?? '';
+                if ($digits === '') {
+                    $query->whereRaw('1 = 0');
+                } else {
+                    // Last 10 digits so 017…, 88017… and +88017… all match.
+                    $query->where('customer_phone', 'like', '%' . substr($digits, -10) . '%');
+                }
+            }
+            if ($request->filled('status') && ctype_digit((string) $request->get('status'))) {
+                $query->where('orders.status', (int) $request->get('status'));
             }
 
             // CarryBee-style sections (?section=&stage=) + their counts.
