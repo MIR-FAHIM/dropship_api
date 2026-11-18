@@ -962,11 +962,14 @@ class OrderController extends Controller
                 });
             }
 
+            // CarryBee-style sections (?section=&stage=) + their counts.
+            $journeyCounts = app(\App\Service\OrderJourneyService::class)->apply($query, $request);
+
             $orders = $query
                 ->latest()
                 ->paginate($perPage);
 
-            return $this->success('Orders fetched successfully', $orders);
+            return $this->success('Orders fetched successfully', $orders->toArray() + ['journey_counts' => $journeyCounts]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
@@ -1470,6 +1473,20 @@ class OrderController extends Controller
                 }
             }
 
+            // Search: order number, customer name / phone, consignment id.
+            $search = trim((string) $request->get('search', ''));
+            if ($search !== '') {
+                $like = '%' . addcslashes($search, '%_\\') . '%';
+                $ordersQuery->where(fn ($q) => $q
+                    ->where('order_number', 'like', $like)
+                    ->orWhere('customer_name', 'like', $like)
+                    ->orWhere('customer_phone', 'like', $like)
+                    ->orWhereHas('deliveryInformation', fn ($d) => $d->where('consignment_id', 'like', $like)));
+            }
+
+            // CarryBee-style sections (?section=&stage=) + their counts.
+            $journeyCounts = app(\App\Service\OrderJourneyService::class)->apply($ordersQuery, $request);
+
             $orders = $ordersQuery->latest()->paginate($perPage);
 
             // Admin note only for admins or the vendor this list belongs to; this
@@ -1478,7 +1495,7 @@ class OrderController extends Controller
                 $orders->getCollection()->each->makeVisible(Order::ADMIN_NOTE_FIELDS);
             }
 
-            return $this->success('Vendor orders fetched successfully', $orders);
+            return $this->success('Vendor orders fetched successfully', $orders->toArray() + ['journey_counts' => $journeyCounts]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         } catch (\Throwable $e) {
@@ -1634,6 +1651,9 @@ class OrderController extends Controller
                 $progress->applyStageFilter($query, $paymentStage);
             }
 
+            // CarryBee-style sections (?section=&stage=) + their counts.
+            $journeyCounts = app(\App\Service\OrderJourneyService::class)->apply($query, $request);
+
             $orders = $query->latest()->paginate($perPage)->through(function (Order $order) use ($progress) {
                 $order->setAttribute('payment_progress', $progress->build($order));
                 // Only needed to build payment_progress; keep the list payload small.
@@ -1642,7 +1662,7 @@ class OrderController extends Controller
                 return $order;
             });
 
-            return $this->success('Orders fetched successfully', $orders);
+            return $this->success('Orders fetched successfully', $orders->toArray() + ['journey_counts' => $journeyCounts]);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
