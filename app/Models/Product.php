@@ -140,6 +140,12 @@ class Product extends Model
     {
         return $this->belongsTo(Vendor::class, 'vendor_id');
     }
+    /** Every click row; used with withCount('clicks') for the admin product list. */
+    public function clicks()
+    {
+        return $this->hasMany(ProductClicks::class, 'product_id');
+    }
+
     public function productClicks()
     {
         return $this->hasOne(ProductClicks::class, 'product_id')

@@ -456,8 +456,10 @@ class ProductController extends Controller
     {
         try {
             $query = Product::query()->with(['primaryImage', 'images', 'category',
-              'subCategory', 'vendor.division', 
-              'vendor.district', 'brand', 'productDiscount']);
+              'subCategory', 'vendor.division',
+              'vendor.district', 'brand', 'productDiscount'])
+                // clicks_count: shown under the product name on the admin products list.
+                ->withCount('clicks');
 
             if ($request->filled('vendor_id')) {
                 $query->where('vendor_id', $request->vendor_id);
