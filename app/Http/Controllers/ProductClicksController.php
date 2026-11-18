@@ -169,7 +169,8 @@ class ProductClicksController extends Controller
                 $query->whereDate('created_at', '<=', $request->input('end_date'));
             }
 
-            $rows = $query->with('product:id,name,sku')->get();
+            // thumbnail_img + primaryImage: product photo on the admin clicks report.
+            $rows = $query->with(['product:id,name,sku,thumbnail_img', 'product.primaryImage:id,file_name,external_link'])->get();
 
             $leaderboard = $rows->map(function ($row, $index) {
                 return [
