@@ -759,15 +759,12 @@ class ProductController extends Controller
                 }
             }
 
-            // Moving a product to another vendor (admin product page): admins / product
-            // managers only — this route is also used by vendors for their own products.
-            $changesVendor = $request->filled('vendor_id') && (int) $request->input('vendor_id') !== (int) $product->vendor_id;
-            if ($changesVendor) {
-                $user = $request->user();
-                $roles = [strtolower((string) $user?->user_type), strtolower((string) $user?->role)];
-                if (!$user || (int) $user->banned === 1 || !array_intersect($roles, ['admin', 'superadmin', 'product manager'])) {
-                    return $this->failed('Only an admin can change the vendor of a product', null, 403);
-                }
+            // The vendor is changed only through POST /products/{id}/vendor-change, which also
+            // updates the SKU and open carts and keeps a log. Here it may only stay the same.
+            if ($request->filled('vendor_id') && (int) $request->input('vendor_id') !== (int) $product->vendor_id) {
+                return $this->failed('Use "Change vendor" on the product page to move a product to another vendor.', [
+                    'vendor_id' => ['The vendor can only be changed with the Change vendor option.'],
+                ], 422);
             }
 
             // Normalize photos input: accept comma string or single id and convert to array
@@ -775,7 +772,7 @@ class ProductController extends Controller
             $validated = $request->validate([
                 'name' => ['sometimes', 'nullable', 'string', 'max:255'],
                 'added_by' => ['sometimes', 'nullable', 'string', 'max:255'],
-                // Was missing, so a vendor change from the admin product page was silently dropped.
+                // Only the current vendor is allowed here (checked above); kept so it isn't silently dropped.
                 'vendor_id' => ['sometimes', 'required', 'integer', 'exists:vendors,id'],
                 'user_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
                 'category_id' => ['sometimes', 'nullable', 'integer', 'exists:categories,id'],

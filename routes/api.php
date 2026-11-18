@@ -237,6 +237,10 @@ Route::prefix('products')->group(function () {
     Route::get('/list/today-deal', [ProductController::class, 'listTodayDealProducts']);
     Route::get('/details/{id}', [ProductController::class, 'getProductDetails'])->withoutMiddleware('token');
     Route::post('/update/{id}', [ProductController::class, 'updateProduct']);
+    // Change vendor (admin product page): also updates the auto SKU and open carts, logged.
+    Route::get('/{id}/vendor-change/preview', [\App\Http\Controllers\ProductVendorChangeController::class, 'preview'])->whereNumber('id')->middleware('admin');
+    Route::post('/{id}/vendor-change', [\App\Http\Controllers\ProductVendorChangeController::class, 'change'])->whereNumber('id')->middleware('admin');
+    Route::get('/{id}/vendor-changes', [\App\Http\Controllers\ProductVendorChangeController::class, 'history'])->whereNumber('id')->middleware('admin');
     Route::delete('/delete/{id}', [ProductController::class, 'deleteProduct']);
     // Images
     Route::post('/images/add/{id}', [ProductController::class, 'addProductImage']);
