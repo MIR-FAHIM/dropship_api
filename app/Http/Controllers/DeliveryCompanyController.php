@@ -523,7 +523,21 @@ class DeliveryCompanyController extends Controller
             $result = $service->getInvoiceDetails($invoiceId);
 
             if ($result['status'] >= 400) {
-                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+                $reason = is_array($result['body']) ? ($result['body']['message'] ?? null) : null;
+                $reason = $reason ?: ($result['raw'] !== '' ? strip_tags($result['raw']) : 'empty response');
+
+                \Illuminate\Support\Facades\Log::warning('CarryBee invoice details failed', [
+                    'vendor_id'  => $vendorId,
+                    'invoice_id' => $invoiceId,
+                    'status'     => $result['status'],
+                    'body'       => $result['raw'],
+                ]);
+
+                return $this->failed(
+                    "Carrybee API error ({$result['status']}): {$reason}",
+                    $result['body'] ?? ['raw' => $result['raw']],
+                    $result['status']
+                );
             }
 
             return $this->success('Invoice details fetched successfully', $result['body']);

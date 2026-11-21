@@ -183,6 +183,8 @@ class CarrybeeService
         return [
             'status' => $response->status(),
             'body'   => $response->json(),
+            // Kept for errors: CarryBee sometimes answers with a non-JSON body.
+            'raw'    => mb_substr(trim($response->body()), 0, 500),
         ];
     }
 

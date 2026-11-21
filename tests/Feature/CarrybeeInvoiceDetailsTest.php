@@ -73,7 +73,18 @@ class CarrybeeInvoiceDetailsTest extends TestCase
         Http::fake(['https://developers.carrybee.com/api/v2/invoices/*' => Http::response(['error' => true, 'message' => 'Invoice not found'], 404)]);
 
         $this->getJson("/api/delivery-companies/carrybee/{$this->vendor->id}/invoices/IX0", $this->adminHeaders)
-            ->assertStatus(404);
+            ->assertStatus(404)
+            ->assertJsonPath('message', 'Carrybee API error (404): Invoice not found');
+    }
+
+    public function test_non_json_carrybee_error_is_shown(): void
+    {
+        Http::fake(['https://developers.carrybee.com/api/v2/invoices/*' => Http::response('Invalid invoice id', 400)]);
+
+        $this->getJson("/api/delivery-companies/carrybee/{$this->vendor->id}/invoices/I171026QB3G7S", $this->adminHeaders)
+            ->assertStatus(400)
+            ->assertJsonPath('message', 'Carrybee API error (400): Invalid invoice id')
+            ->assertJsonPath('errors.raw', 'Invalid invoice id');
     }
 
     public function test_requires_admin(): void
