@@ -523,27 +523,95 @@ class DeliveryCompanyController extends Controller
             $result = $service->getInvoiceDetails($invoiceId);
 
             if ($result['status'] >= 400) {
-                $reason = is_array($result['body']) ? ($result['body']['message'] ?? null) : null;
-                $reason = $reason ?: ($result['raw'] !== '' ? strip_tags($result['raw']) : 'empty response');
-
-                \Illuminate\Support\Facades\Log::warning('CarryBee invoice details failed', [
-                    'vendor_id'  => $vendorId,
-                    'invoice_id' => $invoiceId,
-                    'status'     => $result['status'],
-                    'body'       => $result['raw'],
-                ]);
-
-                return $this->failed(
-                    "Carrybee API error ({$result['status']}): {$reason}",
-                    $result['body'] ?? ['raw' => $result['raw']],
-                    $result['status']
-                );
+                return $this->carrybeeInvoiceError('CarryBee invoice details failed', $result, ['vendor_id' => $vendorId, 'invoice_id' => $invoiceId]);
             }
 
             return $this->success('Invoice details fetched successfully', $result['body']);
         } catch (\Throwable $e) {
             return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * GET /delivery-companies/carrybee/{vendorId}/invoices?page=&limit=&all=1
+     * CarryBee settlement invoices of the account this vendor ships with (admin only).
+     * all=1 walks every page (capped) and returns the combined list.
+     */
+    public function carrybeeInvoiceList(Request $request, $vendorId)
+    {
+        try {
+            $validated = $request->validate([
+                'page'  => ['nullable', 'integer', 'min:1'],
+                'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+                'all'   => ['nullable', 'boolean'],
+            ]);
+
+            $service = $this->carrybeeService($vendorId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $page     = (int) ($validated['page'] ?? 1);
+            $limit    = (int) ($validated['limit'] ?? 20);
+            $fetchAll = (bool) ($validated['all'] ?? false);
+            $maxPages = 50;
+
+            $invoices   = [];
+            $pagination = null;
+            $pagesRead  = 0;
+
+            do {
+                $result = $service->listInvoices($page, $limit);
+
+                if ($result['status'] >= 400) {
+                    return $this->carrybeeInvoiceError('CarryBee invoice list failed', $result, ['vendor_id' => $vendorId, 'page' => $page]);
+                }
+
+                $body       = is_array($result['body']) ? $result['body'] : [];
+                $pageItems  = $body['data']['invoices'] ?? [];
+                $invoices   = array_merge($invoices, is_array($pageItems) ? $pageItems : []);
+                $pagination = $body['pagination'] ?? null;
+                $pagesRead++;
+
+                // CarryBee sends page numbers as strings; stop when there is no later page.
+                $nextPage = (int) ($pagination['nextPage'] ?? 0);
+                $hasMore  = $fetchAll && $nextPage > $page && !empty($pageItems) && $pagesRead < $maxPages;
+                $page     = $nextPage;
+            } while ($hasMore);
+
+            return $this->success('Invoices fetched successfully', [
+                'invoices'   => $invoices,
+                'count'      => count($invoices),
+                'pagination' => $pagination,
+                'pages_read' => $pagesRead,
+                'truncated'  => $fetchAll && $pagesRead >= $maxPages && (int) ($pagination['nextPage'] ?? 0) > 0,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Error response that carries CarryBee's own reason (its JSON message, else its raw reply).
+     */
+    private function carrybeeInvoiceError(string $logMessage, array $result, array $context)
+    {
+        $reason = is_array($result['body']) ? ($result['body']['message'] ?? null) : null;
+        $reason = $reason ?: ($result['raw'] !== '' ? strip_tags($result['raw']) : 'empty response');
+
+        \Illuminate\Support\Facades\Log::warning($logMessage, $context + [
+            'status' => $result['status'],
+            'body'   => $result['raw'],
+        ]);
+
+        return $this->failed(
+            "Carrybee API error ({$result['status']}): {$reason}",
+            $result['body'] ?? ['raw' => $result['raw']],
+            $result['status']
+        );
     }
 
     /**

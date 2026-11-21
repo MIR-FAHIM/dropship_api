@@ -87,11 +87,64 @@ class CarrybeeInvoiceDetailsTest extends TestCase
             ->assertJsonPath('errors.raw', 'Invalid invoice id');
     }
 
+    public function test_lists_one_page_of_invoices(): void
+    {
+        Http::fake(['https://developers.carrybee.com/api/v2/invoices*' => Http::response([
+            'error'      => false,
+            'data'       => ['invoices' => [['invoice_id' => 'IX1'], ['invoice_id' => 'IX2']]],
+            'pagination' => ['currentPage' => '1', 'nextPage' => '2', 'limit' => '2', 'count' => '2', 'total' => '3'],
+        ], 200)]);
+
+        $this->getJson("/api/delivery-companies/carrybee/{$this->vendor->id}/invoices?limit=2", $this->adminHeaders)
+            ->assertOk()
+            ->assertJsonPath('data.count', 2)
+            ->assertJsonPath('data.pages_read', 1)
+            ->assertJsonPath('data.invoices.1.invoice_id', 'IX2');
+
+        Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://developers.carrybee.com/api/v2/invoices?')
+            && $request['page'] == 1 && $request['limit'] == 2 && $request->header('Client-ID')[0] === 'cid');
+    }
+
+    public function test_all_walks_every_page(): void
+    {
+        Http::fake(function ($request) {
+            $page = (int) $request['page'];
+            $items = $page === 1 ? [['invoice_id' => 'IX1'], ['invoice_id' => 'IX2']] : [['invoice_id' => 'IX3']];
+            $next = $page === 1 ? '2' : '';
+
+            return Http::response([
+                'error'      => false,
+                'data'       => ['invoices' => $items],
+                'pagination' => ['currentPage' => (string) $page, 'nextPage' => $next, 'limit' => '2', 'total' => '3'],
+            ], 200);
+        });
+
+        $this->getJson("/api/delivery-companies/carrybee/{$this->vendor->id}/invoices?limit=2&all=1", $this->adminHeaders)
+            ->assertOk()
+            ->assertJsonPath('data.count', 3)
+            ->assertJsonPath('data.pages_read', 2)
+            ->assertJsonPath('data.invoices.2.invoice_id', 'IX3')
+            ->assertJsonPath('data.truncated', false);
+
+        Http::assertSentCount(2);
+    }
+
+    public function test_invoice_list_shows_carrybee_reason(): void
+    {
+        Http::fake(['https://developers.carrybee.com/api/v2/invoices*' => Http::response('Invalid path', 400)]);
+
+        $this->getJson("/api/delivery-companies/carrybee/{$this->vendor->id}/invoices?all=1", $this->adminHeaders)
+            ->assertStatus(400)
+            ->assertJsonPath('message', 'Carrybee API error (400): Invalid path');
+    }
+
     public function test_requires_admin(): void
     {
         Http::fake();
 
         $this->getJson("/api/delivery-companies/carrybee/{$this->vendor->id}/invoices/IX212124433")
+            ->assertStatus(401);
+        $this->getJson("/api/delivery-companies/carrybee/{$this->vendor->id}/invoices")
             ->assertStatus(401);
 
         Http::assertNothingSent();

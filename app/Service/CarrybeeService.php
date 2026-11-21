@@ -172,6 +172,22 @@ class CarrybeeService
     }
 
     /**
+     * GET /invoices?page=&limit=
+     * One page of settlement invoices for this CarryBee account.
+     */
+    public function listInvoices(int $page = 1, int $limit = 20): array
+    {
+        $response = Http::withHeaders($this->authHeaders())
+            ->get(self::BASE_URL . '/invoices', ['page' => $page, 'limit' => $limit]);
+
+        return [
+            'status' => $response->status(),
+            'body'   => $response->json(),
+            'raw'    => mb_substr(trim($response->body()), 0, 500),
+        ];
+    }
+
+    /**
      * GET /invoices/{invoiceId}
      * Settlement invoice: totals plus the per-consignment breakdown.
      */
