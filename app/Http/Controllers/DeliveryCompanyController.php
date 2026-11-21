@@ -501,6 +501,38 @@ class DeliveryCompanyController extends Controller
     }
 
     /**
+     * GET /delivery-companies/carrybee/{vendorId}/invoices/{invoiceId}
+     * CarryBee settlement invoice details (admin only).
+     */
+    public function carrybeeInvoiceDetails($vendorId, string $invoiceId)
+    {
+        try {
+            $invoiceId = trim($invoiceId);
+
+            // "MANUAL-…" ids are generated locally when an admin marks an order paid by hand.
+            if ($invoiceId === '' || str_starts_with(strtoupper($invoiceId), 'MANUAL-')) {
+                return $this->failed('This invoice was recorded manually and does not exist at CarryBee', null, 422);
+            }
+
+            $service = $this->carrybeeService($vendorId);
+
+            if (!$service instanceof CarrybeeService) {
+                return $service;
+            }
+
+            $result = $service->getInvoiceDetails($invoiceId);
+
+            if ($result['status'] >= 400) {
+                return $this->failed('Carrybee API error', $result['body'], $result['status']);
+            }
+
+            return $this->success('Invoice details fetched successfully', $result['body']);
+        } catch (\Throwable $e) {
+            return $this->failed('Something went wrong', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * GET /delivery-companies/carrybee/track/{consignmentId}
      * Track an order with only consignmentId by resolving vendor / credentials from database.
      */

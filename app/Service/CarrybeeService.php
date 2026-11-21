@@ -172,6 +172,21 @@ class CarrybeeService
     }
 
     /**
+     * GET /invoices/{invoiceId}
+     * Settlement invoice: totals plus the per-consignment breakdown.
+     */
+    public function getInvoiceDetails(string $invoiceId): array
+    {
+        $response = Http::withHeaders($this->authHeaders())
+            ->get(self::BASE_URL . '/invoices/' . rawurlencode($invoiceId));
+
+        return [
+            'status' => $response->status(),
+            'body'   => $response->json(),
+        ];
+    }
+
+    /**
      * POST /address-details
      * Returns city_id and zone_id for a given address query.
      */
