@@ -17,11 +17,13 @@ class SettlementInvoice extends Model
 
     const TYPE_VENDOR_SETTLEMENT = 'vendor_settlement';
     const TYPE_DROPSHIPPER_PAYOUT = 'dropshipper_payout';
+    const TYPE_MARKETER_COMMISSION = 'marketer_commission'; // Partner Portal commission payout
 
     protected $fillable = [
         'invoice_number',
         'vendor_id',
         'dropshipper_id',
+        'marketer_id',
         'receiver_account',
         'user_id',
         'type',
@@ -89,6 +91,11 @@ class SettlementInvoice extends Model
     public function dropshipper()
     {
         return $this->belongsTo(User::class, 'dropshipper_id');
+    }
+
+    public function marketer()
+    {
+        return $this->belongsTo(User::class, 'marketer_id');
     }
 
     public function creator()

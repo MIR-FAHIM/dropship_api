@@ -359,6 +359,11 @@ class OrderAccountingService
                 );
             }
 
+            // 7b. Partner Portal: the client's marketer earns rate% of this platform profit
+            // (product markup + delivery margin). Only for orders tagged to a marketer's client.
+            app(\App\Service\MarketerCommissionService::class)
+                ->earnForOrder($lockedOrder, (float) $totalPlatformProductMargin, (float) $platformShippingMargin);
+
             // 8. Balanced Ledger Entries (Debits == Credits)
             // Dr Courier Clearing (COD received)
             // Release booking revenue clearing upon delivery
@@ -574,6 +579,9 @@ class OrderAccountingService
                     'admin_note' => trim(($settlement->admin_note ?? '') . " [Reversed: {$reason}]"),
                 ]);
             }
+
+            // Partner Portal: undo the marketer's commission (or claw it back if already on a payout).
+            app(\App\Service\MarketerCommissionService::class)->reverseForOrder($order, $reason);
 
             // Revert company transaction
             Transaction::where('order_id', $order->id)->where('type', 'platform_order_margin')->update([

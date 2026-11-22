@@ -86,6 +86,14 @@ Route::prefix('admin/marketers')->name('admin.marketers.')->middleware('admin:ac
     Route::patch('/{id}/suspension', [MarketerController::class, 'setSuspended'])->whereNumber('id')->name('suspension');
     Route::get('/{id}/clients', [MarketerController::class, 'adminClients'])->whereNumber('id')->name('clients.index');
     Route::patch('/clients/{id}/end', [MarketerController::class, 'endClient'])->whereNumber('id')->name('clients.end');
+    // Partner Portal: commission lines, rates and payouts
+    Route::get('/commissions', [\App\Http\Controllers\MarketerCommissionController::class, 'adminSummary'])->name('commissions.summary');
+    Route::get('/commission-payouts', [\App\Http\Controllers\MarketerCommissionController::class, 'adminPayouts'])->name('commissions.payouts');
+    Route::post('/commission-payouts/{invoiceId}/pay', [\App\Http\Controllers\MarketerCommissionController::class, 'pay'])->whereNumber('invoiceId')->name('commissions.pay');
+    Route::post('/commission-payouts/{invoiceId}/cancel', [\App\Http\Controllers\MarketerCommissionController::class, 'cancel'])->whereNumber('invoiceId')->name('commissions.cancel');
+    Route::get('/{id}/commissions', [\App\Http\Controllers\MarketerCommissionController::class, 'adminCommissions'])->whereNumber('id')->name('commissions.index');
+    Route::patch('/{id}/commission-rate', [\App\Http\Controllers\MarketerCommissionController::class, 'setRate'])->whereNumber('id')->name('commissions.rate');
+    Route::post('/{id}/commission-payouts', [\App\Http\Controllers\MarketerCommissionController::class, 'createPayout'])->whereNumber('id')->name('commissions.create-payout');
 });
 
 Route::prefix('marketer')->name('marketer.panel.')->group(function () {
@@ -96,6 +104,10 @@ Route::prefix('marketer')->name('marketer.panel.')->group(function () {
     Route::get('/invitations', [MarketerController::class, 'invitations'])->name('invitations.index');
     Route::post('/invitations', [MarketerController::class, 'invite'])->middleware('throttle:10,1')->name('invitations.create');
     Route::delete('/invitations/{id}', [MarketerController::class, 'revokeInvitation'])->whereNumber('id')->name('invitations.revoke');
+    // Partner Portal: overview cards + clients table, commission lines, payouts
+    Route::get('/overview', [\App\Http\Controllers\MarketerCommissionController::class, 'overview'])->name('overview');
+    Route::get('/commissions', [\App\Http\Controllers\MarketerCommissionController::class, 'myCommissions'])->name('commissions');
+    Route::get('/commission-payouts', [\App\Http\Controllers\MarketerCommissionController::class, 'myPayouts'])->name('commission-payouts');
 });
 
 Route::prefix('marketer-client')->group(function () {
