@@ -80,6 +80,14 @@ Route::post('/auth/reset-password-mobile', [AuthController::class, 'resetPasswor
 
 Route::post('/auth/logout', [AuthController::class, 'logout'])->name('auth.logout');
 
+// Partner Portal F6: winning products with ad hook / angle / comparison photos (admins + product managers).
+Route::middleware('admin')->group(function () {
+    Route::get('/admin/winning-products', [\App\Http\Controllers\WinningProductController::class, 'adminIndex']);
+    Route::get('/admin/products/{id}/winning', [\App\Http\Controllers\WinningProductController::class, 'adminShow'])->whereNumber('id');
+    Route::post('/admin/products/{id}/winning', [\App\Http\Controllers\WinningProductController::class, 'adminSave'])->whereNumber('id');
+    Route::delete('/admin/products/{id}/winning', [\App\Http\Controllers\WinningProductController::class, 'adminUnmark'])->whereNumber('id');
+});
+
 // Partner Portal F4: sourcing team answers marketers' product requests (admins + product managers).
 Route::prefix('admin/sourcing-requests')->middleware('admin')->group(function () {
     Route::get('/', [\App\Http\Controllers\PartnerSourcingController::class, 'adminIndex']);
@@ -116,6 +124,8 @@ Route::prefix('marketer')->name('marketer.panel.')->group(function () {
     Route::get('/commissions', [\App\Http\Controllers\MarketerCommissionController::class, 'myCommissions'])->name('commissions');
     Route::get('/commission-payouts', [\App\Http\Controllers\MarketerCommissionController::class, 'myPayouts'])->name('commission-payouts');
     Route::get('/commission-payouts/{invoiceId}', [\App\Http\Controllers\MarketerCommissionController::class, 'myPayoutDetails'])->whereNumber('invoiceId')->name('commission-payout');
+    // F6: winning products with creative angles
+    Route::get('/winning-products', [\App\Http\Controllers\WinningProductController::class, 'marketerIndex'])->name('winning-products');
     // F5: pitch calculator data (maths runs in the browser)
     Route::get('/pitch/products', [\App\Http\Controllers\MarketerPitchController::class, 'products'])->name('pitch.products');
     Route::post('/pitch/products/{id}/star', [\App\Http\Controllers\MarketerPitchController::class, 'star'])->whereNumber('id')->name('pitch.star');
