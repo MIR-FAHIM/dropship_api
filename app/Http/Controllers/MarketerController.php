@@ -148,6 +148,39 @@ class MarketerController extends Controller
         return $this->success('Marketer relationship accepted', $client, 201);
     }
 
+    /** POST /marketer-client/referral/preview {ref_code} — who the code belongs to + the consent text. */
+    public function referralPreview(Request $request): JsonResponse
+    {
+        $this->requireDropshipper($request);
+        $data = $request->validate(['ref_code' => ['required', 'string', 'max:40']]);
+        $marketer = app(\App\Service\MarketerReferralService::class)->marketerFor($data['ref_code']);
+        abort_unless($marketer, 404, 'Referral code not found');
+        abort_if(MarketerClient::where('active_dropshipper_user_id', $request->user()->id)->exists(), 409, 'Dropshipper already has an active marketer');
+
+        return $this->success('Referral code found', [
+            'marketer_name' => $marketer->name,
+            'business_name' => $marketer->business_name,
+            'ref_code' => $marketer->marketer_ref_code,
+            'consent_version' => MarketerClient::CONSENT_VERSION,
+            'consent_text' => self::CONSENT_TEXT,
+        ]);
+    }
+
+    /** POST /marketer-client/referral/accept {ref_code, consent} */
+    public function referralAccept(Request $request): JsonResponse
+    {
+        $this->requireDropshipper($request);
+        $data = $request->validate([
+            'ref_code' => ['required', 'string', 'max:40'],
+            'consent' => ['required', 'accepted'],
+            'consent_version' => ['nullable', 'in:'.MarketerClient::CONSENT_VERSION],
+        ]);
+        $client = app(\App\Service\MarketerReferralService::class)
+            ->accept($request->user(), $data['ref_code'], $data['consent_version'] ?? MarketerClient::CONSENT_VERSION);
+
+        return $this->success('Marketer relationship accepted', $client, 201);
+    }
+
     public function adminClients(Request $request, int $id): JsonResponse
     {
         User::where('user_type', 'marketer')->findOrFail($id);

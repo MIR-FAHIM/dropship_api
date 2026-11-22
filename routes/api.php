@@ -120,6 +120,9 @@ Route::prefix('marketer-client')->group(function () {
     Route::get('/relationship', [MarketerController::class, 'relationship']);
     Route::post('/invitation/preview', [MarketerController::class, 'preview'])->middleware('throttle:15,1');
     Route::post('/invitation/accept', [MarketerController::class, 'accept'])->middleware('throttle:15,1');
+    // Partner Portal F3: join a marketer with their public referral code
+    Route::post('/referral/preview', [MarketerController::class, 'referralPreview'])->middleware('throttle:15,1');
+    Route::post('/referral/accept', [MarketerController::class, 'referralAccept'])->middleware('throttle:15,1');
     Route::patch('/{id}/end', [MarketerController::class, 'endClient'])->whereNumber('id');
 });
 Route::get('/auth/tokens', [AuthController::class, 'listTokens']);

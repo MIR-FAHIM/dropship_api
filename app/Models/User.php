@@ -20,6 +20,7 @@ class User extends Model
     protected $fillable = [
         'referred_by',
         'marketer_commission_rate',
+        'marketer_ref_code',
         'provider',
         'provider_id',
         'refresh_token',

@@ -29,28 +29,46 @@ class MarketerCommissionController extends Controller
 
     /* ======================= Marketer panel ======================= */
 
-    /** GET /marketer/overview — cards, connected clients table and the commission formula. */
+    /**
+     * GET /marketer/overview?period=7d|30d|90d|all — cards, connected clients table, formula.
+     * The period narrows order counts, sales and commission earned; money balances
+     * (due / being paid / paid) and the tour goal are always all-time.
+     */
     public function overview(Request $request): JsonResponse
     {
         $marketer = $request->user();
         $rate = $this->commissions->rateFor($marketer);
+        $period = in_array($request->input('period'), ['7d', '30d', '90d', 'all'], true) ? $request->input('period') : 'all';
+        $since = match ($period) {
+            '7d' => now()->subDays(7),
+            '30d' => now()->subDays(30),
+            '90d' => now()->subDays(90),
+            default => null,
+        };
 
         $clients = MarketerClient::where('marketer_user_id', $marketer->id)
             ->with('dropshipper:id,name,business_name')
             ->orderByDesc('accepted_at')
             ->get();
         $clientIds = $clients->pluck('id')->all();
+        $delivered = implode(',', self::DELIVERED_STATUSES);
 
         $orderStats = $clientIds === [] ? collect() : Order::query()
             ->whereIn('marketer_client_id', $clientIds)
+            ->when($since, fn ($q) => $q->where('created_at', '>=', $since))
             ->selectRaw('marketer_client_id')
             ->selectRaw('COUNT(*) AS placed')
-            ->selectRaw('COUNT(CASE WHEN status IN (' . implode(',', self::DELIVERED_STATUSES) . ') THEN 1 END) AS delivered')
-            ->selectRaw('COALESCE(SUM(CASE WHEN status IN (' . implode(',', self::DELIVERED_STATUSES) . ') THEN total END), 0) AS sales')
+            ->selectRaw("COUNT(CASE WHEN status IN ({$delivered}) THEN 1 END) AS delivered")
+            ->selectRaw("COALESCE(SUM(CASE WHEN status IN ({$delivered}) THEN total END), 0) AS sales")
             ->groupBy('marketer_client_id')->toBase()->get()->keyBy('marketer_client_id');
+
+        // Tour goal counts every delivered order, whatever period is selected.
+        $deliveredAllTime = $clientIds === [] ? 0 : Order::whereIn('marketer_client_id', $clientIds)
+            ->whereIn('status', self::DELIVERED_STATUSES)->count();
 
         $commissionByClient = MarketerCommission::where('marketer_user_id', $marketer->id)
             ->whereIn('status', [MarketerCommission::STATUS_EARNED, MarketerCommission::STATUS_PAID])
+            ->when($since, fn ($q) => $q->where('earned_at', '>=', $since))
             ->selectRaw('marketer_client_id, ROUND(SUM(amount), 2) AS commission, ROUND(SUM(base_amount), 2) AS platform_profit')
             ->groupBy('marketer_client_id')->toBase()->get()->keyBy('marketer_client_id');
 
@@ -76,11 +94,17 @@ class MarketerCommissionController extends Controller
         return $this->ok('Marketer overview', [
             'marketer' => ['id' => $marketer->id, 'name' => $marketer->name, 'business_name' => $marketer->business_name],
             'commission_rate' => $rate,
+            // Public code dropshippers can enter to connect (created on first visit).
+            'ref_code' => app(\App\Service\MarketerReferralService::class)->codeFor($marketer),
+            'period' => $period,
+            'generated_at' => now()->toIso8601String(),
             'totals' => $this->commissions->totals($marketer->id) + [
                 'active_clients' => $clients->whereNull('ended_at')->count(),
                 'orders_placed' => (int) $rows->sum('orders_placed'),
                 'orders_delivered' => (int) $rows->sum('orders_delivered'),
+                'orders_delivered_all_time' => $deliveredAllTime,
                 'sales_volume' => round((float) $rows->sum('sales_volume'), 2),
+                'period_commission' => round((float) $rows->sum('commission'), 2),
             ],
             'clients' => $rows,
             // Same worked example as the Partner Portal demo, with this marketer's rate.
