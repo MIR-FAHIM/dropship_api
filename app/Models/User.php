@@ -21,6 +21,7 @@ class User extends Model
         'referred_by',
         'marketer_commission_rate',
         'marketer_ref_code',
+        'marketer_dollar_rate',
         'provider',
         'provider_id',
         'refresh_token',

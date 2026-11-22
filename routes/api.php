@@ -80,6 +80,12 @@ Route::post('/auth/reset-password-mobile', [AuthController::class, 'resetPasswor
 
 Route::post('/auth/logout', [AuthController::class, 'logout'])->name('auth.logout');
 
+// Partner Portal F4: sourcing team answers marketers' product requests (admins + product managers).
+Route::prefix('admin/sourcing-requests')->middleware('admin')->group(function () {
+    Route::get('/', [\App\Http\Controllers\PartnerSourcingController::class, 'adminIndex']);
+    Route::patch('/{id}', [\App\Http\Controllers\PartnerSourcingController::class, 'adminUpdate'])->whereNumber('id');
+});
+
 Route::prefix('admin/marketers')->name('admin.marketers.')->middleware('admin:accounts')->group(function () {
     Route::get('/', [MarketerController::class, 'index'])->name('index');
     Route::post('/', [MarketerController::class, 'create'])->name('create');
@@ -110,6 +116,16 @@ Route::prefix('marketer')->name('marketer.panel.')->group(function () {
     Route::get('/commissions', [\App\Http\Controllers\MarketerCommissionController::class, 'myCommissions'])->name('commissions');
     Route::get('/commission-payouts', [\App\Http\Controllers\MarketerCommissionController::class, 'myPayouts'])->name('commission-payouts');
     Route::get('/commission-payouts/{invoiceId}', [\App\Http\Controllers\MarketerCommissionController::class, 'myPayoutDetails'])->whereNumber('invoiceId')->name('commission-payout');
+    // F5: pitch calculator data (maths runs in the browser)
+    Route::get('/pitch/products', [\App\Http\Controllers\MarketerPitchController::class, 'products'])->name('pitch.products');
+    Route::post('/pitch/products/{id}/star', [\App\Http\Controllers\MarketerPitchController::class, 'star'])->whereNumber('id')->name('pitch.star');
+    Route::delete('/pitch/products/{id}/star', [\App\Http\Controllers\MarketerPitchController::class, 'unstar'])->whereNumber('id')->name('pitch.unstar');
+    Route::get('/pitch/settings', [\App\Http\Controllers\MarketerPitchController::class, 'settings'])->name('pitch.settings');
+    Route::put('/pitch/settings', [\App\Http\Controllers\MarketerPitchController::class, 'saveSettings'])->name('pitch.settings.save');
+    // F4: product sourcing requests
+    Route::get('/requirements', [\App\Http\Controllers\PartnerSourcingController::class, 'index'])->name('requirements');
+    Route::post('/requirements', [\App\Http\Controllers\PartnerSourcingController::class, 'store'])->middleware('throttle:20,1')->name('requirements.store');
+    Route::delete('/requirements/{id}', [\App\Http\Controllers\PartnerSourcingController::class, 'withdraw'])->whereNumber('id')->name('requirements.withdraw');
     // F2: where the marketer wants to be paid
     Route::get('/payment-accounts', [\App\Http\Controllers\MarketerPaymentAccountController::class, 'index'])->name('payment-accounts');
     Route::post('/payment-accounts', [\App\Http\Controllers\MarketerPaymentAccountController::class, 'store'])->middleware('throttle:20,1')->name('payment-accounts.store');
