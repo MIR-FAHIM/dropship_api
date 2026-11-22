@@ -621,6 +621,8 @@ Route::prefix('delivery-companies')->group(function () {
     Route::post('/carrybee/{vendorId}/orders/{consignmentId}/cancel', [DeliveryCompanyController::class, 'carrybeeCancelOrder']);
     Route::get('/carrybee/{vendorId}/orders/{consignmentId}/details', [DeliveryCompanyController::class, 'carrybeeOrderDetails'])->withoutMiddleware('token');
     Route::post('/carrybee/{vendorId}/address-details', [DeliveryCompanyController::class, 'carrybeeAddressDetails']);
+    Route::get('/carrybee/{vendorId}/invoices', [DeliveryCompanyController::class, 'carrybeeInvoiceList'])->middleware('admin:orders');
+    Route::get('/carrybee/{vendorId}/invoices/{invoiceId}', [DeliveryCompanyController::class, 'carrybeeInvoiceDetails'])->middleware('admin:orders');
     // Carrybee Webhook & Payment Notification Endpoints
     Route::post('/carrybee/webhook', [CarrybeeWebhookController::class, 'handle'])->withoutMiddleware('token');
     Route::get('/carrybee/unacknowledged-paid-orders', [CarrybeeWebhookController::class, 'getUnacknowledgedPaidOrders'])->middleware('admin:orders');

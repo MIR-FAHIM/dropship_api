@@ -172,6 +172,39 @@ class CarrybeeService
     }
 
     /**
+     * GET /invoices?page=&limit=
+     * One page of settlement invoices for this CarryBee account.
+     */
+    public function listInvoices(int $page = 1, int $limit = 20): array
+    {
+        $response = Http::withHeaders($this->authHeaders())
+            ->get(self::BASE_URL . '/invoices', ['page' => $page, 'limit' => $limit]);
+
+        return [
+            'status' => $response->status(),
+            'body'   => $response->json(),
+            'raw'    => mb_substr(trim($response->body()), 0, 500),
+        ];
+    }
+
+    /**
+     * GET /invoices/{invoiceId}
+     * Settlement invoice: totals plus the per-consignment breakdown.
+     */
+    public function getInvoiceDetails(string $invoiceId): array
+    {
+        $response = Http::withHeaders($this->authHeaders())
+            ->get(self::BASE_URL . '/invoices/' . rawurlencode($invoiceId));
+
+        return [
+            'status' => $response->status(),
+            'body'   => $response->json(),
+            // Kept for errors: CarryBee sometimes answers with a non-JSON body.
+            'raw'    => mb_substr(trim($response->body()), 0, 500),
+        ];
+    }
+
+    /**
      * POST /address-details
      * Returns city_id and zone_id for a given address query.
      */
