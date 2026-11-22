@@ -73,6 +73,7 @@ class Order extends Model
         'carrybee_invoice_id',
         'carrybee_paid_at',
         'carrybee_disbursed_to',
+        'carrybee_reconciled_at',
 
         'note',
         'admin_note',
@@ -95,6 +96,7 @@ class Order extends Model
         'courier_cost_confirmed' => 'boolean',
         'courier_net_payout' => 'float',
         'carrybee_paid_at' => 'datetime',
+        'carrybee_reconciled_at' => 'datetime',
         'admin_note_updated_at' => 'datetime',
         'lat' => 'float',
         'lon' => 'float',

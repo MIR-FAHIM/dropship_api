@@ -46,7 +46,7 @@ class CarrybeeInvoiceReportService
     }
 
     /** Platform account first, then every vendor with its own complete CarryBee credentials. */
-    private function accounts(): array
+    public function accounts(): array
     {
         $accounts = [];
         $platform = DeliveryCompany::where('is_active', true)->latest()->first();
@@ -74,22 +74,7 @@ class CarrybeeInvoiceReportService
     private function group(array $account, array $filters): array
     {
         $base = ['key' => $account['key'], 'type' => $account['type'], 'vendor_id' => $account['vendor_id'], 'label' => $account['label']];
-        [$id, $secret, $context] = $account['creds'] ?? [null, null, null];
-        if (!$id || !$secret || !$context) {
-            return $base + ['error' => 'CarryBee credentials are missing or incomplete for this account.', 'invoices' => [], 'totals' => $this->sum([]), 'truncated' => false];
-        }
-
-        $cacheKey = 'carrybee-invoices:' . md5($id . '|' . $context);
-        if (!empty($filters['refresh'])) {
-            Cache::forget($cacheKey);
-        }
-        $fetched = Cache::get($cacheKey);
-        if (!$fetched) {
-            $fetched = $this->fetchAll(new CarrybeeService($id, $secret, $context));
-            if (!$fetched['error']) {
-                Cache::put($cacheKey, $fetched, now()->addMinutes(self::CACHE_MINUTES));
-            }
-        }
+        $fetched = $this->invoicesFor($account, !empty($filters['refresh']));
         if ($fetched['error']) {
             return $base + ['error' => $fetched['error'], 'invoices' => [], 'totals' => $this->sum([]), 'truncated' => false];
         }
@@ -101,6 +86,37 @@ class CarrybeeInvoiceReportService
         usort($invoices, fn ($a, $b) => strcmp((string) ($b['invoice_date'] ?? ''), (string) ($a['invoice_date'] ?? '')));
 
         return $base + ['error' => null, 'invoices' => $invoices, 'totals' => $this->sum($invoices), 'truncated' => $fetched['truncated']];
+    }
+
+    /** CarryBee API client for an account from accounts(), or null when its credentials are incomplete. */
+    public function serviceFor(array $account): ?CarrybeeService
+    {
+        [$id, $secret, $context] = $account['creds'] ?? [null, null, null];
+
+        return ($id && $secret && $context) ? new CarrybeeService($id, $secret, $context) : null;
+    }
+
+    /** Every invoice of one account (cached 10 min). @return array{error:?string,invoices:array,truncated:bool} */
+    public function invoicesFor(array $account, bool $refresh = false): array
+    {
+        $service = $this->serviceFor($account);
+        if (!$service) {
+            return ['error' => 'CarryBee credentials are missing or incomplete for this account.', 'invoices' => [], 'truncated' => false];
+        }
+        [$id, , $context] = $account['creds'];
+        $cacheKey = 'carrybee-invoices:' . md5($id . '|' . $context);
+        if ($refresh) {
+            Cache::forget($cacheKey);
+        }
+        $fetched = Cache::get($cacheKey);
+        if (!$fetched) {
+            $fetched = $this->fetchAll($service);
+            if (!$fetched['error']) {
+                Cache::put($cacheKey, $fetched, now()->addMinutes(self::CACHE_MINUTES));
+            }
+        }
+
+        return $fetched;
     }
 
     /** Read every page (CarryBee sends page numbers as strings). */

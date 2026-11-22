@@ -408,6 +408,8 @@ Route::prefix('order-settlements')->group(function () {
     Route::post('/vendor-invoices/{id}/approve', [OrderSettlementController::class, 'approveVendorInvoice'])->middleware('admin:accounts');
     Route::post('/vendor-invoices/{id}/adjust', [OrderSettlementController::class, 'adjustVendorInvoice'])->middleware('admin:orders');
     Route::post('/vendor-invoices/{id}/reject', [OrderSettlementController::class, 'rejectVendorInvoice'])->middleware('admin:accounts');
+    // Replace an unpaid vendor invoice with one built from CarryBee-matched figures
+    Route::post('/vendor-invoices/{id}/reissue', [\App\Http\Controllers\CarrybeeReconcileController::class, 'reissue'])->middleware('admin:accounts');
     Route::get('/admin-payment-accounts', [OrderSettlementController::class, 'getAdminPaymentAccounts']);
 });
 
@@ -667,6 +669,11 @@ Route::prefix('delivery-companies')->group(function () {
     Route::post('/carrybee/{vendorId}/address-details', [DeliveryCompanyController::class, 'carrybeeAddressDetails']);
     // Admin → CarryBee Invoices: every account's invoices, grouped and summed (cached 10 min, ?refresh=1).
     Route::get('/carrybee/all-invoices', [\App\Http\Controllers\CarrybeeInvoiceReportController::class, 'index'])->middleware('admin:orders');
+    // Match our payouts with CarryBee's final invoices (CarrybeeReconcileService). {account} = platform | vendor-{id}
+    Route::get('/carrybee/reconcile/{account}', [\App\Http\Controllers\CarrybeeReconcileController::class, 'report'])->middleware('admin:orders');
+    Route::post('/carrybee/reconcile/{account}/sync', [\App\Http\Controllers\CarrybeeReconcileController::class, 'sync'])->middleware('admin:orders');
+    Route::post('/carrybee/reconcile/orders/{orderId}/penalty', [\App\Http\Controllers\CarrybeeReconcileController::class, 'penalty'])->middleware('admin:accounts');
+    Route::post('/carrybee/reconcile/flags/{id}/resolve', [\App\Http\Controllers\CarrybeeReconcileController::class, 'resolveFlag'])->middleware('admin:accounts');
     Route::get('/carrybee/{vendorId}/invoices', [DeliveryCompanyController::class, 'carrybeeInvoiceList'])->middleware('admin:orders');
     Route::get('/carrybee/{vendorId}/invoices/{invoiceId}', [DeliveryCompanyController::class, 'carrybeeInvoiceDetails'])->middleware('admin:orders');
     // Carrybee Webhook & Payment Notification Endpoints

@@ -2,8 +2,10 @@
 
 namespace App\Service;
 
+use App\Models\CarrybeeInvoiceLine;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\OrderReturnPenalty;
 use App\Models\OrderSettlement;
 use App\Models\OrderAccountingLedger;
 use App\Models\ResellerTransaction;
@@ -1469,6 +1471,16 @@ class OrderAccountingService
             $courierCodFee = 0.00;
         }
 
+        // Once synced, CarryBee's final invoice line is the truth for cash and fees
+        // (booking quotes and webhook estimates above can be wrong). See CarrybeeReconcileService.
+        $cbLines = CarrybeeInvoiceLine::where('order_id', $order->id)->orderByDesc('invoiced_date')->get();
+        $cbDelivery = $cbLines->firstWhere('line_type', CarrybeeInvoiceLine::TYPE_DELIVERY);
+        if ($cbDelivery && !$cancelledOrReturned) {
+            $courierCollectable = round((float) $cbDelivery->collected, 2);
+            $courierDeliveryFee = round((float) $cbDelivery->delivery_fee, 2);
+            $courierCodFee = round((float) $cbDelivery->cod_fee, 2);
+        }
+
         $totalCourierCost = round($courierDeliveryFee + $courierCodFee, 2);
         $courierNetToSupplier = round($courierCollectable - $totalCourierCost, 2);
         if ($cancelledOrReturned) {
@@ -1560,6 +1572,20 @@ class OrderAccountingService
             $platformNetProfit = 0.00;
         }
 
+        // Returned parcel: CarryBee still charges the return trip. Who carries it is the admin's
+        // decision (order_return_penalties.payer). The charge landed on the CarryBee account that
+        // shipped it: for a vendor's own account a non-vendor payer means the platform credits the
+        // vendor; on the platform account a vendor payer means the vendor owes it.
+        $penalty = $cancelledOrReturned ? OrderReturnPenalty::where('order_id', $order->id)->first() : null;
+        $penaltyAmount = round((float) ($penalty?->amount ?? 0), 2);
+        if ($penaltyAmount > 0 && $penalty->payer) {
+            if ($hasOwnDeliveryAccount) {
+                $supplierOwesPlatform = $penalty->payer === 'vendor' ? 0.00 : -$penaltyAmount;
+            } else {
+                $supplierOwesPlatform = $penalty->payer === 'vendor' ? $penaltyAmount : 0.00;
+            }
+        }
+
         // Balance check: Supplier Owes Platform == Dropshipper Profit + Platform Net Profit (for has_own_delivery_account)
         $isBalanced = ($courierCollectable <= 0)
             ? true
@@ -1637,6 +1663,17 @@ class OrderAccountingService
             ],
             'is_editable' => !($supplierSettlement?->status === OrderSettlement::STATUS_SETTLED && $resellerSettlement?->status === OrderSettlement::STATUS_SETTLED),
             'items' => $itemsData,
+            'carrybee' => [
+                'reconciled' => $cbLines->isNotEmpty(),
+                'reconciled_at' => $order->carrybee_reconciled_at?->toIso8601String(),
+                'invoice_id' => $cbDelivery?->invoice_id ?? $cbLines->first()?->invoice_id,
+                'lines' => $cbLines->map(fn ($l) => $l->only(['invoice_id', 'invoiced_date', 'consignment_id', 'line_type', 'collected', 'delivery_fee', 'cod_fee', 'total_fee', 'delivery_status']))->values()->all(),
+            ],
+            'return_penalty' => $penalty ? [
+                'amount' => $penaltyAmount,
+                'payer' => $penalty->payer,
+                'decided' => (bool) $penalty->payer,
+            ] : null,
         ];
     }
 
@@ -1906,7 +1943,7 @@ class OrderAccountingService
         });
     }
 
-    private function isCancelledOrReturned(Order $order): bool
+    public function isCancelledOrReturned(Order $order): bool
     {
         $statusText = mb_strtolower(trim(
             (string) $order->status . ' '

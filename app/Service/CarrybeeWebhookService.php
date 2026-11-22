@@ -531,6 +531,16 @@ class CarrybeeWebhookService
         ], $previousPaymentStatus);
         $webhookEvent->disbursed_amount = (float) ($result['courier_net_payout'] ?? 0.00);
 
+        // Match the payouts with CarryBee's final invoice right away (the daily carrybee:reconcile catches misses).
+        // Not in unit tests: it calls the CarryBee API.
+        if ($invoiceId !== '' && !app()->runningUnitTests()) {
+            try {
+                app(CarrybeeReconcileService::class)->syncPaidInvoice($order, $invoiceId);
+            } catch (\Throwable $e) {
+                Log::warning('CarryBee reconcile after paid webhook failed', ['order_id' => $order->id, 'invoice_id' => $invoiceId, 'error' => $e->getMessage()]);
+            }
+        }
+
         $this->notificationService->createAdminNotifications([
             'title'      => 'CarryBee পেমেন্ট পরিশোধ (Order Paid)',
             'subtitle'   => "CarryBee {$invoiceDisplay} দ্বারা অর্ডার #{$order->order_number} এর টাকা {$disbursedText} জমা হয়েছে।",
