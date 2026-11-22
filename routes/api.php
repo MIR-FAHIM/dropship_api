@@ -89,6 +89,7 @@ Route::prefix('admin/marketers')->name('admin.marketers.')->middleware('admin:ac
     // Partner Portal: commission lines, rates and payouts
     Route::get('/commissions', [\App\Http\Controllers\MarketerCommissionController::class, 'adminSummary'])->name('commissions.summary');
     Route::get('/commission-payouts', [\App\Http\Controllers\MarketerCommissionController::class, 'adminPayouts'])->name('commissions.payouts');
+    Route::get('/commission-payouts/{invoiceId}', [\App\Http\Controllers\MarketerCommissionController::class, 'adminPayoutDetails'])->whereNumber('invoiceId')->name('commissions.payout');
     Route::post('/commission-payouts/{invoiceId}/pay', [\App\Http\Controllers\MarketerCommissionController::class, 'pay'])->whereNumber('invoiceId')->name('commissions.pay');
     Route::post('/commission-payouts/{invoiceId}/cancel', [\App\Http\Controllers\MarketerCommissionController::class, 'cancel'])->whereNumber('invoiceId')->name('commissions.cancel');
     Route::get('/{id}/commissions', [\App\Http\Controllers\MarketerCommissionController::class, 'adminCommissions'])->whereNumber('id')->name('commissions.index');
@@ -108,6 +109,11 @@ Route::prefix('marketer')->name('marketer.panel.')->group(function () {
     Route::get('/overview', [\App\Http\Controllers\MarketerCommissionController::class, 'overview'])->name('overview');
     Route::get('/commissions', [\App\Http\Controllers\MarketerCommissionController::class, 'myCommissions'])->name('commissions');
     Route::get('/commission-payouts', [\App\Http\Controllers\MarketerCommissionController::class, 'myPayouts'])->name('commission-payouts');
+    Route::get('/commission-payouts/{invoiceId}', [\App\Http\Controllers\MarketerCommissionController::class, 'myPayoutDetails'])->whereNumber('invoiceId')->name('commission-payout');
+    // F2: where the marketer wants to be paid
+    Route::get('/payment-accounts', [\App\Http\Controllers\MarketerPaymentAccountController::class, 'index'])->name('payment-accounts');
+    Route::post('/payment-accounts', [\App\Http\Controllers\MarketerPaymentAccountController::class, 'store'])->middleware('throttle:20,1')->name('payment-accounts.store');
+    Route::delete('/payment-accounts/{id}', [\App\Http\Controllers\MarketerPaymentAccountController::class, 'destroy'])->whereNumber('id')->name('payment-accounts.destroy');
 });
 
 Route::prefix('marketer-client')->group(function () {

@@ -129,6 +129,8 @@ class MarketerCommissionController extends Controller
                 'commission_rate' => $this->commissions->rateFor($u),
                 'custom_rate' => $u->marketer_commission_rate !== null,
                 'active_clients' => (int) ($clientCounts[$u->id] ?? 0),
+                // Where they want to be paid (marketer panel → Earnings → payment accounts).
+                'payment_accounts' => app(MarketerPaymentAccountController::class)->accountsOf($u->id),
             ] + ($totals[$u->id] ?? $empty));
 
         return $this->ok('Marketer commissions', [
@@ -140,6 +142,25 @@ class MarketerCommissionController extends Controller
                 'paid' => round($marketers->sum('paid'), 2),
             ],
         ]);
+    }
+
+    /** GET /admin/marketers/commission-payouts/{invoiceId} — the payout invoice with its lines. */
+    public function adminPayoutDetails(int $invoiceId): JsonResponse
+    {
+        $invoice = SettlementInvoice::where('type', SettlementInvoice::TYPE_MARKETER_COMMISSION)->find($invoiceId);
+
+        return $invoice ? $this->ok('Commission payout', $this->payoutDocument($invoice))
+            : response()->json(['status' => 'failed', 'message' => 'Commission payout not found', 'errors' => null], 404);
+    }
+
+    /** GET /marketer/commission-payouts/{invoiceId} — own payouts only. */
+    public function myPayoutDetails(Request $request, int $invoiceId): JsonResponse
+    {
+        $invoice = SettlementInvoice::where('type', SettlementInvoice::TYPE_MARKETER_COMMISSION)
+            ->where('marketer_id', $request->user()->id)->find($invoiceId);
+
+        return $invoice ? $this->ok('Commission payout', $this->payoutDocument($invoice))
+            : response()->json(['status' => 'failed', 'message' => 'Commission payout not found', 'errors' => null], 404);
     }
 
     /** GET /admin/marketers/{id}/commissions — lines of one marketer (also used for the sheet download). */
@@ -211,6 +232,49 @@ class MarketerCommissionController extends Controller
     }
 
     /* ======================= helpers ======================= */
+
+    /**
+     * Invoice + marketer + one row per commission line. Lines come from the ids saved on the
+     * invoice, so a cancelled payout still shows what it held.
+     */
+    private function payoutDocument(SettlementInvoice $invoice): array
+    {
+        $invoice->loadMissing(['marketer:id,name,business_name,phone,email', 'creator:id,name', 'payer:id,name']);
+        $raw = $invoice->getAttributes()['orders_breakdown'] ?? '[]';
+        $snapshot = is_string($raw) ? (json_decode($raw, true) ?: []) : (array) $raw;
+        $lines = MarketerCommission::with(['order:id,order_number,created_at', 'client:id,dropshipper_user_id', 'client.dropshipper:id,name,business_name'])
+            ->whereIn('id', array_column($snapshot, 'commission_id'))->orderBy('id')->get()
+            ->map(fn (MarketerCommission $c) => [
+                'id' => $c->id,
+                'type' => $c->type,
+                'order_number' => $c->order?->order_number ?? "#{$c->order_id}",
+                'order_date' => $c->order?->created_at,
+                'client' => $c->client?->dropshipper?->business_name ?: $c->client?->dropshipper?->name,
+                'product_markup' => $c->product_markup,
+                'delivery_margin' => $c->delivery_margin,
+                'base_amount' => $c->base_amount,
+                'rate' => $c->rate,
+                'amount' => $c->amount,
+                'earned_at' => $c->earned_at,
+            ])->values();
+
+        return [
+            'invoice' => collect($invoice->only([
+                'id', 'invoice_number', 'status', 'payment_method', 'trx_id', 'receiver_account', 'note',
+                'total_amount_owed', 'total_platform_net_profit', 'orders_count', 'paid_at', 'created_at',
+                'rejected_at', 'rejection_reason',
+            ]))->all(),
+            'marketer' => $invoice->marketer?->only(['id', 'name', 'business_name', 'phone', 'email']),
+            'created_by' => $invoice->creator?->name,
+            'paid_by' => $invoice->payer?->name,
+            'lines' => $lines,
+            'totals' => [
+                'commission' => round((float) $lines->where('type', MarketerCommission::TYPE_COMMISSION)->sum('amount'), 2),
+                'taken_back' => round((float) $lines->where('type', MarketerCommission::TYPE_CLAWBACK)->sum('amount'), 2),
+                'payout' => round((float) $invoice->total_amount_owed, 2),
+            ],
+        ];
+    }
 
     private function commissionQuery(Request $request, int $marketerId)
     {

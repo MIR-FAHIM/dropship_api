@@ -231,4 +231,64 @@ class MarketerCommissionTest extends TestCase
         $this->patchJson("/api/admin/marketers/{$this->marketer->id}/commission-rate", ['rate' => 90], $this->headers($this->marketer))->assertForbidden();
         $this->postJson("/api/admin/marketers/{$this->marketer->id}/commission-payouts", ['payment_method' => 'cash'], $this->headers($this->client))->assertForbidden();
     }
+
+    /* ---------------- F2: commission payouts ---------------- */
+
+    public function test_admin_can_pay_only_selected_lines(): void
+    {
+        $a = $this->order();
+        $b = $this->order();
+        $this->deliver($a);
+        $this->deliver($b);
+
+        $invoice = $this->postJson("/api/admin/marketers/{$this->marketer->id}/commission-payouts",
+            ['commission_ids' => [$this->commission($a)->id], 'payment_method' => 'cash'], $this->headers($this->admin))
+            ->assertCreated()->json('data');
+        $this->assertEquals(24, $invoice['total_amount_owed']);
+        $this->assertSame(MarketerCommission::STATUS_PAID, $this->commission($a)->status);
+        $this->assertSame(MarketerCommission::STATUS_EARNED, $this->commission($b)->status, 'unselected line stays payable');
+        $this->assertNull($this->commission($b)->payout_invoice_id);
+    }
+
+    public function test_payout_invoice_shows_its_lines_to_admin_and_its_own_marketer_only(): void
+    {
+        $a = $this->order();
+        $this->deliver($a);
+        $id = $this->postJson("/api/admin/marketers/{$this->marketer->id}/commission-payouts",
+            ['payment_method' => 'bkash', 'trx_id' => 'BK1', 'receiver_account' => '01711000000'], $this->headers($this->admin))->json('data.id');
+
+        $doc = $this->getJson("/api/admin/marketers/commission-payouts/{$id}", $this->headers($this->admin))->assertOk()->json('data');
+        $this->assertSame('paid', $doc['invoice']['status']);
+        $this->assertSame('BK1', $doc['invoice']['trx_id']);
+        $this->assertSame($a->order_number, $doc['lines'][0]['order_number']);
+        $this->assertSame('Ariful', $doc['lines'][0]['client']);
+        $this->assertEquals(100, $doc['lines'][0]['product_markup']);
+        $this->assertEquals(24, $doc['totals']['payout']);
+
+        $this->getJson("/api/marketer/commission-payouts/{$id}", $this->headers($this->marketer))->assertOk()->assertJsonPath('data.invoice.id', $id);
+        $this->getJson("/api/marketer/commission-payouts/{$id}", $this->headers($this->otherMarketer))->assertNotFound();
+        $this->getJson("/api/admin/marketers/commission-payouts/{$id}", $this->headers($this->marketer))->assertForbidden();
+    }
+
+    public function test_marketer_manages_own_payment_accounts_and_admin_sees_them(): void
+    {
+        $h = $this->headers($this->marketer);
+        $this->postJson('/api/marketer/payment-accounts', ['method' => 'bkash', 'account_no' => '12345'], $h)->assertUnprocessable();
+        $acc = $this->postJson('/api/marketer/payment-accounts', ['method' => 'bkash', 'account_no' => '+880 1711-000000', 'acc_name' => 'Tanvir'], $h)
+            ->assertCreated()->assertJsonPath('data.account_no', '01711000000')->assertJsonPath('data.method_label', 'bKash')->json('data');
+        $this->postJson('/api/marketer/payment-accounts', ['method' => 'bkash', 'account_no' => '01711000000'], $h)->assertUnprocessable(); // duplicate
+        $this->postJson('/api/marketer/payment-accounts', ['method' => 'bank_transfer', 'account_no' => '1234567890'], $h)->assertUnprocessable(); // bank name needed
+        $this->postJson('/api/marketer/payment-accounts', ['method' => 'bank_transfer', 'account_no' => '1234567890', 'bank_name' => 'City Bank'], $h)->assertCreated();
+
+        $this->assertCount(2, $this->getJson('/api/marketer/payment-accounts', $h)->assertOk()->json('data'));
+        $this->assertCount(0, $this->getJson('/api/marketer/payment-accounts', $this->headers($this->otherMarketer))->json('data'));
+        $this->deleteJson("/api/marketer/payment-accounts/{$acc['id']}", [], $this->headers($this->otherMarketer))->assertNotFound();
+
+        $summary = collect($this->getJson('/api/admin/marketers/commissions', $this->headers($this->admin))->json('data.marketers'))->keyBy('id');
+        $this->assertCount(2, $summary[$this->marketer->id]['payment_accounts']);
+
+        $this->deleteJson("/api/marketer/payment-accounts/{$acc['id']}", [], $h)->assertOk();
+        $this->assertCount(1, $this->getJson('/api/marketer/payment-accounts', $h)->json('data'));
+        $this->getJson('/api/marketer/payment-accounts', $this->headers($this->client))->assertForbidden();
+    }
 }
