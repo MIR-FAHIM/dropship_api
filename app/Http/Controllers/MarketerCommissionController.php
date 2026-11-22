@@ -94,6 +94,8 @@ class MarketerCommissionController extends Controller
         return $this->ok('Marketer overview', [
             'marketer' => ['id' => $marketer->id, 'name' => $marketer->name, 'business_name' => $marketer->business_name],
             'commission_rate' => $rate,
+            // F8 level badge: pro = "Upper Level (Pro)", mid = "Mid Level", null = not set.
+            'level' => \App\Models\MarketerProfile::where('user_id', $marketer->id)->value('level'),
             // Public code dropshippers can enter to connect (created on first visit).
             'ref_code' => app(\App\Service\MarketerReferralService::class)->codeFor($marketer),
             'period' => $period,

@@ -42,15 +42,32 @@ class MarketerController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        return $this->success('Marketers fetched', User::where('user_type', 'marketer')
-            ->select(['id', 'name', 'business_name', 'email', 'banned', 'created_at'])
-            ->latest('id')->paginate($this->perPage($request)));
+        // F8: ?status=pending|approved|rejected; each row carries its application profile and level.
+        $status = (string) $request->input('status', 'all');
+        $q = User::where('user_type', 'marketer')
+            ->select(['id', 'name', 'business_name', 'email', 'phone', 'banned', 'marketer_commission_rate', 'created_at'])
+            ->with('marketerProfile');
+        if ($status === 'approved') {
+            $q->where(fn ($w) => $w->doesntHave('marketerProfile')->orWhereHas('marketerProfile', fn ($p) => $p->where('application_status', 'approved')));
+        } elseif (in_array($status, ['pending', 'rejected'], true)) {
+            $q->whereHas('marketerProfile', fn ($p) => $p->where('application_status', $status));
+        }
+        $page = $q->latest('id')->paginate($this->perPage($request));
+        $commissions = app(\App\Service\MarketerCommissionService::class);
+        $page->getCollection()->each(fn (User $u) => $u->setAttribute('commission_rate', $commissions->rateFor($u)));
+
+        return $this->success('Marketers fetched', $page->toArray() + [
+            'pending_count' => \App\Models\MarketerProfile::where('application_status', 'pending')->count(),
+        ]);
     }
 
     public function setSuspended(Request $request, int $id): JsonResponse
     {
         $data = $request->validate(['suspended' => ['required', 'boolean']]);
         $marketer = User::where('user_type', 'marketer')->findOrFail($id);
+        // F8: an application must be approved (not just un-suspended) to open the account.
+        $status = \App\Models\MarketerProfile::where('user_id', $marketer->id)->value('application_status');
+        abort_if(!$data['suspended'] && in_array($status, ['pending', 'rejected'], true), 422, 'Approve the partner application first.');
         $marketer->update(['banned' => (int) $data['suspended']]);
 
         return $this->success('Marketer status updated', ['id' => $marketer->id, 'suspended' => (bool) $marketer->banned]);

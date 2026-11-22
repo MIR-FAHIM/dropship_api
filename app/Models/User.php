@@ -143,6 +143,12 @@ class User extends Model
         return $this->hasMany(Order::class);
     }
 
+    /** Partner Portal F8: marketer application / profile (null for admin-created marketers). */
+    public function marketerProfile()
+    {
+        return $this->hasOne(MarketerProfile::class, 'user_id');
+    }
+
     public function bankAccounts()
     {
         return $this->hasMany(UserBankAccount::class, 'user_id');

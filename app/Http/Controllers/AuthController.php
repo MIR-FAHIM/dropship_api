@@ -183,6 +183,19 @@ class AuthController extends Controller
                 return $this->failed('Invalid credentials', null, 401);
             }
 
+            // Partner Portal F8: a partner application that isn't approved yet gets a clear answer.
+            if ($user->user_type === 'marketer' && $user->banned == 1) {
+                $application = \App\Models\MarketerProfile::where('user_id', $user->id)->first(['application_status', 'rejection_reason']);
+                if ($application?->application_status === \App\Models\MarketerProfile::STATUS_PENDING) {
+                    $this->storeLoginError($request, 'Partner application pending', $user);
+                    return $this->failed('Your partner application is under review. We will email you when it is approved.', ['application_status' => 'pending'], 403);
+                }
+                if ($application?->application_status === \App\Models\MarketerProfile::STATUS_REJECTED) {
+                    $this->storeLoginError($request, 'Partner application rejected', $user);
+                    return $this->failed('Your partner application was not approved.' . ($application->rejection_reason ? " Reason: {$application->rejection_reason}" : ''), ['application_status' => 'rejected'], 403);
+                }
+            }
+
             // Check if user is banned (not activated)
             if (isset($user->banned) && $user->banned == 1) {
                 $this->storeLoginError($request, 'Account inactive or banned', $user);

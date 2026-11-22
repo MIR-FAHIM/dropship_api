@@ -64,6 +64,8 @@ use App\Models\TaskType;
 
 // Authentication endpoints
 Route::post('/auth/login', [AuthController::class, 'login'])->withoutMiddleware('token');
+// Partner Portal F8: public partner (marketer) application — account stays blocked until an admin approves.
+Route::post('/partner/apply', [\App\Http\Controllers\MarketerApplicationController::class, 'apply'])->withoutMiddleware('token')->middleware('throttle:5,1');
 Route::post('/auth/login-as-vendor', [AuthController::class, 'loginAsVendor'])->middleware('admin:accounts');
 Route::post('/auth/login-as-dropshipper', [AuthController::class, 'loginAsDropshipper']);
 Route::post('/dropshipper-register', [UserController::class, 'dropshipperRegister'])->withoutMiddleware('token');
@@ -98,6 +100,10 @@ Route::prefix('admin/marketers')->name('admin.marketers.')->middleware('admin:ac
     Route::get('/', [MarketerController::class, 'index'])->name('index');
     Route::post('/', [MarketerController::class, 'create'])->name('create');
     Route::patch('/{id}/suspension', [MarketerController::class, 'setSuspended'])->whereNumber('id')->name('suspension');
+    // F8: partner applications and levels
+    Route::post('/{id}/approve', [\App\Http\Controllers\MarketerApplicationController::class, 'approve'])->whereNumber('id')->name('approve');
+    Route::post('/{id}/reject', [\App\Http\Controllers\MarketerApplicationController::class, 'reject'])->whereNumber('id')->name('reject');
+    Route::patch('/{id}/level', [\App\Http\Controllers\MarketerApplicationController::class, 'setLevel'])->whereNumber('id')->name('level');
     Route::get('/{id}/clients', [MarketerController::class, 'adminClients'])->whereNumber('id')->name('clients.index');
     Route::patch('/clients/{id}/end', [MarketerController::class, 'endClient'])->whereNumber('id')->name('clients.end');
     // Partner Portal: commission lines, rates and payouts
@@ -124,6 +130,9 @@ Route::prefix('marketer')->name('marketer.panel.')->group(function () {
     Route::get('/commissions', [\App\Http\Controllers\MarketerCommissionController::class, 'myCommissions'])->name('commissions');
     Route::get('/commission-payouts', [\App\Http\Controllers\MarketerCommissionController::class, 'myPayouts'])->name('commission-payouts');
     Route::get('/commission-payouts/{invoiceId}', [\App\Http\Controllers\MarketerCommissionController::class, 'myPayoutDetails'])->whereNumber('invoiceId')->name('commission-payout');
+    // F8: own partner profile (photo, logo, links, ad experience → level)
+    Route::get('/profile', [\App\Http\Controllers\MarketerApplicationController::class, 'show'])->name('profile');
+    Route::post('/profile', [\App\Http\Controllers\MarketerApplicationController::class, 'update'])->name('profile.update');
     // F6: winning products with creative angles
     Route::get('/winning-products', [\App\Http\Controllers\WinningProductController::class, 'marketerIndex'])->name('winning-products');
     // F5: pitch calculator data (maths runs in the browser)

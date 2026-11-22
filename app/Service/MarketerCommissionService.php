@@ -30,11 +30,17 @@ class MarketerCommissionService
     {
     }
 
+    /** Admin's custom rate → the partner level's rate (Pro 20 / Mid 15) → the default. */
     public function rateFor(?User $marketer): float
     {
         $rate = $marketer?->marketer_commission_rate;
+        if ($rate !== null) {
+            return round((float) $rate, 2);
+        }
+        $level = $marketer ? \App\Models\MarketerProfile::where('user_id', $marketer->id)->value('level') : null;
+        $levelRate = $level ? config("marketer.level_rates.{$level}") : null;
 
-        return round((float) ($rate !== null ? $rate : config('marketer.commission_rate', 20)), 2);
+        return round((float) ($levelRate ?? config('marketer.commission_rate', 20)), 2);
     }
 
     /* ---------------- earning / reversal (called from order accounting) ---------------- */
