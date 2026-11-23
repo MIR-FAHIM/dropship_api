@@ -135,6 +135,8 @@ Route::prefix('marketer')->name('marketer.panel.')->group(function () {
     Route::post('/profile', [\App\Http\Controllers\MarketerApplicationController::class, 'update'])->name('profile.update');
     // F6: winning products with creative angles
     Route::get('/winning-products', [\App\Http\Controllers\WinningProductController::class, 'marketerIndex'])->name('winning-products');
+    // F7: tour milestones (progress only)
+    Route::get('/tours', [\App\Http\Controllers\MarketerTourController::class, 'index'])->name('tours');
     // F5: pitch calculator data (maths runs in the browser)
     Route::get('/pitch/products', [\App\Http\Controllers\MarketerPitchController::class, 'products'])->name('pitch.products');
     Route::post('/pitch/products/{id}/star', [\App\Http\Controllers\MarketerPitchController::class, 'star'])->whereNumber('id')->name('pitch.star');
