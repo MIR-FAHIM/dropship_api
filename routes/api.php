@@ -480,6 +480,8 @@ Route::prefix('product-attributes')->group(function () {
 Route::prefix('reports')->group(function () {
     Route::get('/dashboard', [ReportController::class, 'dashboard']);
     Route::get('/cashflow-dashboard', [ReportController::class, 'cashflowDashboard']);
+    // Who owes whom (CarryBee / vendor / admin / dropshipper) and the admin's final income
+    Route::get('/money-board', [\App\Http\Controllers\AdminMoneyBoardController::class, 'index'])->middleware('admin:orders');
 });
 
 Route::prefix('ecommerce-website-leads')->group(function () {
