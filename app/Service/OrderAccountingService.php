@@ -249,7 +249,7 @@ class OrderAccountingService
                         $direction = OrderSettlement::DIRECTION_PAYEE_OWES_PLATFORM;
                         $netPayable = round($courierNetPayout - $grossEntitlement, 2);
                         $adminNote = "Vendor-owned delivery: received {$courierNetPayout} BDT net from courier, "
-                            . "product cost {$grossEntitlement} BDT. Vendor owes platform the {$netPayable} BDT surplus.";
+                            . "product cost {$grossEntitlement} BDT. Vendor will give admin the {$netPayable} BDT surplus.";
                     } else {
                         $netPayable = round($grossEntitlement - $deductedByCourier, 2);
                         $adminNote = "Vendor-owned delivery: {$deductedByCourier} BDT paid by courier. "
@@ -1908,7 +1908,7 @@ class OrderAccountingService
 
                 $adminNote = !empty($adjusted['admin_note'])
                     ? $adjusted['admin_note']
-                    : "Supplier settlement adjusted by admin #{$adminUserId}. Supplier owes platform: ৳{$supplierOwes}";
+                    : "Supplier settlement adjusted by admin #{$adminUserId}. Vendor will give admin: ৳{$supplierOwes}";
 
                 $supplierSettlement->update([
                     'gross_entitlement' => $vendorPrice,
@@ -2021,7 +2021,7 @@ class OrderAccountingService
                         'settled_at' => $isDirectlyPaid ? now() : null,
                         'admin_note' => $isDirectlyPaid
                             ? "Settled via Vendor Invoice {$invoiceNumber}. Trx ID: {$trxId}"
-                            : "Invoice {$invoiceNumber} issued (Pending Payment). Owed: ৳{$b['supplier']['supplier_owes_platform']}",
+                            : "Invoice {$invoiceNumber} issued (Pending Payment). Vendor will give admin: ৳{$b['supplier']['supplier_owes_platform']}",
                     ]
                 );
 
@@ -2081,7 +2081,7 @@ class OrderAccountingService
                     'trx_type' => 'credit',
                     'source' => $paymentMethod,
                     'status' => 'completed',
-                    'note' => "Collected owed settlement of ৳{$totalAmountOwed} from Vendor #{$vendorId} via Invoice {$invoiceNumber} (Trx: {$trxId})",
+                    'note' => "Collected settlement of ৳{$totalAmountOwed} from Vendor #{$vendorId} via Invoice {$invoiceNumber} (Trx: {$trxId})",
                 ]);
             }
 
@@ -2157,7 +2157,7 @@ class OrderAccountingService
                     'trx_type' => 'credit',
                     'source' => $paymentMethod,
                     'status' => 'completed',
-                    'note' => "Collected owed settlement of ৳{$paidAmount} from Vendor #{$invoice->vendor_id} via Invoice {$invoice->invoice_number} (Trx: {$trxId})",
+                    'note' => "Collected settlement of ৳{$paidAmount} from Vendor #{$invoice->vendor_id} via Invoice {$invoice->invoice_number} (Trx: {$trxId})",
                 ]);
             }
 
