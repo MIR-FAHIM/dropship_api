@@ -99,6 +99,18 @@ class CarrybeeReconcileService
         }
 
         $keys = array_column($accounts, 'key');
+
+        // CarryBee paid these parcels but we never got its "paid" message (e.g. order #199, Nov 2026):
+        // replay it so the order goes through the normal paid journey before reconciling.
+        $recovered = [];
+        CarrybeeInvoiceLine::whereIn('account_key', $keys)->whereNotNull('order_id')
+            ->where('line_type', CarrybeeInvoiceLine::TYPE_DELIVERY)->get()
+            ->each(function (CarrybeeInvoiceLine $line) use (&$recovered) {
+                if ($number = $this->recoverMissedPayment($line)) {
+                    $recovered[] = $number;
+                }
+            });
+
         $orderIds = CarrybeeInvoiceLine::whereIn('account_key', $keys)->whereNotNull('order_id')->distinct()->pluck('order_id');
         $results = Order::whereIn('id', $orderIds)->get()->map(fn (Order $o) => $this->reconcileOrder($o))->values()->all();
 
@@ -108,8 +120,44 @@ class CarrybeeReconcileService
             'error' => $errors ? implode('; ', $errors) : null,
             'invoices' => $invoiceCount,
             'lines' => $lines,
+            'recovered_paid' => $recovered,
             'orders' => $results,
         ];
+    }
+
+    /** Statuses where CarryBee may still owe us a "paid" message: Delivered, Partially Delivered. */
+    private const AWAITING_PAYMENT_STATUSES = [6, 13];
+
+    /**
+     * A CarryBee invoice line shows a delivered parcel that CarryBee already paid out, but the order
+     * never recorded that payment (the "paid" webhook was missed). Replays CarryBee's order.paid event
+     * through the trusted webhook handler, so status, settlements and deposits follow the normal path.
+     * Returns the order number when it recovered one.
+     */
+    public function recoverMissedPayment(CarrybeeInvoiceLine $line): ?string
+    {
+        if (!in_array(strtolower((string) $line->receivable_status), ['paid', 'received'], true)
+            || !str_contains(strtolower((string) $line->delivery_status), 'deliver')) {
+            return null;
+        }
+        $order = Order::find($line->order_id);
+        if (!$order || $order->carrybee_paid_at || !in_array((int) $order->status, self::AWAITING_PAYMENT_STATUSES, true)) {
+            return null;
+        }
+
+        $result = app(CarrybeeWebhookService::class)->processTrusted([
+            'event' => 'order.paid',
+            'consignment_id' => $line->consignment_id,
+            'merchant_order_id' => $line->merchant_order_id ?: $order->order_number,
+            'invoice_id' => $line->invoice_id,
+            'collected_amount' => (float) $line->collected,
+            'delivery_fee' => (float) $line->delivery_fee,
+            'cod_fee' => (float) $line->cod_fee,
+            'timestamptz' => optional($line->invoiced_date)->format('Y-m-d') . 'T00:00:00+06:00',
+            'source' => 'carrybee-invoice-sync',
+        ], \App\Models\OrderStatusHistory::SOURCE_SYSTEM);
+
+        return ($result['ok'] ?? false) && $order->fresh()->carrybee_paid_at ? $order->order_number : null;
     }
 
     /** Fetch one invoice's parcel lines from CarryBee and store them. Returns the number of lines. */
