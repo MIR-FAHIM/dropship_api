@@ -59,16 +59,35 @@ class CarrybeeInvoiceReportService
         }
 
         Vendor::where('has_own_delivery_account', true)->orderBy('shop_name')->get()->each(function (Vendor $v) use (&$accounts) {
-            $cred = VendorCarryBeeCredintial::where('is_active', true)
-                ->whereIn('vendor_id', array_unique(array_filter([$v->user_id, $v->id])))->latest()->first();
+            $rows = VendorCarryBeeCredintial::whereIn('vendor_id', array_unique(array_filter([$v->user_id, $v->id])))->latest()->get();
+            $cred = $rows->firstWhere('is_active', true);
+            $name = $v->shop_name ?: "Vendor #{$v->id}";
             $accounts[] = [
-                'key' => "vendor-{$v->id}", 'type' => 'vendor', 'vendor_id' => $v->id,
-                'label' => $v->shop_name ?: "Vendor #{$v->id}",
+                'key' => "vendor-{$v->id}", 'type' => 'vendor', 'vendor_id' => $v->id, 'old' => false,
+                'label' => $name,
                 'creds' => $cred ? [$cred->client_id, $cred->client_secret, $cred->client_context] : null,
             ];
+            // Old accounts: a vendor that moved to a new CarryBee account keeps the old one saved as
+            // inactive. It is never used for new parcels, only to read its past invoices.
+            $rows->where('is_active', false)->each(function ($old) use (&$accounts, $v, $name) {
+                if (!$old->client_id || !$old->client_secret || !$old->client_context) {
+                    return;
+                }
+                $accounts[] = [
+                    'key' => "vendor-{$v->id}-old-{$old->id}", 'type' => 'vendor', 'vendor_id' => $v->id, 'old' => true,
+                    'label' => "{$name} — old CarryBee account #{$old->id}" . ($old->note ? " ({$old->note})" : ''),
+                    'creds' => [$old->client_id, $old->client_secret, $old->client_context],
+                ];
+            });
         });
 
         return $accounts;
+    }
+
+    /** All CarryBee accounts of one vendor (current first, then old ones). */
+    public function vendorAccounts(int $vendorId): array
+    {
+        return array_values(array_filter($this->accounts(), fn ($a) => $a['type'] === 'vendor' && (int) $a['vendor_id'] === $vendorId));
     }
 
     private function group(array $account, array $filters): array

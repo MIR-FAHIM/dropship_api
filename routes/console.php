@@ -24,7 +24,8 @@ Artisan::command('carrybee:catch-up {--limit= : Max consignments to check} {--co
 })->purpose('Ask CarryBee for the current state of quiet consignments and apply it');
 
 Artisan::command('carrybee:reconcile {--account= : platform or vendor-{id}; all accounts when empty} {--refresh : Fetch stored paid invoices again}', function (\App\Service\CarrybeeReconcileService $reconcile) {
-    $keys = $this->option('account') ? [$this->option('account')] : collect(app(\App\Service\CarrybeeInvoiceReportService::class)->accounts())->pluck('key')->all();
+    // Old CarryBee accounts are synced together with their vendor's main account.
+    $keys = $this->option('account') ? [$this->option('account')] : collect(app(\App\Service\CarrybeeInvoiceReportService::class)->accounts())->filter(fn ($a) => empty($a['old']))->pluck('key')->all();
     foreach ($keys as $key) {
         $r = $reconcile->syncAccount($key, (bool) $this->option('refresh'));
         $changed = collect($r['orders'])->filter(fn ($o) => !empty($o['changes']))->count();

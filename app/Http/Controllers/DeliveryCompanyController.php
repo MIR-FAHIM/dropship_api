@@ -522,6 +522,22 @@ class DeliveryCompanyController extends Controller
 
             $result = $service->getInvoiceDetails($invoiceId);
 
+            // Not on the current account: the vendor may have moved CarryBee accounts. Try its old
+            // (inactive) accounts, which keep the history.
+            if ($result['status'] >= 400 && is_numeric($vendorId) && (int) $vendorId > 0) {
+                $report = app(\App\Service\CarrybeeInvoiceReportService::class);
+                foreach ($report->vendorAccounts((int) $vendorId) as $acc) {
+                    if (empty($acc['old']) || !($old = $report->serviceFor($acc))) {
+                        continue;
+                    }
+                    $try = $old->getInvoiceDetails($invoiceId);
+                    if ($try['status'] < 400) {
+                        $result = $try;
+                        break;
+                    }
+                }
+            }
+
             if ($result['status'] >= 400) {
                 return $this->carrybeeInvoiceError('CarryBee invoice details failed', $result, ['vendor_id' => $vendorId, 'invoice_id' => $invoiceId]);
             }

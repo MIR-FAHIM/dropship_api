@@ -65,36 +65,48 @@ class CarrybeeReconcileService
     public function syncAccount(string $key, bool $refresh = false): array
     {
         $account = $this->account($key);
-        $list = $this->invoices->invoicesFor($account, $refresh);
-        if ($list['error']) {
-            return ['account' => $key, 'error' => $list['error'], 'invoices' => 0, 'lines' => 0, 'orders' => []];
-        }
+        // A vendor's main key syncs all its CarryBee accounts: the current one and any old ones
+        // (a vendor that moved accounts keeps its history on the old account).
+        $accounts = $account['type'] === 'vendor' && empty($account['old'])
+            ? $this->invoices->vendorAccounts((int) $account['vendor_id'])
+            : [$account];
 
+        $invoiceCount = 0;
         $lines = 0;
         $errors = [];
-        foreach ($list['invoices'] as $row) {
-            $invoiceId = (string) ($row['invoice_id'] ?? '');
-            if ($invoiceId === '') {
+        foreach ($accounts as $acc) {
+            $list = $this->invoices->invoicesFor($acc, $refresh);
+            if ($list['error']) {
+                $errors[] = (count($accounts) > 1 ? "{$acc['label']}: " : '') . $list['error'];
                 continue;
             }
-            $stored = CarrybeeInvoiceLine::where('invoice_id', $invoiceId)->exists();
-            if ($stored && !$refresh && strtolower((string) ($row['receivable_status'] ?? '')) === 'paid') {
-                continue;
-            }
-            try {
-                $lines += $this->syncInvoice($account, $invoiceId, $refresh);
-            } catch (\Throwable $e) {
-                $errors[] = "{$invoiceId}: {$e->getMessage()}";
+            $invoiceCount += count($list['invoices']);
+            foreach ($list['invoices'] as $row) {
+                $invoiceId = (string) ($row['invoice_id'] ?? '');
+                if ($invoiceId === '') {
+                    continue;
+                }
+                $stored = CarrybeeInvoiceLine::where('invoice_id', $invoiceId)->exists();
+                if ($stored && !$refresh && strtolower((string) ($row['receivable_status'] ?? '')) === 'paid') {
+                    continue;
+                }
+                try {
+                    $lines += $this->syncInvoice($acc, $invoiceId, $refresh);
+                } catch (\Throwable $e) {
+                    $errors[] = "{$invoiceId}: {$e->getMessage()}";
+                }
             }
         }
 
-        $orderIds = CarrybeeInvoiceLine::where('account_key', $key)->whereNotNull('order_id')->distinct()->pluck('order_id');
+        $keys = array_column($accounts, 'key');
+        $orderIds = CarrybeeInvoiceLine::whereIn('account_key', $keys)->whereNotNull('order_id')->distinct()->pluck('order_id');
         $results = Order::whereIn('id', $orderIds)->get()->map(fn (Order $o) => $this->reconcileOrder($o))->values()->all();
 
         return [
             'account' => $key,
+            'accounts' => array_map(fn ($a) => ['key' => $a['key'], 'label' => $a['label'], 'old' => !empty($a['old'])], $accounts),
             'error' => $errors ? implode('; ', $errors) : null,
-            'invoices' => count($list['invoices']),
+            'invoices' => $invoiceCount,
             'lines' => $lines,
             'orders' => $results,
         ];
@@ -380,7 +392,11 @@ class CarrybeeReconcileService
     public function report(string $key): array
     {
         $account = $this->account($key);
-        $lines = CarrybeeInvoiceLine::where('account_key', $key)->get();
+        // A vendor's report covers all its CarryBee accounts (current + old).
+        $accounts = $account['type'] === 'vendor' && empty($account['old'])
+            ? $this->invoices->vendorAccounts((int) $account['vendor_id'])
+            : [$account];
+        $lines = CarrybeeInvoiceLine::whereIn('account_key', array_column($accounts, 'key'))->get();
         $orderIds = $lines->pluck('order_id')->filter()->unique()->values();
         $orders = Order::with(['orderStatus'])->whereIn('id', $orderIds)->orderByDesc('id')->get();
         $penalties = OrderReturnPenalty::whereIn('order_id', $orderIds)->get()->keyBy('order_id');
@@ -428,6 +444,7 @@ class CarrybeeReconcileService
 
         return [
             'account' => ['key' => $account['key'], 'label' => $account['label'], 'type' => $account['type'], 'vendor_id' => $account['vendor_id']],
+            'accounts' => array_map(fn ($a) => ['key' => $a['key'], 'label' => $a['label'], 'old' => !empty($a['old'])], $accounts),
             'synced_at' => optional($lines->max('updated_at'))->toIso8601String(),
             'totals' => [
                 'orders' => $rows->count(),
@@ -514,6 +531,7 @@ class CarrybeeReconcileService
     /** All accounts, for the scheduled command. */
     public function syncAll(): Collection
     {
-        return collect($this->invoices->accounts())->map(fn ($a) => $this->syncAccount($a['key']));
+        // Old accounts are synced together with their vendor's main account.
+        return collect($this->invoices->accounts())->filter(fn ($a) => empty($a['old']))->map(fn ($a) => $this->syncAccount($a['key']))->values();
     }
 }
