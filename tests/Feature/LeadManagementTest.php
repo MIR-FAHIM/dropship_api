@@ -178,4 +178,22 @@ class LeadManagementTest extends TestCase
         $this->assertSame('new', $rows[$idle->id]['lead_status']);
         $this->assertNull($rows[$active->id]['lead_id']);
     }
+
+    public function test_admin_can_add_a_role_and_use_it(): void
+    {
+        $this->create(['phone' => '01733333333', 'role' => 'marketer'])->assertStatus(422); // not a role yet
+
+        $this->postJson('/api/leads/roles', ['label' => 'Facebook Marketer'], $this->h)
+            ->assertCreated()->assertJsonPath('data.value', 'facebook_marketer');
+        $this->postJson('/api/leads/roles', ['label' => 'facebook marketer'], $this->h)->assertStatus(422); // duplicate
+        $this->postJson('/api/leads/roles', ['label' => 'Supplier'], $this->h)->assertStatus(422);          // built-in
+        $this->postJson('/api/leads/roles', ['label' => '!!!'], $this->h)->assertStatus(422);
+
+        $roles = collect($this->getJson('/api/leads/roles', $this->h)->assertOk()->json('data'));
+        $this->assertSame(['dropshipper', 'supplier', 'facebook_marketer'], $roles->pluck('value')->all());
+
+        $id = $this->create(['phone' => '01733333333', 'role' => 'facebook_marketer'])->assertCreated()->json('data.lead.id');
+        $this->assertSame('facebook_marketer', Lead::find($id)->role);
+        $this->assertCount(1, $this->getJson('/api/leads?role=facebook_marketer', $this->h)->assertOk()->json('data.data'));
+    }
 }

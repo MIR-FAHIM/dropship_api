@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Lead;
 use App\Models\LeadActivity;
 use App\Models\LeadProductTag;
+use App\Models\LeadRole;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
@@ -98,7 +99,7 @@ class LeadController extends Controller
         return [
             'name' => ['nullable', 'string', 'max:150'],
             'phone' => [$req, 'string', 'max:30'],
-            'role' => ['sometimes', Rule::in(Lead::ROLES)],
+            'role' => ['sometimes', Rule::in(Lead::allRoles())],
             'status' => ['sometimes', Rule::in(Lead::STATUSES)],
             'followup_tag' => ['nullable', Rule::in(Lead::FOLLOWUP_TAGS)],
             'page_link' => ['nullable', 'string', 'max:500'],
@@ -119,7 +120,7 @@ class LeadController extends Controller
         try {
             $request->validate([
                 'status' => ['nullable', Rule::in(array_merge(Lead::STATUSES, ['all']))],
-                'role' => ['nullable', Rule::in(array_merge(Lead::ROLES, ['all']))],
+                'role' => ['nullable', Rule::in(array_merge(Lead::allRoles(), ['all']))],
                 'followup_tag' => ['nullable', Rule::in(array_merge(Lead::FOLLOWUP_TAGS, ['all']))],
                 'schedule' => ['nullable', Rule::in(['scheduled', 'today', 'all'])],
                 'source' => ['nullable', Rule::in(array_merge(Lead::SOURCES, ['all']))],
@@ -457,6 +458,39 @@ class LeadController extends Controller
             $validated = $request->validate(['name' => ['required', 'string', 'max:80', 'unique:lead_product_tags,name']]);
 
             return $this->success('Tag added.', LeadProductTag::create(['name' => trim($validated['name'])]), 201);
+        } catch (ValidationException $e) {
+            return $this->failed('Validation failed', $e->errors(), 422);
+        }
+    }
+
+    /** GET /leads/roles — built-in roles first, then the ones admins added. */
+    public function roles()
+    {
+        $builtIn = [
+            ['value' => 'dropshipper', 'label' => 'Dropshipper', 'builtin' => true],
+            ['value' => 'supplier', 'label' => 'Supplier', 'builtin' => true],
+        ];
+        $custom = LeadRole::orderBy('label')->get(['value', 'label'])
+            ->map(fn ($r) => ['value' => $r->value, 'label' => $r->label, 'builtin' => false])->all();
+
+        return $this->success('Lead roles fetched successfully', array_merge($builtIn, $custom));
+    }
+
+    /** POST /leads/roles {label} — adds a role; its stored value is made from the label. */
+    public function storeRole(Request $request)
+    {
+        try {
+            $validated = $request->validate(['label' => ['required', 'string', 'max:60']]);
+            $label = trim($validated['label']);
+            $value = substr(trim(preg_replace('/[^a-z0-9]+/', '_', strtolower($label)), '_'), 0, 20);
+            if ($value === '' || in_array($value, Lead::allRoles(), true)
+                || LeadRole::whereRaw('LOWER(label) = ?', [strtolower($label)])->exists()) {
+                throw ValidationException::withMessages(['label' => [$value === '' ? 'Use letters or numbers in the role name.' : 'This role already exists.']]);
+            }
+            $user = $request->attributes->get('api_user') ?? $request->user();
+            $role = LeadRole::create(['value' => $value, 'label' => $label, 'created_by' => $user?->id]);
+
+            return $this->success('Role added.', ['value' => $role->value, 'label' => $role->label, 'builtin' => false], 201);
         } catch (ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
         }

@@ -12,6 +12,12 @@ class Lead extends Model
     use SoftDeletes;
 
     public const ROLES = ['dropshipper', 'supplier'];
+
+    /** Built-in roles plus the ones admins added (lead_roles). */
+    public static function allRoles(): array
+    {
+        return array_values(array_unique(array_merge(self::ROLES, LeadRole::pluck('value')->all())));
+    }
     public const STATUSES = ['new', 'contacted', 'converted', 'cancelled'];
     public const FOLLOWUP_TAGS = ['phone_off', 'no_answer', 'call_later', 'messaged', 'interested', 'not_interested'];
     public const SOURCES = ['manual', 'dropshipper'];

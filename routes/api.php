@@ -183,6 +183,8 @@ Route::prefix('leads')->middleware('admin')->group(function () {
     Route::get('/stats', [LeadController::class, 'stats']);
     Route::get('/tags', [LeadController::class, 'tags']);
     Route::post('/tags', [LeadController::class, 'storeTag']);
+    Route::get('/roles', [LeadController::class, 'roles']);
+    Route::post('/roles', [LeadController::class, 'storeRole']);
     Route::post('/from-dropshipper/{userId}', [LeadController::class, 'fromDropshipper'])->whereNumber('userId');
     Route::get('/{id}', [LeadController::class, 'show'])->whereNumber('id');
     Route::put('/{id}', [LeadController::class, 'update'])->whereNumber('id');
