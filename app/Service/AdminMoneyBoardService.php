@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\OrderReturnPenalty;
 use App\Models\OrderSettlement;
 use App\Models\PayoutFlag;
+use App\Models\SettlementInvoice;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -52,6 +53,7 @@ class AdminMoneyBoardService
             ->whereIn('status', array_merge(self::DELIVERED, [self::COMPLETED]))
             ->get();
         $reconciled = CarrybeeInvoiceLine::whereNotNull('order_id')->distinct()->pluck('order_id')->flip();
+        $this->invoicedVendorAmounts = $this->paidVendorInvoiceAmounts();
 
         $waiting = $this->bucket();
         $settling = $this->bucket();
@@ -177,7 +179,11 @@ class AdminMoneyBoardService
         // Expected: correct figures. Final: what was actually settled where it was settled.
         $dropOut = $dropSettled ? (float) $rs->settleable_amount : $profit;
         if ($own) {
-            $vendorIn = $vendorSettled ? (float) $sup->settleable_amount : $vendorOwes;
+            // What the vendor really paid for this order is on its paid/approved vendor invoice. The
+            // order's settlement row can be wrong (order #83: invoice paid ৳748.70, row says ৳0).
+            $vendorIn = $vendorSettled
+                ? ($this->invoicedVendorAmounts[$order->id] ?? (float) $sup->settleable_amount)
+                : $vendorOwes;
             $expected = $vendorOwes - $profit;
             $final = $vendorIn - $dropOut;
         } else {
@@ -200,6 +206,27 @@ class AdminMoneyBoardService
             'income_final' => round($final, 2),
             'absorbed' => $rawProfit < 0 ? -$rawProfit : 0.0,
         ];
+    }
+
+    /** order_id => amount the vendor gave admin for it, from paid/approved vendor invoices' per-order snapshot. */
+    private array $invoicedVendorAmounts = [];
+
+    private function paidVendorInvoiceAmounts(): array
+    {
+        $map = [];
+        SettlementInvoice::where('type', SettlementInvoice::TYPE_VENDOR_SETTLEMENT)
+            ->whereIn('status', [SettlementInvoice::STATUS_PAID, SettlementInvoice::STATUS_APPROVED])
+            ->orderBy('id')
+            ->get(['id', 'orders_breakdown'])
+            ->each(function (SettlementInvoice $inv) use (&$map) {
+                foreach ((array) $inv->orders_breakdown as $b) {
+                    if (isset($b['order_id'], $b['supplier']['supplier_owes_platform'])) {
+                        $map[(int) $b['order_id']] = round((float) $b['supplier']['supplier_owes_platform'], 2);
+                    }
+                }
+            });
+
+        return $map;
     }
 
     private function bucket(): array

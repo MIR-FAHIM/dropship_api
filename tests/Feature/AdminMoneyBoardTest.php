@@ -109,6 +109,22 @@ class AdminMoneyBoardTest extends TestCase
         $this->assertSame(0, $d['alerts']['paid_not_synced']);
     }
 
+    public function test_final_income_uses_the_paid_vendor_invoice_when_the_order_record_is_wrong(): void
+    {
+        // Like order #83: the vendor paid its invoice (৳748.70 for this order) but the order's
+        // settlement row was left at ৳0. Final income must count what the vendor actually paid.
+        $o = $this->order($this->own, 9, 2630, 130, 1750, 1838, [2630, 105, 26.3],
+            [OrderSettlement::TYPE_SUPPLIER_PRODUCT_PRICE => 0, OrderSettlement::TYPE_RESELLER_PROFIT => 635.7]);
+        \App\Models\SettlementInvoice::create(['invoice_number' => 'INV-V41-TEST', 'vendor_id' => $this->own->id, 'type' => 'vendor_settlement',
+            'status' => 'approved', 'payment_method' => 'bank', 'orders_count' => 1, 'order_ids' => [$o->id], 'total_amount_owed' => 748.7,
+            'orders_breakdown' => [['order_id' => $o->id, 'supplier' => ['supplier_owes_platform' => 748.7]]]]);
+
+        $d = $this->getJson('/api/reports/money-board?refresh=1', $this->admin)->assertOk()->json('data');
+
+        // 748.70 the vendor gave − 635.70 paid to the dropshipper = 113, not −635.70.
+        $this->assertEquals(113, $d['completed']['admin_income']);
+    }
+
     public function test_only_order_admins(): void
     {
         $t = ApiTokenService::create($this->drop, ['basic'])['plain'];
