@@ -61,6 +61,27 @@ Artisan::command('facebook:check-pages', function (\App\Service\FacebookGraphSer
     $this->info("Facebook pages: {$ok} fine, {$broken} need reconnect, {$skipped} could not be checked.");
 })->purpose('Check connected Facebook pages and alert dropshippers whose page must be reconnected');
 
+Artisan::command('seller-team:verify {--dry-run : Only list who would get a seller code}', function (\App\Service\SellerTeamService $team) {
+    // One-time backfill (safe to re-run): dropshippers who already have 10+ delivered orders get their seller code.
+    $done = 0;
+    \App\Models\User::where('user_type', 'dropshipper')->whereNull('seller_verified_at')->orderBy('id')
+        ->chunkById(200, function ($users) use ($team, &$done) {
+            foreach ($users as $u) {
+                $n = $team->deliveredOrders($u->id);
+                if ($n < \App\Service\SellerTeamService::ORDERS_TO_VERIFY) {
+                    continue;
+                }
+                if ($this->option('dry-run')) {
+                    $this->line("  #{$u->id} {$u->name}: {$n} delivered");
+                } else {
+                    $team->checkVerification($u);
+                }
+                $done++;
+            }
+        });
+    $this->info(($this->option('dry-run') ? 'Would verify ' : 'Verified ') . "{$done} dropshipper(s).");
+})->purpose('Give seller codes to dropshippers who already have 10 delivered orders');
+
 // Needs the server cron: * * * * * php /path/to/artisan schedule:run
 Schedule::command('facebook:check-pages')->dailyAt('09:00')->withoutOverlapping()->onOneServer();
 Schedule::command('carrybee:catch-up')->everyThirtyMinutes()->withoutOverlapping()->onOneServer();

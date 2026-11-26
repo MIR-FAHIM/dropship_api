@@ -18,7 +18,6 @@ class User extends Model
      * The attributes that are mass assignable.
      */
     protected $fillable = [
-        'referred_by',
         'marketer_commission_rate',
         'marketer_ref_code',
         'marketer_dollar_rate',
@@ -82,6 +81,8 @@ class User extends Model
         'remaining_uploads' => 'integer',
         'customer_package_id' => 'integer',
         'referred_by' => 'integer',
+        'seller_verified_at' => 'datetime',
+        'referred_at' => 'datetime',
         'division_id' => 'integer',
         'district_id' => 'integer',
         'upazila_id' => 'integer',

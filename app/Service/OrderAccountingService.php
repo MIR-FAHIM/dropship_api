@@ -366,6 +366,11 @@ class OrderAccountingService
             app(\App\Service\MarketerCommissionService::class)
                 ->earnForOrder($lockedOrder, (float) $totalPlatformProductMargin, (float) $platformShippingMargin);
 
+            // 7c. Passive Income: 10 delivered orders → verified seller with a seller code.
+            if ($seller = \App\Models\User::find($lockedOrder->user_id)) {
+                app(\App\Service\SellerTeamService::class)->checkVerification($seller);
+            }
+
             // 8. Balanced Ledger Entries (Debits == Credits)
             // Dr Courier Clearing (COD received)
             // Release booking revenue clearing upon delivery

@@ -70,6 +70,18 @@ Route::post('/auth/login-as-vendor', [AuthController::class, 'loginAsVendor'])->
 Route::post('/auth/login-as-dropshipper', [AuthController::class, 'loginAsDropshipper']);
 Route::post('/dropshipper-register', [UserController::class, 'dropshipperRegister'])->withoutMiddleware('token');
 
+// Passive Income phase 1: seller team (referral). Code check is public for the sign-up form.
+Route::get('/seller-team/code/{code}', [\App\Http\Controllers\SellerTeamController::class, 'checkCode'])->withoutMiddleware('token')->middleware('throttle:30,1');
+Route::get('/seller-team/summary', [\App\Http\Controllers\SellerTeamController::class, 'summary']);
+Route::get('/seller-team/members', [\App\Http\Controllers\SellerTeamController::class, 'members']);
+Route::prefix('admin/seller-team')->middleware('admin:accounts')->group(function () {
+    Route::get('/sellers', [\App\Http\Controllers\SellerTeamController::class, 'adminSellers']);
+    Route::get('/users/{id}', [\App\Http\Controllers\SellerTeamController::class, 'adminUser'])->whereNumber('id');
+    Route::put('/users/{id}/upline', [\App\Http\Controllers\SellerTeamController::class, 'adminSetUpline'])->whereNumber('id');
+    Route::post('/users/{id}/verify', [\App\Http\Controllers\SellerTeamController::class, 'adminVerify'])->whereNumber('id');
+    Route::post('/users/{id}/unverify', [\App\Http\Controllers\SellerTeamController::class, 'adminUnverify'])->whereNumber('id');
+});
+
 // Email OTP Password Reset (Public)
 Route::post('/forgot-password', [PasswordResetOtpController::class, 'forgotPassword'])->withoutMiddleware('token');
 Route::post('/reset-password', [PasswordResetOtpController::class, 'resetPassword'])->withoutMiddleware('token');

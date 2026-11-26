@@ -125,7 +125,23 @@ class UserController extends Controller
                 'upazila' => ['nullable', 'string', 'max:255'],
                 'state' => ['nullable', 'string', 'max:255'],
                 'city' => ['nullable', 'string', 'max:255'],
+                'seller_code' => ['nullable', 'string', 'max:20'],
             ]);
+
+            // Passive Income: optional seller code → join that verified seller's team. Checked before
+            // the account is created, so a wrong code never leaves a half-made account behind.
+            $team = app(\App\Service\SellerTeamService::class);
+            $upline = null;
+            if (!empty($validated['seller_code'])) {
+                $upline = $team->sellerForCode($validated['seller_code']);
+                $samePhone = $upline && $upline->phone
+                    && substr(preg_replace('/\D+/', '', (string) $upline->phone), -10) === substr(preg_replace('/\D+/', '', (string) $validated['phone']), -10);
+                if (!$upline || $samePhone) {
+                    $msg = $upline ? 'নিজের কোড দিয়ে নিজের টিমে যোগ দেওয়া যায় না।' : 'এই সেলার কোডটি সঠিক নয় বা এখন সক্রিয় নেই।';
+
+                    return $this->failed($msg, ['seller_code' => [$msg]], 422);
+                }
+            }
 
             // Use provided password or auto-generate fallback
             if (!empty($validated['password'])) {
@@ -158,6 +174,10 @@ class UserController extends Controller
                 'whatsapp_consent_source' => 'dropshipper_registration',
                 'whatsapp_consented_at' => now(),
             ]);
+
+            if ($upline) {
+                $team->joinWithCode($user, $upline->seller_code);
+            }
 
             $created = ApiTokenService::create($user, ['basic'], 30, 'dropshipper-register-token');
 
