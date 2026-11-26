@@ -133,7 +133,7 @@ class FacebookProductPostController extends Controller
             return $base + ['ok' => true, 'status' => $post->status, 'fb_post_id' => $fbId, 'post_url' => $fbId ? 'https://www.facebook.com/' . $fbId : null];
         } catch (FacebookApiException $e) {
             if ($e->needsReconnect()) {
-                $page->update(['status' => FacebookPage::STATUS_NEEDS_RECONNECT, 'last_error' => mb_substr($e->getMessage(), 0, 480), 'updated_at' => now()]);
+                $page->markNeedsReconnect($e->getMessage());
             }
             FacebookPost::create($record + ['fb_post_id' => '', 'status' => 'failed', 'error' => mb_substr($e->getMessage(), 0, 480)]);
 

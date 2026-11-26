@@ -37,6 +37,31 @@ Artisan::command('carrybee:reconcile {--account= : platform or vendor-{id}; all 
     }
 })->purpose('Match order payouts with CarryBee final invoices');
 
+Artisan::command('facebook:check-pages', function (\App\Service\FacebookGraphService $graph) {
+    // Every connected page: does Facebook still accept its token? If not, mark it and tell the dropshipper.
+    $ok = $broken = $skipped = 0;
+    \App\Models\FacebookPage::where(fn ($q) => $q->where('status', \App\Models\FacebookPage::STATUS_CONNECTED)->orWhereNull('status'))
+        ->orderBy('id')->chunkById(100, function ($pages) use ($graph, &$ok, &$broken, &$skipped) {
+            foreach ($pages as $page) {
+                try {
+                    $graph->verifyPage($page);
+                    $ok++;
+                } catch (\App\Service\FacebookApiException $e) {
+                    if ($e->needsReconnect()) {
+                        $page->markNeedsReconnect($e->getMessage());
+                        $broken++;
+                    } else {
+                        $skipped++; // Facebook hiccup: try again tomorrow, don't alarm the user
+                    }
+                } catch (\Throwable) {
+                    $skipped++;
+                }
+            }
+        });
+    $this->info("Facebook pages: {$ok} fine, {$broken} need reconnect, {$skipped} could not be checked.");
+})->purpose('Check connected Facebook pages and alert dropshippers whose page must be reconnected');
+
 // Needs the server cron: * * * * * php /path/to/artisan schedule:run
+Schedule::command('facebook:check-pages')->dailyAt('09:00')->withoutOverlapping()->onOneServer();
 Schedule::command('carrybee:catch-up')->everyThirtyMinutes()->withoutOverlapping()->onOneServer();
 Schedule::command('carrybee:reconcile')->dailyAt('04:30')->withoutOverlapping()->onOneServer();

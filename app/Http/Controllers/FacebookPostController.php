@@ -217,7 +217,7 @@ class FacebookPostController extends Controller
                 $fbPostId = $graph->publish($page, $caption, $imageUrl);
             } catch (FacebookApiException $e) {
                 if ($e->needsReconnect()) {
-                    $page->update(['status' => FacebookPage::STATUS_NEEDS_RECONNECT, 'last_error' => mb_substr($e->getMessage(), 0, 480), 'updated_at' => now()]);
+                    $page->markNeedsReconnect($e->getMessage());
                 }
                 FacebookPost::create([
                     'facebook_page_id' => $page->id,

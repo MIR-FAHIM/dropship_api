@@ -60,6 +60,28 @@ class FacebookPage extends Model
         return ($this->status ?? self::STATUS_CONNECTED) === self::STATUS_CONNECTED && $this->plainToken() !== null;
     }
 
+    /**
+     * Facebook stopped accepting this page's token: mark it and tell the dropshipper once
+     * (only when the status changes, so repeated failures don't spam them).
+     */
+    public function markNeedsReconnect(?string $error = null): void
+    {
+        $was = $this->status ?: self::STATUS_CONNECTED;
+        $this->update([
+            'status' => self::STATUS_NEEDS_RECONNECT,
+            'last_error' => $error ? mb_substr($error, 0, 480) : $this->last_error,
+            'updated_at' => now(),
+        ]);
+        if ($was === self::STATUS_CONNECTED) {
+            app(\App\Service\NotificationService::class)->createNotificationSafely([
+                'title' => 'Facebook পেজ আবার কানেক্ট করুন',
+                'subtitle' => "\"{$this->page_name}\" পেজে আর পোস্ট করা যাচ্ছে না — Facebook অনুমতি বাতিল করেছে। Facebook পেজ মেনু থেকে আবার কানেক্ট করুন।",
+                'created_by' => null, 'send_to' => $this->user_id, 'is_seen' => false,
+                'type' => 'facebook', 'is_active' => true, 'image' => null, 'module' => 'facebook',
+            ]);
+        }
+    }
+
     public function user()
     {
         return $this->belongsTo(User::class);

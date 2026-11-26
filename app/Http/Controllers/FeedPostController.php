@@ -498,7 +498,7 @@ class FeedPostController extends Controller
             } catch (\App\Service\FacebookApiException $e) {
                 $error = $e;
                 if ($e->needsReconnect()) {
-                    $page->update(['status' => FacebookPage::STATUS_NEEDS_RECONNECT, 'last_error' => mb_substr($e->getMessage(), 0, 480), 'updated_at' => now()]);
+                    $page->markNeedsReconnect($e->getMessage());
                 }
             }
 

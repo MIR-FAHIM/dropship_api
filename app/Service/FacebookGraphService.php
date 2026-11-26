@@ -102,12 +102,22 @@ class FacebookGraphService
             return 'No page token saved.';
         }
         try {
-            $this->get('/' . $page->page_id, ['fields' => 'id,name'], $token);
+            $this->verifyPage($page);
 
             return null;
         } catch (FacebookApiException $e) {
             return $e->getMessage();
         }
+    }
+
+    /** Throws FacebookApiException (with Facebook's error code) when the page token no longer works. */
+    public function verifyPage(FacebookPage $page): void
+    {
+        $token = $page->plainToken();
+        if (!$token) {
+            throw new FacebookApiException('No page token saved.', 190);
+        }
+        $this->get('/' . $page->page_id, ['fields' => 'id,name'], $token);
     }
 
     /** Post a photo (with caption) or a text post to a page. Returns Facebook's post id. */
@@ -146,6 +156,41 @@ class FacebookGraphService
         $res = $this->post('/' . $page->page_id . '/feed', $form, $token);
 
         return (string) ($res['id'] ?? $res['post_id'] ?? '');
+    }
+
+    /**
+     * Likes (all reactions), comments, shares and the link of a post; whether it is live yet
+     * (a scheduled post becomes is_published = true at its time).
+     */
+    public function postStats(FacebookPage $page, string $fbPostId): array
+    {
+        $token = $page->plainToken();
+        if (!$token) {
+            throw new FacebookApiException('This page is not connected.', 190);
+        }
+        $res = $this->get('/' . $fbPostId, [
+            'fields' => 'is_published,permalink_url,created_time,shares,reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0)',
+        ], $token);
+
+        return [
+            'is_published' => (bool) ($res['is_published'] ?? true),
+            'permalink' => $res['permalink_url'] ?? null,
+            'likes' => (int) ($res['reactions']['summary']['total_count'] ?? 0),
+            'comments' => (int) ($res['comments']['summary']['total_count'] ?? 0),
+            'shares' => (int) ($res['shares']['count'] ?? 0),
+        ];
+    }
+
+    /** Delete a post (used to cancel a scheduled one before it goes live). */
+    public function deletePost(FacebookPage $page, string $fbPostId): void
+    {
+        $token = $page->plainToken();
+        if (!$token) {
+            throw new FacebookApiException('This page is not connected.', 190);
+        }
+        $this->decode(Http::timeout(20)->asForm()->delete($this->base() . '/' . $fbPostId, [
+            'access_token' => $token, 'appsecret_proof' => $this->proof($token),
+        ]));
     }
 
     /* ---------------------------------------------------------------- http */

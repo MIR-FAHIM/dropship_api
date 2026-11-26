@@ -573,6 +573,10 @@ Route::prefix('facebook')->group(function () {
     // Phase 2: post a product to my connected page(s)
     Route::get('/products/{id}/draft', [\App\Http\Controllers\FacebookProductPostController::class, 'draft'])->whereNumber('id');
     Route::post('/products/{id}/publish', [\App\Http\Controllers\FacebookProductPostController::class, 'publish'])->whereNumber('id')->middleware('throttle:10,1');
+    // Phase 3: post history, numbers from Facebook, cancel scheduled
+    Route::get('/my-posts', [\App\Http\Controllers\FacebookPostHistoryController::class, 'index']);
+    Route::post('/my-posts/refresh-stats', [\App\Http\Controllers\FacebookPostHistoryController::class, 'refreshStats'])->middleware('throttle:6,1');
+    Route::delete('/my-posts/{id}', [\App\Http\Controllers\FacebookPostHistoryController::class, 'cancel'])->whereNumber('id');
 
     Route::post('/accounts/add', [FacebookPostController::class, 'addAccount']);
     Route::get('/accounts', [FacebookPostController::class, 'getAccounts']);

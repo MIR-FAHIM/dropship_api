@@ -21,11 +21,22 @@ class FacebookPost extends Model
         'image_count',
         'scheduled_at',
         'error',
+        'likes_count',
+        'comments_count',
+        'shares_count',
+        'permalink',
+        'published_at',
+        'stats_updated_at',
     ];
 
     protected $casts = [
         'scheduled_at' => 'datetime',
+        'published_at' => 'datetime',
+        'stats_updated_at' => 'datetime',
         'image_count' => 'integer',
+        'likes_count' => 'integer',
+        'comments_count' => 'integer',
+        'shares_count' => 'integer',
     ];
 
     public $timestamps = false;
