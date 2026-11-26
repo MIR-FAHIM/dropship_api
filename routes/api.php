@@ -570,6 +570,9 @@ Route::prefix('facebook')->group(function () {
     Route::post('/my-pages/{id}/check', [\App\Http\Controllers\FacebookConnectController::class, 'check'])->whereNumber('id')->middleware('throttle:30,1');
     Route::delete('/my-pages/{id}', [\App\Http\Controllers\FacebookConnectController::class, 'disconnect'])->whereNumber('id');
     Route::post('/data-deletion', [\App\Http\Controllers\FacebookConnectController::class, 'dataDeletion'])->withoutMiddleware('token')->middleware('throttle:30,1');
+    // Phase 2: post a product to my connected page(s)
+    Route::get('/products/{id}/draft', [\App\Http\Controllers\FacebookProductPostController::class, 'draft'])->whereNumber('id');
+    Route::post('/products/{id}/publish', [\App\Http\Controllers\FacebookProductPostController::class, 'publish'])->whereNumber('id')->middleware('throttle:10,1');
 
     Route::post('/accounts/add', [FacebookPostController::class, 'addAccount']);
     Route::get('/accounts', [FacebookPostController::class, 'getAccounts']);

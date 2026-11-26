@@ -124,6 +124,30 @@ class FacebookGraphService
         return (string) ($res['post_id'] ?? $res['id'] ?? '');
     }
 
+    /**
+     * One post with a caption and 0–10 photos, now or scheduled. Photos are uploaded to the page
+     * unpublished first, then attached to a single feed post (so 3 photos = 1 post, not 3).
+     * Returns Facebook's post id.
+     */
+    public function publishPost(FacebookPage $page, string $message, array $imageUrls = [], ?\DateTimeInterface $scheduleAt = null): string
+    {
+        $token = $page->plainToken();
+        if (!$token) {
+            throw new FacebookApiException('This page is not connected.', 190);
+        }
+        $schedule = $scheduleAt ? ['published' => 'false', 'scheduled_publish_time' => $scheduleAt->getTimestamp()] : [];
+
+        $form = ['message' => $message] + $schedule;
+        foreach (array_values(array_slice($imageUrls, 0, 10)) as $i => $url) {
+            $photo = $this->post('/' . $page->page_id . '/photos',
+                ['url' => $url, 'published' => 'false'] + ($scheduleAt ? ['temporary' => 'true'] : []), $token);
+            $form["attached_media[{$i}]"] = json_encode(['media_fbid' => (string) ($photo['id'] ?? '')]);
+        }
+        $res = $this->post('/' . $page->page_id . '/feed', $form, $token);
+
+        return (string) ($res['id'] ?? $res['post_id'] ?? '');
+    }
+
     /* ---------------------------------------------------------------- http */
 
     private function get(string $path, array $query, ?string $token = null): array

@@ -59,6 +59,8 @@ return [
         // Optional Facebook Login for Business configuration id (when set, used instead of scopes).
         'config_id' => env('FACEBOOK_LOGIN_CONFIG_ID'),
         'scopes' => ['pages_show_list', 'pages_manage_posts', 'pages_read_engagement'],
+        // Public base URL of product photos (Facebook downloads them from here).
+        'media_base_url' => env('FACEBOOK_MEDIA_BASE_URL', 'https://apidropship.resellerbrain.com/storage/app/public'),
     ],
 
     'whatsapp' => [
