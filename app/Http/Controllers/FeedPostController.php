@@ -455,7 +455,10 @@ class FeedPostController extends Controller
     public function shareToFacebookPage(Request $request, $id)
     {
         try {
-            $userId = $this->resolveUserId($request);
+            // Only the logged-in user — never a user_id from the request (that would allow posting on
+            // someone else's Facebook page).
+            $me = $request->attributes->get('api_user') ?? $request->user();
+            $userId = $me ? (int) $me->id : null;
             if (!$userId) {
                 return $this->failed('Authentication required to share', null, 401);
             }
@@ -479,43 +482,35 @@ class FeedPostController extends Controller
                 return $this->failed('Facebook page does not belong to you', null, 403);
             }
 
-            $token = $page->page_access_token;
-            try {
-                $decryptedToken = Crypt::decryptString($token);
-                $token = $decryptedToken;
-            } catch (\Throwable) {
-                // If token was stored unencrypted
+            if (!$page->isUsable()) {
+                return $this->failed('This page needs to be connected again.', ['reason' => 'needs_reconnect'], 409);
             }
 
             $caption = $validated['custom_caption'] ?? $post->content;
             $images = is_array($post->images) ? $post->images : [];
             $firstImageUrl = !empty($images[0]) ? $images[0] : null;
 
-            $graphUrl = $firstImageUrl
-                ? "https://graph.facebook.com/v19.0/{$page->page_id}/photos"
-                : "https://graph.facebook.com/v19.0/{$page->page_id}/feed";
-
-            $payload = $firstImageUrl
-                ? ['url' => $firstImageUrl, 'caption' => $caption]
-                : ['message' => $caption];
-
-            $response = Http::asForm()->post($graphUrl, array_merge($payload, [
-                'access_token' => $token,
-            ]));
-
-            $fbPostId = $response->json('post_id')
-                ?? $response->json('id')
-                ?? '';
+            // Token decrypted on the server; the call is signed with appsecret_proof.
+            $fbPostId = '';
+            $error = null;
+            try {
+                $fbPostId = app(\App\Service\FacebookGraphService::class)->publish($page, (string) $caption, $firstImageUrl);
+            } catch (\App\Service\FacebookApiException $e) {
+                $error = $e;
+                if ($e->needsReconnect()) {
+                    $page->update(['status' => FacebookPage::STATUS_NEEDS_RECONNECT, 'last_error' => mb_substr($e->getMessage(), 0, 480), 'updated_at' => now()]);
+                }
+            }
 
             $fbPostRecord = FacebookPost::create([
                 'feed_post_id' => $post->id,
-                'facebook_page_id' => $validated['facebook_page_id'],
+                'facebook_page_id' => $page->id,
                 'product_id' => $post->product_id ?? 0,
                 'fb_post_id' => $fbPostId,
-                'status' => $response->successful() ? 'published' : 'failed',
+                'status' => $error ? 'failed' : 'published',
             ]);
 
-            if ($response->successful()) {
+            if (!$error) {
                 $post->increment('shares_count');
                 return $this->success('Post shared to Facebook page successfully', [
                     'facebook_post' => $fbPostRecord,
@@ -523,9 +518,8 @@ class FeedPostController extends Controller
                 ]);
             }
 
-            return $this->failed('Failed to publish to Facebook page', [
-                'facebook_response' => $response->json(),
-                'record' => $fbPostRecord,
+            return $this->failed($error->needsReconnect() ? 'This page needs to be connected again.' : 'Facebook did not accept the post: ' . $error->getMessage(), [
+                'reason' => $error->needsReconnect() ? 'needs_reconnect' : 'facebook_error',
             ], 502);
         } catch (ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);

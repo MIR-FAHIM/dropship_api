@@ -6,9 +6,10 @@ use App\Models\FacebookAccount;
 use App\Models\FacebookPage;
 use App\Models\FacebookPost;
 use App\Models\Product;
+use App\Service\FacebookApiException;
+use App\Service\FacebookGraphService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
 
 class FacebookPostController extends Controller
@@ -31,15 +32,22 @@ class FacebookPostController extends Controller
         ], $code);
     }
 
+    /**
+     * Always the logged-in user. A user_id sent by the browser is ignored: trusting it let anyone read or
+     * attach Facebook pages of another account.
+     */
     private function resolveUserId(Request $request): ?int
     {
-        if ($request->filled('user_id')) {
-            return (int) $request->user_id;
-        }
-
-        $user = $request->attributes->get('api_user');
+        $user = $request->attributes->get('api_user') ?? $request->user();
 
         return $user ? (int) $user->id : null;
+    }
+
+    private function ownsPost(Request $request, FacebookPost $post): bool
+    {
+        $page = FacebookPage::find($post->facebook_page_id);
+
+        return $page && (int) $page->user_id === (int) $this->resolveUserId($request);
     }
 
     /**
@@ -54,7 +62,7 @@ class FacebookPostController extends Controller
                 'fb_name' => ['required', 'string', 'max:255'],
             ]);
 
-            $userId = $this->resolveUserId($request) ?? ($validated['user_id'] ?? null);
+            $userId = $this->resolveUserId($request);
 
             if (!$userId) {
                 return $this->failed('User is required', null, 422);
@@ -80,14 +88,7 @@ class FacebookPostController extends Controller
     public function getAccounts(Request $request)
     {
         try {
-            $query = FacebookAccount::query();
-
-            $userId = $this->resolveUserId($request);
-            if ($userId) {
-                $query->where('user_id', $userId);
-            } elseif ($request->filled('user_id')) {
-                $query->where('user_id', (int) $request->user_id);
-            }
+            $query = FacebookAccount::query()->where('user_id', (int) $this->resolveUserId($request));
 
             $perPage = (int) $request->get('per_page', 20);
             $accounts = $query->latest()->paginate($perPage);
@@ -113,7 +114,7 @@ class FacebookPostController extends Controller
                 'category' => ['required', 'string', 'max:255'],
             ]);
 
-            $userId = $this->resolveUserId($request) ?? ($validated['user_id'] ?? null);
+            $userId = $this->resolveUserId($request);
 
             if (!$userId) {
                 return $this->failed('User is required', null, 422);
@@ -151,14 +152,10 @@ class FacebookPostController extends Controller
     public function getPages(Request $request)
     {
         try {
-            $query = FacebookPage::query();
-
-            $userId = $this->resolveUserId($request);
-            if ($userId) {
-                $query->where('user_id', $userId);
-            } elseif ($request->filled('user_id')) {
-                $query->where('user_id', (int) $request->user_id);
-            }
+            // Own pages only; tokens are hidden by the model; disconnected pages are not offered for posting.
+            $query = FacebookPage::query()
+                ->where('user_id', (int) $this->resolveUserId($request))
+                ->where(fn ($q) => $q->whereNull('status')->orWhere('status', '!=', FacebookPage::STATUS_DISCONNECTED));
 
             if ($request->filled('facebook_account_id')) {
                 $query->where('facebook_account_id', (int) $request->facebook_account_id);
@@ -196,8 +193,11 @@ class FacebookPostController extends Controller
             }
 
             $userId = $this->resolveUserId($request);
-            if ($userId && (int) $page->user_id !== (int) $userId) {
+            if (!$userId || (int) $page->user_id !== (int) $userId) {
                 return $this->failed('Facebook page does not belong to user', null, 403);
+            }
+            if (!$page->isUsable()) {
+                return $this->failed('This page needs to be connected again.', ['reason' => 'needs_reconnect'], 409);
             }
 
             $product = Product::find($validated['product_id']);
@@ -205,52 +205,38 @@ class FacebookPostController extends Controller
                 return $this->failed('Product not found', null, 404);
             }
 
-
-            $token = $page->page_access_token;
-
-
-
             $caption = $validated['caption'] ?? $product->name ?? 'New product';
-            $imageUrl = $product->primaryImage?->file_name
-                ? 'https://apidropship.resellerbrain.com/storage/app/public/' . ltrim($product->primaryImage->file_name, '/')
-                : null;
+            $file = $product->primaryImage?->file_name;
+            $imageUrl = $validated['image_url'] ?? ($file
+                ? (preg_match('#^https?://#i', $file) ? $file : 'https://apidropship.resellerbrain.com/storage/app/public/' . ltrim($file, '/'))
+                : null);
 
+            // Token is decrypted on the server and every call is signed (appsecret_proof).
+            $graph = app(FacebookGraphService::class);
+            try {
+                $fbPostId = $graph->publish($page, $caption, $imageUrl);
+            } catch (FacebookApiException $e) {
+                if ($e->needsReconnect()) {
+                    $page->update(['status' => FacebookPage::STATUS_NEEDS_RECONNECT, 'last_error' => mb_substr($e->getMessage(), 0, 480), 'updated_at' => now()]);
+                }
+                FacebookPost::create([
+                    'facebook_page_id' => $page->id,
+                    'product_id' => $validated['product_id'],
+                    'fb_post_id' => '',
+                    'status' => 'failed',
+                ]);
 
-
-            $graphUrl = $imageUrl
-                ? "https://graph.facebook.com/v19.0/{$page->page_id}/photos"
-                : "https://graph.facebook.com/v19.0/{$page->page_id}/feed";
-
-            $payload = $imageUrl
-                ? ['url' => $imageUrl, 'caption' => $caption]
-                : ['message' => $caption];
-
-            $response = Http::asForm()->post($graphUrl, array_merge($payload, [
-                'access_token' => $token,
-            ]));
-            $responseBody = $response->json();
-            $fbPostId = $response->json('post_id')
-                ?? $response->json('id')
-                ?? '';
+                return $this->failed($e->needsReconnect() ? 'This page needs to be connected again.' : 'Facebook did not accept the post: ' . $e->getMessage(),
+                    ['reason' => $e->needsReconnect() ? 'needs_reconnect' : 'facebook_error'], 502);
+            }
 
             $post = FacebookPost::create([
-                'facebook_page_id' => $validated['facebook_page_id'],
+                'facebook_page_id' => $page->id,
                 'product_id' => $validated['product_id'],
                 'fb_post_id' => $fbPostId,
-                'status' => $response->successful() ? 'published' : 'failed',
+                'status' => 'published',
             ]);
 
-            if (!$response->successful()) {
-                return $this->failed('Failed to publish content', [
-                    'facebook_response' => $response->json(),
-                    'post' => $post,
-                    'payload' => [
-                        'graph_url' => $graphUrl,
-                        'caption' => $caption,
-                        'image_url' => $imageUrl,
-                    ],
-                ], 502);
-            }
             return $this->success('Content published', $post, 201);
         } catch (ValidationException $e) {
             return $this->failed('Validation failed', $e->errors(), 422);
@@ -279,12 +265,8 @@ class FacebookPostController extends Controller
                 $query->where('status', $request->status);
             }
 
-            $userId = $this->resolveUserId($request);
-            if ($userId) {
-                $query->whereHas('facebookPage', function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
-                });
-            }
+            $userId = (int) $this->resolveUserId($request);
+            $query->whereHas('facebookPage', fn ($q) => $q->where('user_id', $userId));
 
             $perPage = (int) $request->get('per_page', 20);
             $posts = $query->latest()->paginate($perPage);
@@ -306,12 +288,8 @@ class FacebookPostController extends Controller
                 return $this->failed('Content not found', null, 404);
             }
 
-            $userId = $this->resolveUserId($request);
-            if ($userId) {
-                $page = FacebookPage::find($post->facebook_page_id);
-                if ($page && (int) $page->user_id !== (int) $userId) {
-                    return $this->failed('Content does not belong to user', null, 403);
-                }
+            if (!$this->ownsPost($request, $post)) {
+                return $this->failed('Content does not belong to user', null, 403);
             }
 
             $validated = $request->validate([
@@ -343,12 +321,8 @@ class FacebookPostController extends Controller
                 return $this->failed('Content not found', null, 404);
             }
 
-            $userId = $this->resolveUserId($request);
-            if ($userId) {
-                $page = FacebookPage::find($post->facebook_page_id);
-                if ($page && (int) $page->user_id !== (int) $userId) {
-                    return $this->failed('Content does not belong to user', null, 403);
-                }
+            if (!$this->ownsPost($request, $post)) {
+                return $this->failed('Content does not belong to user', null, 403);
             }
 
             $post->delete();

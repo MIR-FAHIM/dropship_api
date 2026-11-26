@@ -47,6 +47,20 @@ return [
         ],
     ],
 
+    // Facebook page connect for dropshippers (Meta app with "Facebook Login for Business").
+    // FACEBOOK_REDIRECT_URI must be added in the Meta app as a valid OAuth redirect URI.
+    'facebook' => [
+        'app_id' => env('FACEBOOK_APP_ID'),
+        'app_secret' => env('FACEBOOK_APP_SECRET'),
+        'graph_version' => env('FACEBOOK_GRAPH_VERSION', 'v21.0'),
+        'redirect_uri' => env('FACEBOOK_REDIRECT_URI', rtrim((string) env('APP_URL'), '/') . '/api/facebook/connect/callback'),
+        // Where the dropshipper lands back after Facebook (the panel's Facebook page).
+        'frontend_return_url' => env('FACEBOOK_FRONTEND_RETURN_URL', 'https://resellerbrain.com/app/facebook-pages'),
+        // Optional Facebook Login for Business configuration id (when set, used instead of scopes).
+        'config_id' => env('FACEBOOK_LOGIN_CONFIG_ID'),
+        'scopes' => ['pages_show_list', 'pages_manage_posts', 'pages_read_engagement'],
+    ],
+
     'whatsapp' => [
         'enabled' => filter_var(env('WHATSAPP_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
         'access_token' => env('WHATSAPP_ACCESS_TOKEN'),

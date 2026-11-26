@@ -560,6 +560,17 @@ Route::prefix('transactions')->group(function () {
 
 // Facebook endpoints
 Route::prefix('facebook')->group(function () {
+    // One-click page connect (FacebookConnectController). Facebook itself calls the callback and the
+    // data-deletion URL, so those two run without our app token.
+    Route::get('/connect/start', [\App\Http\Controllers\FacebookConnectController::class, 'start'])->middleware('throttle:20,1');
+    Route::get('/connect/callback', [\App\Http\Controllers\FacebookConnectController::class, 'callback'])->withoutMiddleware('token')->middleware('throttle:30,1');
+    Route::get('/connect/pending/{key}', [\App\Http\Controllers\FacebookConnectController::class, 'pending'])->where('key', '[A-Za-z0-9]{40}');
+    Route::post('/connect/pending/{key}', [\App\Http\Controllers\FacebookConnectController::class, 'choose'])->where('key', '[A-Za-z0-9]{40}');
+    Route::get('/my-pages', [\App\Http\Controllers\FacebookConnectController::class, 'myPages']);
+    Route::post('/my-pages/{id}/check', [\App\Http\Controllers\FacebookConnectController::class, 'check'])->whereNumber('id')->middleware('throttle:30,1');
+    Route::delete('/my-pages/{id}', [\App\Http\Controllers\FacebookConnectController::class, 'disconnect'])->whereNumber('id');
+    Route::post('/data-deletion', [\App\Http\Controllers\FacebookConnectController::class, 'dataDeletion'])->withoutMiddleware('token')->middleware('throttle:30,1');
+
     Route::post('/accounts/add', [FacebookPostController::class, 'addAccount']);
     Route::get('/accounts', [FacebookPostController::class, 'getAccounts']);
 
